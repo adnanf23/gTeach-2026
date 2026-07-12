@@ -105,15 +105,12 @@ export default function KelasSayaPage() {
               })
               .catch(() => []),
             // Kandidat mapel "umum" untuk tingkat-tingkat kelas guru ini.
-            // Expand spesifik_kelas_id supaya kita tahu tingkat dari tiap
-            // kelas yang sudah di-spesifik-kan (buat cek per-tingkat).
             pb
               .collection("mata_pelajaran")
               .getFullList({
                 filter: distinctTingkat
                   .map((t) => `target_tingkat ~ "${t}"`)
                   .join(" || "),
-                expand: "spesifik_kelas_id",
                 requestKey: null,
               })
               .catch(() => []),
@@ -127,13 +124,19 @@ export default function KelasSayaPage() {
           groupedSiswa[kid].push(s);
         }
 
-        // Untuk tiap kelas, tentukan mapel mana yang berlaku:
-        // - spesifik: kelas ini eksplisit ada di spesifik_kelas_id mapel
-        // - umum: tingkat kelas ini ADA di target_tingkat mapel, DAN
-        //   tidak ada satupun kelas di spesifik_kelas_id mapel yang
-        //   tingkatnya sama dengan tingkat kelas ini (kalau ada, berarti
-        //   tingkat itu sudah "diperebutkan" kelas lain -> bukan umum lagi
-        //   untuk tingkat tsb).
+        // Aturan final (disederhanakan): spesifik_kelas_id terisi -> mapel
+        // HANYA untuk kelas yang tercantum, target_tingkat diabaikan.
+        // spesifik_kelas_id kosong -> berlaku untuk semua kelas yang
+        // tingkatnya cocok dengan target_tingkat.
+        const umumMapel = kandidatUmumMapel.filter((m) => {
+          const ids = Array.isArray(m.spesifik_kelas_id)
+            ? m.spesifik_kelas_id
+            : m.spesifik_kelas_id
+              ? [m.spesifik_kelas_id]
+              : [];
+          return ids.length === 0;
+        });
+
         const groupedMapel = {};
         for (const kelas of kelasRecords) {
           const tingkat = String(kelas.tingkat);
@@ -152,23 +155,11 @@ export default function KelasSayaPage() {
             }
           }
 
-          for (const m of kandidatUmumMapel) {
+          for (const m of umumMapel) {
             if (seen.has(m.id)) continue;
             if (!(m.target_tingkat || []).includes(tingkat)) continue;
-
-            const spesifikRecords = Array.isArray(m.expand?.spesifik_kelas_id)
-              ? m.expand.spesifik_kelas_id
-              : m.expand?.spesifik_kelas_id
-                ? [m.expand.spesifik_kelas_id]
-                : [];
-            const adaRestriksiUntukTingkatIni = spesifikRecords.some(
-              (k) => String(k.tingkat) === tingkat,
-            );
-
-            if (!adaRestriksiUntukTingkatIni) {
-              applied.push({ ...m, __khusus: false });
-              seen.add(m.id);
-            }
+            applied.push({ ...m, __khusus: false });
+            seen.add(m.id);
           }
 
           groupedMapel[kelas.id] = applied.sort((a, b) =>

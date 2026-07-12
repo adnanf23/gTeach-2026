@@ -3,13 +3,13 @@ import { NextResponse } from "next/server";
 export function proxy(request) {
   const currentPath = request.nextUrl.pathname;
 
-  //ambil cookie
+  // Ambil cookie
   const authCookie = request.cookies.get("pb_auth")?.value;
 
   let isAuthenticated = false;
   let userRole = "";
 
-  //uraikan data cookie
+  // Uraikan data cookie
   if (authCookie) {
     try {
       const parsedAuth = JSON.parse(decodeURIComponent(authCookie));
@@ -22,40 +22,116 @@ export function proxy(request) {
     }
   }
 
+  // BENTENG 1: Redirect ke login jika belum login
   if (
     !isAuthenticated &&
     (currentPath.startsWith("/admin") ||
       currentPath.startsWith("/walikelas") ||
-      currentPath.startsWith("/ict"))
+      currentPath.startsWith("/ict") ||
+      currentPath.startsWith("/guru-mapel"))
   ) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
-  // BENTENG 2: Jika SUDAH login tapi malah membuka halaman /login lagi
+  // BENTENG 2: Jika SUDAH login tapi membuka /login
   if (isAuthenticated && currentPath === "/login") {
-    if (userRole === "guru walikelas" || userRole === "guru pendamping") {
-      return NextResponse.redirect(new URL("/walikelas", request.url));
-    }
-    if (userRole === "ict") {
-      return NextResponse.redirect(new URL("/ict", request.url));
-    }
-    return NextResponse.redirect(new URL("/walikelas", request.url));
+    // Redirect berdasarkan role
+    const roleRedirects = {
+      "guru walikelas": "/walikelas",
+      "guru pendamping": "/walikelas",
+      "guru mapel": "/guru-mapel",
+      ict: "/ict",
+      admin: "/admin",
+    };
+
+    const redirectPath = roleRedirects[userRole] || "/login";
+    return NextResponse.redirect(new URL(redirectPath, request.url));
   }
 
-  // BENTENG 3: Hak Akses Spesifik (Mencegah Guru iseng masuk ke URL Admin)
-  if (
-    isAuthenticated &&
-    currentPath.startsWith("/admin") &&
-    userRole !== "admin" &&
-    userRole !== "ict"
-  ) {
-    return NextResponse.redirect(new URL("/walikelas", request.url));
+  // BENTENG 3: Hak Akses Spesifik
+  if (isAuthenticated) {
+    // Route /admin: hanya untuk admin dan ict
+    if (
+      currentPath.startsWith("/admin") &&
+      userRole !== "admin" &&
+      userRole !== "ict"
+    ) {
+      const roleRedirects = {
+        "guru walikelas": "/walikelas",
+        "guru pendamping": "/walikelas",
+        "guru mapel": "/guru-mapel",
+        ict: "/ict",
+        admin: "/admin",
+      };
+      const redirectPath = roleRedirects[userRole] || "/login";
+      return NextResponse.redirect(new URL(redirectPath, request.url));
+    }
+
+    // Route /ict: hanya untuk ict dan admin
+    if (
+      currentPath.startsWith("/ict") &&
+      userRole !== "ict" &&
+      userRole !== "admin"
+    ) {
+      const roleRedirects = {
+        "guru walikelas": "/walikelas",
+        "guru pendamping": "/walikelas",
+        "guru mapel": "/guru-mapel",
+        ict: "/ict",
+        admin: "/admin",
+      };
+      const redirectPath = roleRedirects[userRole] || "/login";
+      return NextResponse.redirect(new URL(redirectPath, request.url));
+    }
+
+    // Route /walikelas: untuk guru walikelas, guru pendamping, admin, dan ict
+    if (
+      currentPath.startsWith("/walikelas") &&
+      userRole !== "guru walikelas" &&
+      userRole !== "guru pendamping" &&
+      userRole !== "admin" &&
+      userRole !== "ict"
+    ) {
+      const roleRedirects = {
+        "guru walikelas": "/walikelas",
+        "guru pendamping": "/walikelas",
+        "guru mapel": "/guru-mapel",
+        ict: "/ict",
+        admin: "/admin",
+      };
+      const redirectPath = roleRedirects[userRole] || "/login";
+      return NextResponse.redirect(new URL(redirectPath, request.url));
+    }
+
+    // Route /guru-mapel: untuk guru mapel, admin, dan ict
+    if (
+      currentPath.startsWith("/guru-mapel") &&
+      userRole !== "guru mapel" &&
+      userRole !== "admin" &&
+      userRole !== "ict"
+    ) {
+      const roleRedirects = {
+        "guru walikelas": "/walikelas",
+        "guru pendamping": "/walikelas",
+        "guru mapel": "/guru-mapel",
+        ict: "/ict",
+        admin: "/admin",
+      };
+      const redirectPath = roleRedirects[userRole] || "/login";
+      return NextResponse.redirect(new URL(redirectPath, request.url));
+    }
   }
 
   return NextResponse.next();
 }
 
-// Konfigurasi halaman mana saja yang diproteksi oleh middleware ini
+// Konfigurasi matcher
 export const config = {
-  matcher: ["/login", "/admin/:path*", "/walikelas/:path*", "/ict/:path*"],
+  matcher: [
+    "/login",
+    "/admin/:path*",
+    "/walikelas/:path*",
+    "/ict/:path*",
+    "/guru-mapel/:path*",
+  ],
 };

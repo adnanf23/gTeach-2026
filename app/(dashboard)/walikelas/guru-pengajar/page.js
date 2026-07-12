@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-// Sesuaikan path import berikut dengan lokasi file pocketbase client di project-mu
 import { pb, isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
 
 function waLink(nomor, pesanAwal = null) {
@@ -10,12 +9,9 @@ function waLink(nomor, pesanAwal = null) {
   const digits = nomor.replace(/[^0-9]/g, "");
   const normalized = digits.startsWith("0") ? `62${digits.slice(1)}` : digits;
   let url = `https://wa.me/${normalized}`;
-
-  // Tambahkan parameter text jika ada pesan awal
   if (pesanAwal) {
     url += `?text=${encodeURIComponent(pesanAwal)}`;
   }
-
   return url;
 }
 
@@ -29,8 +25,11 @@ function getInitials(name) {
     .toUpperCase();
 }
 
-// Palet warna yang dirotasi berdasarkan hash nama/ID mapel, supaya tiap mata
-// pelajaran punya warna avatar & badge yang konsisten tapi bervariasi.
+function firstOf(val) {
+  return Array.isArray(val) ? val[0] : val;
+}
+
+// Palet warna
 const PALETTES = [
   {
     avatar: "bg-indigo-100 text-indigo-700",
@@ -57,6 +56,7 @@ const PALETTES = [
     chip: "bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-100",
   },
 ];
+
 function paletteForKey(key) {
   const str = key || "";
   let hash = 0;
@@ -161,21 +161,33 @@ export default function GuruPengajarPage() {
     setLoadingRows(true);
     setErrorMsg(null);
     try {
+      // Karena kelas_id sekarang multi-select, kita perlu filter yang berbeda
+      // Filter: cari ploting_guru yang memiliki kelas_id mengandung ID kelas yang dipilih
       const records = await pb.collection("ploting_guru").getFullList({
-        filter: `kelas_id="${kelas.id}"`,
+        filter: `kelas_id ~ "${kelas.id}"`,
         expand: "guru_id,mapel_id",
         requestKey: null,
       });
-      const list = records.map((r) => ({
+
+      // Filter manual untuk memastikan kelas_id benar-benar mengandung ID kelas
+      const filteredRecords = records.filter((r) => {
+        const kelasIds = Array.isArray(r.kelas_id) ? r.kelas_id : [r.kelas_id];
+        return kelasIds.includes(kelas.id);
+      });
+
+      const list = filteredRecords.map((r) => ({
         id: r.id,
         guru: r.expand?.guru_id || null,
         mapel: r.expand?.mapel_id || null,
+        kelasIds: r.kelas_id || [],
       }));
+
       list.sort((a, b) =>
         (a.mapel?.nama_mapel || "").localeCompare(b.mapel?.nama_mapel || ""),
       );
       setRows(list);
     } catch (e) {
+      console.error("Error loading pengajar:", e);
       setErrorMsg("Gagal memuat daftar guru pengajar.");
     } finally {
       setLoadingRows(false);
@@ -203,7 +215,6 @@ export default function GuruPengajarPage() {
       return;
     }
 
-    // Buat pesan awal yang lebih personal
     const namaGuru = guru.nama_lengkap || "Guru";
     const namaMapel = mapel?.nama_mapel || "mata pelajaran";
     const namaKelas = kelas?.nama_kelas || "";
@@ -222,7 +233,10 @@ export default function GuruPengajarPage() {
   if (checkingAuth || resolvingKelas) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50">
-        <p className="text-slate-500">Memuat...</p>
+        <div className="text-center">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-indigo-600 border-t-transparent mx-auto"></div>
+          <p className="mt-3 text-sm text-slate-500">Memuat...</p>
+        </div>
       </div>
     );
   }

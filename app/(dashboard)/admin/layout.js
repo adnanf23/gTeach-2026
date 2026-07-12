@@ -39,42 +39,50 @@ const icons = {
   mapel:
     "M2 4.5A2.5 2.5 0 014.5 2H14v10.5a1 1 0 01-1 1H4.5A2.5 2.5 0 012 11V4.5z M2 11h12 M6 2v10",
   pengaturan: "M8 5a3 3 0 100 6 3 3 0 000-6zM8 1v2M8 13v2M1 8h2M13 8h2",
+  // Tambahan ikon baru untuk System Logs ICT
   log: "M2 2h12v12H2V2zM5 6h6M5 9h6M5 12h3",
-  profile: "M8 2a3 3 0 100 6 3 3 0 000-6zM2 14c0-3 2.7-5 6-5s6 2 6 5",
 };
 
 // Array NAV utama untuk Administrator Sekolah
 const NAV = [
-  { key: "overview", label: "Overview", href: "/walikelas/", icon: "overview" },
+  { key: "overview", label: "Overview", href: "/admin/", icon: "overview" },
+  { key: "guru", label: "Data Guru", href: "/admin/data-guru", icon: "guru" },
   {
     key: "kelas",
     label: "Data Kelas",
-    href: "/walikelas/data-kelas",
+    href: "/admin/data-kelas",
     icon: "kelas",
+  },
+  {
+    key: "siswa",
+    label: "Data Siswa",
+    href: "/admin/data-siswa",
+    icon: "siswa",
+  },
+  {
+    key: "Mata Pelajaran",
+    label: "Mata Pelajaran",
+    href: "/admin/mapel",
+    icon: "mapel",
   },
   {
     key: "absensi",
     label: "Absensi Kelas",
-    href: "/walikelas/absensi",
+    href: "/admin/absensi",
     icon: "absensi",
   },
   {
-    key: "pengajar",
-    label: "Pengajar",
-    href: "/walikelas/guru-pengajar",
-    icon: "pembelajaran",
-  },
-  {
-    key: "nilai",
-    label: "Rekap Nilai",
-    href: "/walikelas/penilaian",
-    icon: "nilai",
-  },
-  {
-    key: "agenda",
-    label: "Agenda Mengajar",
-    href: "/walikelas/agenda",
+    key: "Ploting Guru",
+    label: "Ploting Guru",
+    href: "/admin/ploting-guru",
     icon: "pengajaran",
+  },
+  { key: "nilai", label: "Rekap Nilai", href: "/admin/nilai", icon: "nilai" },
+  {
+    key: "Manajemen Ujian",
+    label: "Manajemen Ujian",
+    href: "/admin/manajemen-ujian",
+    icon: "pembelajaran",
   },
 ];
 
@@ -83,18 +91,8 @@ const ICT_NAV = [
   {
     key: "system_logs",
     label: "System Logs",
-    href: "/walikelas/system-logs",
+    href: "/admin/system-logs",
     icon: "log",
-  },
-];
-
-// Menu profil dan pengaturan
-const PROFILE_NAV = [
-  {
-    key: "profile",
-    label: "Profil Saya",
-    href: "/walikelas/profile",
-    icon: "profile",
   },
 ];
 
@@ -112,16 +110,19 @@ export default function AdminLayout({ children }) {
     }
   }, [router]);
 
+  // 1. Tambahkan keyword 'async' di sini
   const handleLogout = async () => {
     try {
       const currentEndpoint =
         typeof window !== "undefined" ? window.location.pathname : "-";
 
+      // 1. Ambil snapshot data user saat ini sebelum dihapus dari state
       const targetUser = user || pb.authStore.model;
 
+      // 2. Tembak log ke backend TANPA await agar user tidak menunggu loading
       createSystemLog({
-        type: "succes",
-        msg: `User '${targetUser?.nama_lengkap || "User"} ( ${targetUser?.role} )' berhasil logout dari sistem.`,
+        type: "succes", // Menyiasati typo 'succes' di database
+        msg: `User '${targetUser?.nama_lengkap || "User"}( ${targetUser?.role} )' berhasil logout dari sistem.`,
         endpoint: currentEndpoint,
         statusCode: 200,
         payload: {
@@ -129,14 +130,20 @@ export default function AdminLayout({ children }) {
           role: targetUser?.role,
         },
       }).catch((err) => console.error("Gagal mencatat log logout:", err));
+      // .catch di atas menjaga jika server log error, aplikasi tidak crash
 
+      // 3. Langsung eksekusi proses bersih-bersih auth (Instan bagi user)
       pb.authStore.clear();
       Cookies.remove("pb_auth", { path: "/" });
       setUser(null);
       router.replace("/login");
     } catch (logError) {
+      // Fallback jika ada error fatal di block try
       console.error("Gagal proses logout:", logError);
+      // Tetap paksa pindah halaman jika terjadi error terduga
       router.replace("/login");
+    } finally {
+      location.reload();
     }
   };
 
@@ -153,11 +160,6 @@ export default function AdminLayout({ children }) {
   const activeNav =
     currentNavList.find((n) => n.key === activeKey) || currentNavList[0];
 
-  // Cek apakah halaman aktif adalah profile atau settings
-  const isProfileActive =
-    pathname === "/walikelas/profile" || pathname === "/walikelas/settings";
-  const activeProfileNav = PROFILE_NAV.find((n) => pathname === n.href);
-
   const initials = user?.name
     ? user.name
         .split(" ")
@@ -168,7 +170,7 @@ export default function AdminLayout({ children }) {
     : user?.username?.slice(0, 2).toUpperCase() || "AD";
 
   return (
-    <div className="flex h-screen min-h-[600px] bg-gray-50 text-[13px] font-sans overflow-hidden text-black">
+    <div className=" flex h-screen min-h-[600px] bg-gray-50 text-[13px] font-sans overflow-hidden text-black">
       {/* Overlay mobile */}
       {sidebarOpen && (
         <div
@@ -186,6 +188,7 @@ export default function AdminLayout({ children }) {
             <h1 className="text-lg font-semibold text-gray-800 leading-tight truncate">
               gTeach Space
             </h1>
+            {/* Teks sub-header berubah dinamis mengikuti role */}
             <p className="text-[10.5px] text-gray-400">
               {user?.role === "ict" ? "ICT Technical Server" : "Administrator"}
             </p>
@@ -200,7 +203,7 @@ export default function AdminLayout({ children }) {
 
         {/* List Menu Navigasi */}
         <div className="pt-2 pb-2 flex-1">
-          {/* Menu utama */}
+          {/* Menggunakan list menu dinamis hasil filter role */}
           {currentNavList.map(({ key, label, icon, href }) => {
             const isActive = activeKey === key;
             return (
@@ -210,17 +213,11 @@ export default function AdminLayout({ children }) {
                   router.push(href);
                   setSidebarOpen(false);
                 }}
-                className={`w-full flex items-center gap-2 px-3 py-[6px] rounded-lg text-left text-[12.5px] transition-colors mx-1 mb-0.5 ${
-                  isActive
-                    ? "bg-[#4d8bff] text-white font-medium"
-                    : "text-gray-500 hover:bg-gray-50 hover:text-gray-700"
-                }`}
+                className={`w-full flex items-center gap-2 px-3 py-[6px] rounded-lg text-left text-[12.5px] transition-colors mx-1 mb-0.5 ${isActive ? "bg-[#4d8bff] text-white font-medium" : "text-gray-500 hover:bg-gray-50 hover:text-gray-700"}`}
                 style={{ width: "calc(100% - 8px)" }}
               >
                 <span
-                  className={`flex-shrink-0 ${
-                    isActive ? "text-blue-200" : "opacity-50"
-                  }`}
+                  className={`flex-shrink-0 ${isActive ? "text-blue-200" : "opacity-50"}`}
                 >
                   <Icon d={icons[icon]} />
                 </span>
@@ -230,46 +227,16 @@ export default function AdminLayout({ children }) {
           })}
         </div>
 
-        {/* Pemisah - Profil & Pengaturan */}
-        <div className="border-t border-gray-200 pt-3 pb-2">
-          <div className="px-3 mb-2">
-            <span className="text-[10px] font-medium text-gray-400 uppercase tracking-wider">
-              Akun
+        <div className="border-t border-gray-100 p-3 flex flex-col gap-1">
+          <button
+            onClick={() => router.push("/admin/settings")}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-[12px] text-gray-500 hover:bg-gray-50 transition-colors w-full"
+          >
+            <span className="opacity-50">
+              <Icon d={icons.settings} />
             </span>
-          </div>
-
-          {/* Menu Profil dan Pengaturan */}
-          {PROFILE_NAV.map(({ key, label, icon, href }) => {
-            const isActive = pathname === href;
-            return (
-              <button
-                key={key}
-                onClick={() => {
-                  router.push(href);
-                  setSidebarOpen(false);
-                }}
-                className={`w-full flex items-center gap-2 px-3 py-[6px] rounded-lg text-left text-[12.5px] transition-colors mx-1 mb-0.5 ${
-                  isActive
-                    ? "bg-[#4d8bff] text-white font-medium"
-                    : "text-gray-500 hover:bg-gray-50 hover:text-gray-700"
-                }`}
-                style={{ width: "calc(100% - 8px)" }}
-              >
-                <span
-                  className={`flex-shrink-0 ${
-                    isActive ? "text-blue-200" : "opacity-50"
-                  }`}
-                >
-                  <Icon d={icons[icon]} />
-                </span>
-                <span className="flex-1">{label}</span>
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Tombol Logout */}
-        <div className="border-t border-gray-100 p-3">
+            Pengaturan
+          </button>
           <button
             onClick={handleLogout}
             className="flex items-center gap-2 px-3 py-2 rounded-lg text-[12px] text-red-400 hover:bg-red-50 transition-colors w-full"
@@ -298,9 +265,7 @@ export default function AdminLayout({ children }) {
             </span>
             <span className="text-gray-300 text-[11px] hidden sm:block">/</span>
             <span className="text-[12px] font-semibold text-gray-700 truncate">
-              {isProfileActive && activeProfileNav
-                ? activeProfileNav.label
-                : activeNav.label}
+              {activeNav.label}
             </span>
           </div>
           <div className="ml-auto flex items-center gap-3">
@@ -316,9 +281,7 @@ export default function AdminLayout({ children }) {
         {/* Page content */}
         <div className="flex-1 overflow-y-auto no-scrollbar p-4 sm:p-5 lg:p-6">
           <h1 className="text-[20px] sm:text-[22px] font-semibold text-gray-900 mb-5 no-print">
-            {isProfileActive && activeProfileNav
-              ? activeProfileNav.label
-              : activeNav.label}
+            {activeNav.label}
           </h1>
           {children}
         </div>

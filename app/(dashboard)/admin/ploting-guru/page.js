@@ -15,29 +15,29 @@ const GURU_ROLES = ["guru walikelas", "guru pendamping", "guru mapel"];
 // Kelas mana saja yang "berhak" untuk sebuah mapel: kelas dengan tingkat
 // yang ada di mapel.target_tingkat, ATAU kelas yang ditandai secara spesifik
 // di mapel.spesifik_kelas_id. Inilah sumber kebenaran, bukan input manual.
-// Aturan: kalau spesifik_kelas_id TERISI, target_tingkat diabaikan sepenuhnya
-// (mapel hanya berlaku utk kelas yg tercantum). Kalau KOSONG, berlaku untuk
-// semua kelas yang tingkatnya cocok target_tingkat.
 function eligibleKelasForMapel(mapel, kelasList) {
   if (!mapel) return [];
+  const targetTingkat = (mapel.target_tingkat || []).map((t) => Number(t));
   const specificIds = mapel.spesifik_kelas_id || [];
-  if (specificIds.length > 0) {
-    return kelasList.filter((k) => specificIds.includes(k.id));
-  }
-  const targetTingkat = (mapel.target_tingkat || []).map((t) => String(t));
-  return kelasList.filter((k) => targetTingkat.includes(String(k.tingkat)));
+  return kelasList.filter(
+    (k) => targetTingkat.includes(k.tingkat) || specificIds.includes(k.id),
+  );
 }
 
 function mapelSubtitle(mapel) {
   if (!mapel) return "";
-  const specificIds = mapel.spesifik_kelas_id || [];
-  if (specificIds.length > 0) {
-    return `Khusus ${specificIds.length} kelas`;
-  }
+  const parts = [];
   if (mapel.target_tingkat && mapel.target_tingkat.length > 0) {
-    return `Tingkat ${mapel.target_tingkat.join(", ")} (semua kelas)`;
+    parts.push(`Tingkat ${mapel.target_tingkat.join(", ")}`);
   }
-  return "";
+  if (mapel.spesifik_kelas_id && mapel.spesifik_kelas_id.length > 0) {
+    parts.push(`${mapel.spesifik_kelas_id.length} kelas spesifik`);
+  }
+  return parts.join(" · ");
+}
+
+function groupKey(guruId, mapelId) {
+  return `${guruId}__${mapelId}`;
 }
 
 // =========================================================
@@ -164,27 +164,41 @@ export default function PlotingGuruPage() {
     [kelasList],
   );
 
-  // ---------------- Sorted list ----------------
-  // Satu baris ploting_guru = satu kombinasi guru + mapel, dengan kelas_id
-  // berupa array (multi-select). Tidak perlu lagi dikelompokkan manual.
-  const sortedPloting = useMemo(() => {
-    return [...plotingList].sort((a, b) => {
-      const na = guruById[a.guru_id]?.nama_lengkap || "";
-      const nb = guruById[b.guru_id]?.nama_lengkap || "";
+  // ---------------- Kelompokkan per guru + mapel ----------------
+  // Data di database tetap 1 baris per kelas (sesuai skema ploting_guru),
+  // tapi di UI kita tampilkan sebagai satu grup "guru X mengajar mapel Y"
+  // beserta daftar kelas yang otomatis tercakup.
+  const groups = useMemo(() => {
+    const map = new Map();
+    for (const r of plotingList) {
+      const key = groupKey(r.guru_id, r.mapel_id);
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          guruId: r.guru_id,
+          mapelId: r.mapel_id,
+          records: [],
+        });
+      }
+      map.get(key).records.push(r);
+    }
+    return Array.from(map.values()).sort((a, b) => {
+      const na = guruById[a.guruId]?.nama_lengkap || "";
+      const nb = guruById[b.guruId]?.nama_lengkap || "";
       return na.localeCompare(nb);
     });
   }, [plotingList, guruById]);
 
   // ---------------- Pencarian ----------------
   const [search, setSearch] = useState("");
-  const filteredPloting = useMemo(() => {
+  const filteredGroups = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!term) return sortedPloting;
-    return sortedPloting.filter((r) => {
-      const guruName = guruById[r.guru_id]?.nama_lengkap || "";
-      const mapelName = mapelById[r.mapel_id]?.nama_mapel || "";
-      const kelasNames = (r.kelas_id || [])
-        .map((kid) => kelasById[kid]?.nama_kelas || "")
+    if (!term) return groups;
+    return groups.filter((g) => {
+      const guruName = guruById[g.guruId]?.nama_lengkap || "";
+      const mapelName = mapelById[g.mapelId]?.nama_mapel || "";
+      const kelasNames = g.records
+        .map((r) => kelasById[r.kelas_id]?.nama_kelas || "")
         .join(" ");
       return (
         guruName.toLowerCase().includes(term) ||
@@ -192,11 +206,11 @@ export default function PlotingGuruPage() {
         kelasNames.toLowerCase().includes(term)
       );
     });
-  }, [sortedPloting, search, guruById, mapelById, kelasById]);
+  }, [groups, search, guruById, mapelById, kelasById]);
 
   // ---------------- Form modal (create / edit) ----------------
   const [modalOpen, setModalOpen] = useState(false);
-  const [editingRecord, setEditingRecord] = useState(null); // record ploting_guru asal saat mode edit
+  const [editingGroup, setEditingGroup] = useState(null); // grup asal saat mode edit
   const [form, setForm] = useState(emptyForm);
   const [formError, setFormError] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -206,35 +220,35 @@ export default function PlotingGuruPage() {
     () => eligibleKelasForMapel(selectedMapel, kelasList),
     [selectedMapel, kelasList],
   );
-  const eligibleKelasIds = useMemo(
-    () => eligibleKelas.map((k) => k.id),
-    [eligibleKelas],
-  );
 
-  // Kelas yang sudah tersimpan di record yang sedang diedit (buat preview
-  // "tetap" vs "baru ditambah" vs "akan dilepas" ketika mapel/guru berubah).
-  const originalKelasIds = useMemo(
-    () => new Set(editingRecord?.kelas_id || []),
-    [editingRecord],
-  );
-  const kelasAkanDilepas = useMemo(() => {
-    if (!editingRecord) return [];
-    return (editingRecord.kelas_id || [])
-      .filter((kid) => !eligibleKelasIds.includes(kid))
-      .map((kid) => kelasById[kid])
-      .filter(Boolean);
-  }, [editingRecord, eligibleKelasIds, kelasById]);
+  // Kelas yang sudah tercatat untuk kombinasi guru+mapel yang sedang dipilih di form
+  // (di luar grup yang sedang diedit) -- dipakai untuk preview "sudah ada" vs "baru".
+  const alreadyAssignedKelasIds = useMemo(() => {
+    if (!form.guruId || !form.mapelId) return new Set();
+    return new Set(
+      plotingList
+        .filter(
+          (r) =>
+            r.guru_id === form.guruId &&
+            r.mapel_id === form.mapelId &&
+            !(
+              editingGroup && editingGroup.records.some((er) => er.id === r.id)
+            ),
+        )
+        .map((r) => r.kelas_id),
+    );
+  }, [plotingList, form.guruId, form.mapelId, editingGroup]);
 
   function openCreateModal() {
-    setEditingRecord(null);
+    setEditingGroup(null);
     setForm(emptyForm);
     setFormError(null);
     setModalOpen(true);
   }
 
-  function openEditModal(record) {
-    setEditingRecord(record);
-    setForm({ guruId: record.guru_id, mapelId: record.mapel_id });
+  function openEditModal(group) {
+    setEditingGroup(group);
+    setForm({ guruId: group.guruId, mapelId: group.mapelId });
     setFormError(null);
     setModalOpen(true);
   }
@@ -262,86 +276,46 @@ export default function PlotingGuruPage() {
       return;
     }
 
-    // Cegah duplikat: satu guru + satu mapel cuma boleh punya 1 record ploting.
-    const duplikat = plotingList.find(
-      (r) =>
-        r.guru_id === form.guruId &&
-        r.mapel_id === form.mapelId &&
-        r.id !== editingRecord?.id,
-    );
-    if (duplikat) {
+    const toCreate = eligible.filter((k) => !alreadyAssignedKelasIds.has(k.id));
+
+    if (toCreate.length === 0 && !editingGroup) {
       setFormError(
-        "Guru ini sudah diploting untuk mapel ini. Edit data yang sudah ada, jangan buat baru.",
+        "Guru ini sudah diploting untuk semua kelas pada mapel ini.",
       );
       return;
     }
 
     setSaving(true);
     try {
-      const eligibleIds = eligible.map((k) => k.id);
-
-      if (editingRecord) {
-        // Kalau guru atau mapel diganti (bukan sekadar sinkron ulang kelas),
-        // cek dulu apakah ploting lama ini sudah punya Lingkup Materi / Nilai
-        // Ujian. Kalau ada, JANGAN diubah diam-diam -- academic data bisa jadi
-        // tidak nyambung lagi. Arahkan user hapus dulu lewat tombol "Hapus".
-        const guruOrMapelBerubah =
-          editingRecord.guru_id !== form.guruId ||
-          editingRecord.mapel_id !== form.mapelId;
-
-        if (guruOrMapelBerubah) {
-          const plotingFilter = `ploting_guru_id="${editingRecord.id}"`;
-          const [lingkup, nilaiUjian] = await Promise.all([
-            pb
-              .collection("lingkup_materi")
-              .getFullList({ filter: plotingFilter, requestKey: null }),
-            pb
-              .collection("nilai_ujian")
-              .getFullList({ filter: plotingFilter, requestKey: null }),
-          ]);
-          if (lingkup.length > 0 || nilaiUjian.length > 0) {
-            setFormError(
-              `Tidak bisa mengganti guru/mapel di sini karena masih ada ${lingkup.length} lingkup materi dan ${nilaiUjian.length} nilai ujian terkait ploting ini. Hapus dulu ploting ini lewat tombol "Hapus" di daftar (akan menampilkan ringkasan data yang ikut terhapus), lalu buat ploting baru.`,
-            );
-            setSaving(false);
-            return;
-          }
-        }
-
-        await pb
-          .collection("ploting_guru")
-          .update(
-            editingRecord.id,
-            {
-              guru_id: form.guruId,
-              mapel_id: form.mapelId,
-              kelas_id: eligibleIds,
-            },
-            { requestKey: null },
-          );
-
-        setMessage({
-          type: "success",
-          text: `Ploting diperbarui — tertaut ke ${eligibleIds.length} kelas.`,
-        });
-      } else {
-        await pb
-          .collection("ploting_guru")
-          .create(
-            {
-              guru_id: form.guruId,
-              mapel_id: form.mapelId,
-              kelas_id: eligibleIds,
-            },
-            { requestKey: null },
-          );
-
-        setMessage({
-          type: "success",
-          text: `Ploting ditambahkan untuk ${eligibleIds.length} kelas otomatis.`,
-        });
+      // Mode edit: hapus dulu seluruh assignment lama grup ini, lalu buat ulang
+      // sesuai kelas yang berhak untuk guru + mapel yang (mungkin) baru.
+      // Ini sekaligus berfungsi sebagai "sinkronisasi" kalau target_tingkat /
+      // spesifik_kelas_id di mapel berubah setelah ploting pertama kali dibuat.
+      if (editingGroup) {
+        await Promise.all(
+          editingGroup.records.map((r) =>
+            pb.collection("ploting_guru").delete(r.id, { requestKey: null }),
+          ),
+        );
       }
 
+      await Promise.all(
+        toCreate.map((k) =>
+          pb
+            .collection("ploting_guru")
+            .create(
+              { guru_id: form.guruId, mapel_id: form.mapelId, kelas_id: k.id },
+              { requestKey: null },
+            ),
+        ),
+      );
+
+      setMessage({
+        type: "success",
+        text: editingGroup
+          ? `Ploting diperbarui — tertaut ke ${toCreate.length} kelas.`
+          : `Ploting ditambahkan untuk ${toCreate.length} kelas otomatis.`,
+      });
       setModalOpen(false);
       await loadAll();
     } catch (err) {
@@ -351,132 +325,28 @@ export default function PlotingGuruPage() {
     }
   }
 
-  // ---------------- Hapus record ----------------
-  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  // ---------------- Hapus grup ----------------
+  const [confirmDeleteKey, setConfirmDeleteKey] = useState(null);
   const [deleting, setDeleting] = useState(false);
-  // Ringkasan data terkait (lingkup materi / nilai) yang akan ikut terhapus
-  const [deleteImpact, setDeleteImpact] = useState(null); // { id, loading, error, lingkupIds, nilaiUjianIds, nilaiHarianCount, lingkupCount, nilaiUjianCount }
 
-  // Sebelum menghapus, cek dulu apakah ploting ini masih dipakai oleh Lingkup
-  // Materi / Nilai Ujian / Nilai Harian. PocketBase menolak (400) menghapus
-  // record yang masih direferensikan oleh relasi WAJIB di collection lain,
-  // jadi kita perlu bersihkan turunannya dulu sebelum menghapus ploting_guru-nya.
-  async function prepareDeleteRecord(record) {
-    setConfirmDeleteId(record.id);
-    setDeleteImpact({ id: record.id, loading: true });
-    try {
-      const plotingFilter = `ploting_guru_id="${record.id}"`;
-
-      const [lingkup, nilaiUjian] = await Promise.all([
-        pb
-          .collection("lingkup_materi")
-          .getFullList({ filter: plotingFilter, requestKey: null }),
-        pb
-          .collection("nilai_ujian")
-          .getFullList({ filter: plotingFilter, requestKey: null }),
-      ]);
-
-      let nilaiHarianCount = 0;
-      if (lingkup.length > 0) {
-        const lingkupFilter = lingkup
-          .map((l) => `lingkup_materi_id="${l.id}"`)
-          .join(" || ");
-        const nilaiHarian = await pb.collection("nilai_harian").getFullList({
-          filter: lingkupFilter,
-          requestKey: null,
-        });
-        nilaiHarianCount = nilaiHarian.length;
-      }
-
-      setDeleteImpact({
-        id: record.id,
-        loading: false,
-        lingkupIds: lingkup.map((l) => l.id),
-        nilaiUjianIds: nilaiUjian.map((n) => n.id),
-        lingkupCount: lingkup.length,
-        nilaiUjianCount: nilaiUjian.length,
-        nilaiHarianCount,
-      });
-    } catch (e) {
-      setDeleteImpact({ id: record.id, loading: false, error: true });
-    }
-  }
-
-  async function handleDeleteRecord(record) {
+  async function handleDeleteGroup(group) {
     setDeleting(true);
     try {
-      const impact =
-        deleteImpact && deleteImpact.id === record.id ? deleteImpact : null;
-
-      if (impact && !impact.error) {
-        // Urutan hapus wajib dari yang paling "bawah" dulu:
-        // nilai harian -> lingkup materi -> nilai ujian -> ploting guru.
-        if (impact.lingkupIds.length > 0) {
-          const lingkupFilter = impact.lingkupIds
-            .map((id) => `lingkup_materi_id="${id}"`)
-            .join(" || ");
-          const nilaiHarian = await pb.collection("nilai_harian").getFullList({
-            filter: lingkupFilter,
-            requestKey: null,
-          });
-          await Promise.all(
-            nilaiHarian.map((n) =>
-              pb.collection("nilai_harian").delete(n.id, { requestKey: null }),
-            ),
-          );
-          await Promise.all(
-            impact.lingkupIds.map((id) =>
-              pb.collection("lingkup_materi").delete(id, { requestKey: null }),
-            ),
-          );
-        }
-        if (impact.nilaiUjianIds.length > 0) {
-          await Promise.all(
-            impact.nilaiUjianIds.map((id) =>
-              pb.collection("nilai_ujian").delete(id, { requestKey: null }),
-            ),
-          );
-        }
-      }
-
-      await pb
-        .collection("ploting_guru")
-        .delete(record.id, { requestKey: null });
+      await Promise.all(
+        group.records.map((r) =>
+          pb.collection("ploting_guru").delete(r.id, { requestKey: null }),
+        ),
+      );
       setMessage({ type: "success", text: "Ploting berhasil dihapus." });
       await loadAll();
     } catch (e) {
       setMessage({
         type: "error",
-        text: "Gagal menghapus data. Kemungkinan masih ada data nilai/lingkup materi terkait yang belum bisa dibersihkan otomatis.",
+        text: "Gagal menghapus data. Silakan coba lagi.",
       });
     } finally {
       setDeleting(false);
-      setConfirmDeleteId(null);
-      setDeleteImpact(null);
-    }
-  }
-
-  // ---------------- Sinkron cepat (tanpa ganti guru/mapel) ----------------
-  // Kalau target_tingkat / spesifik_kelas_id di mapel berubah setelah ploting
-  // dibuat, tombol ini menyamakan ulang kelas_id tanpa perlu buka modal edit.
-  const [syncingId, setSyncingId] = useState(null);
-  async function handleSyncKelas(record) {
-    const mapel = mapelById[record.mapel_id];
-    const eligible = eligibleKelasForMapel(mapel, kelasList).map((k) => k.id);
-    setSyncingId(record.id);
-    try {
-      await pb
-        .collection("ploting_guru")
-        .update(record.id, { kelas_id: eligible }, { requestKey: null });
-      setMessage({
-        type: "success",
-        text: `Kelas disinkronkan ulang (${eligible.length} kelas).`,
-      });
-      await loadAll();
-    } catch (e) {
-      setMessage({ type: "error", text: "Gagal menyinkronkan kelas." });
-    } finally {
-      setSyncingId(null);
+      setConfirmDeleteKey(null);
     }
   }
 
@@ -526,7 +396,7 @@ export default function PlotingGuruPage() {
           )}
         </div>
 
-        {/* Daftar ploting -- satu baris = satu record (guru + mapel + array kelas) */}
+        {/* Daftar ploting (dikelompokkan per guru + mapel) */}
         <div className="rounded-xl border border-slate-200 bg-white">
           {loadingData ? (
             <div className="space-y-2 p-4">
@@ -537,7 +407,7 @@ export default function PlotingGuruPage() {
                 />
               ))}
             </div>
-          ) : filteredPloting.length === 0 ? (
+          ) : filteredGroups.length === 0 ? (
             <p className="py-10 text-center text-sm text-slate-400">
               {search
                 ? "Tidak ada data yang cocok."
@@ -545,24 +415,13 @@ export default function PlotingGuruPage() {
             </p>
           ) : (
             <div className="divide-y divide-slate-100">
-              {filteredPloting.map((r) => {
-                const guru = guruById[r.guru_id];
-                const mapel = mapelById[r.mapel_id];
-                const isConfirming = confirmDeleteId === r.id;
-                const kelasIds = r.kelas_id || [];
-
-                // Bandingkan kelas tersimpan vs kelas yang seharusnya berlaku
-                // sekarang (kalau mapel berubah setelah ploting dibuat).
-                const currentEligibleIds = eligibleKelasForMapel(
-                  mapel,
-                  kelasList,
-                ).map((k) => k.id);
-                const outOfSync =
-                  kelasIds.length !== currentEligibleIds.length ||
-                  kelasIds.some((kid) => !currentEligibleIds.includes(kid));
+              {filteredGroups.map((g) => {
+                const guru = guruById[g.guruId];
+                const mapel = mapelById[g.mapelId];
+                const isConfirming = confirmDeleteKey === g.key;
 
                 return (
-                  <div key={r.id} className="flex flex-col gap-3 p-4">
+                  <div key={g.key} className="flex flex-col gap-3 p-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
@@ -580,12 +439,7 @@ export default function PlotingGuruPage() {
                           </span>
                         </div>
                         <p className="mt-1 text-xs text-slate-400">
-                          {kelasIds.length} kelas tertaut
-                          {outOfSync && (
-                            <span className="ml-1.5 font-medium text-amber-600">
-                              · perlu disinkron ulang
-                            </span>
-                          )}
+                          {g.records.length} kelas otomatis tertaut
                         </p>
                       </div>
 
@@ -593,18 +447,18 @@ export default function PlotingGuruPage() {
                         <div className="flex flex-shrink-0 items-center gap-2">
                           {isConfirming ? (
                             <>
+                              <span className="text-xs text-slate-500">
+                                Yakin hapus?
+                              </span>
                               <button
-                                onClick={() => handleDeleteRecord(r)}
-                                disabled={deleting || deleteImpact?.loading}
+                                onClick={() => handleDeleteGroup(g)}
+                                disabled={deleting}
                                 className="rounded-lg bg-rose-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-rose-700 disabled:opacity-50"
                               >
                                 {deleting ? "..." : "Ya, hapus"}
                               </button>
                               <button
-                                onClick={() => {
-                                  setConfirmDeleteId(null);
-                                  setDeleteImpact(null);
-                                }}
+                                onClick={() => setConfirmDeleteKey(null)}
                                 className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-50"
                               >
                                 Batal
@@ -612,25 +466,14 @@ export default function PlotingGuruPage() {
                             </>
                           ) : (
                             <>
-                              {outOfSync && (
-                                <button
-                                  onClick={() => handleSyncKelas(r)}
-                                  disabled={syncingId === r.id}
-                                  className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100 disabled:opacity-50"
-                                >
-                                  {syncingId === r.id
-                                    ? "Menyinkron..."
-                                    : "Sinkron kelas"}
-                                </button>
-                              )}
                               <button
-                                onClick={() => openEditModal(r)}
+                                onClick={() => openEditModal(g)}
                                 className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
                               >
                                 Edit
                               </button>
                               <button
-                                onClick={() => prepareDeleteRecord(r)}
+                                onClick={() => setConfirmDeleteKey(g.key)}
                                 className="rounded-lg border border-rose-200 px-2.5 py-1 text-xs font-medium text-rose-600 hover:bg-rose-50"
                               >
                                 Hapus
@@ -641,46 +484,14 @@ export default function PlotingGuruPage() {
                       )}
                     </div>
 
-                    {/* Ringkasan dampak hapus (lingkup materi / nilai terkait) */}
-                    {isConfirming && (
-                      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-                        {deleteImpact?.loading ? (
-                          "Mengecek data terkait..."
-                        ) : deleteImpact?.error ? (
-                          "Gagal mengecek data terkait, tapi Anda tetap bisa mencoba hapus."
-                        ) : deleteImpact &&
-                          (deleteImpact.lingkupCount > 0 ||
-                            deleteImpact.nilaiUjianCount > 0 ||
-                            deleteImpact.nilaiHarianCount > 0) ? (
-                          <>
-                            Menghapus ploting ini akan ikut menghapus{" "}
-                            <span className="font-semibold">
-                              {deleteImpact.lingkupCount} lingkup materi
-                            </span>
-                            ,{" "}
-                            <span className="font-semibold">
-                              {deleteImpact.nilaiHarianCount} nilai harian
-                            </span>
-                            , dan{" "}
-                            <span className="font-semibold">
-                              {deleteImpact.nilaiUjianCount} nilai ujian
-                            </span>{" "}
-                            yang terkait. Yakin lanjutkan?
-                          </>
-                        ) : (
-                          "Tidak ada data nilai/lingkup materi terkait. Aman untuk dihapus."
-                        )}
-                      </div>
-                    )}
-
-                    {/* Chip daftar kelas yang tertaut */}
+                    {/* Chip daftar kelas yang otomatis tercakup */}
                     <div className="flex flex-wrap gap-1.5">
-                      {kelasIds.map((kid) => (
+                      {g.records.map((r) => (
                         <span
-                          key={kid}
+                          key={r.id}
                           className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700"
                         >
-                          {kelasById[kid]?.nama_kelas ||
+                          {kelasById[r.kelas_id]?.nama_kelas ||
                             "(kelas tidak ditemukan)"}
                         </span>
                       ))}
@@ -698,7 +509,7 @@ export default function PlotingGuruPage() {
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 px-4">
           <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl">
             <h2 className="text-base font-semibold text-slate-900">
-              {editingRecord ? "Edit Ploting Guru" : "Tambah Ploting Guru"}
+              {editingGroup ? "Edit Ploting Guru" : "Tambah Ploting Guru"}
             </h2>
             <p className="mt-1 text-xs text-slate-500">
               Cukup pilih guru & mata pelajaran — kelas otomatis ditentukan dari
@@ -768,17 +579,17 @@ export default function PlotingGuruPage() {
                   ) : (
                     <div className="flex flex-wrap gap-1.5 rounded-lg border border-slate-200 bg-slate-50 p-2">
                       {eligibleKelas.map((k) => {
-                        const sudahAda = originalKelasIds.has(k.id);
+                        const already = alreadyAssignedKelasIds.has(k.id);
                         return (
                           <span
                             key={k.id}
                             title={
-                              sudahAda
+                              already
                                 ? "Sudah tertaut sebelumnya"
                                 : "Akan ditambahkan"
                             }
                             className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                              sudahAda
+                              already
                                 ? "bg-slate-200 text-slate-500"
                                 : "bg-emerald-100 text-emerald-700"
                             }`}
@@ -787,24 +598,12 @@ export default function PlotingGuruPage() {
                           </span>
                         );
                       })}
-                      {kelasAkanDilepas.map((k) => (
-                        <span
-                          key={`remove-${k.id}`}
-                          title="Sudah tidak eligible, akan dilepas dari ploting ini"
-                          className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-600 line-through"
-                        >
-                          {k.nama_kelas}
-                        </span>
-                      ))}
                     </div>
                   )}
-                  {(eligibleKelas.length > 0 ||
-                    kelasAkanDilepas.length > 0) && (
+                  {eligibleKelas.length > 0 && (
                     <p className="mt-1 text-xs text-slate-400">
-                      Abu-abu = sudah tertaut, hijau = baru ditambahkan
-                      {kelasAkanDilepas.length > 0 &&
-                        ", merah coret = akan dilepas"}
-                      .
+                      Abu-abu = sudah tertaut sebelumnya, hijau = akan
+                      ditambahkan.
                     </p>
                   )}
                 </div>
@@ -831,7 +630,7 @@ export default function PlotingGuruPage() {
                 >
                   {saving
                     ? "Menyimpan..."
-                    : editingRecord
+                    : editingGroup
                       ? "Simpan Perubahan"
                       : "Tambah"}
                 </button>
