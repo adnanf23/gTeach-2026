@@ -264,7 +264,10 @@ export default function DataGuru() {
       try {
         await pb
           .collection("_superusers")
-          .authWithPassword("adnanfauzanm.career@gmail.com", "admin@gTeach");
+          .authWithPassword(
+            process.env.POCKETBASE_ADMIN_EMAIL,
+            process.env.POCKETBASE_ADMIN_PASSWORD,
+          );
       } catch (authError) {
         console.error(
           "Gagal Login Admin. Periksa kembali email/password kamu:",
