@@ -422,6 +422,8 @@ export default function DataGuru() {
           "Nama Lengkap": item.nama_lengkap || "",
           Role: item.role || "",
           "Kelas Diampu": statusKelas,
+          username: item.username,
+          password: "gTeach2026",
         };
       });
 
