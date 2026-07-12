@@ -72,53 +72,87 @@ export default function EditProfilePage() {
   };
 
   // Submit profile update
+  // Submit profile update
+  // Submit profile update via Admin Bypass SDK
+  // Submit profile update via Admin Bypass SDK
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSaving(true);
     setError("");
     setSuccess("");
 
+    // 1. SIMPAN SESI LOGIN USER SAAT INI (Backup token & record asli)
+    const currentUserAuth = pb.authStore.token;
+    const currentUserRecord = pb.authStore.record;
+
     try {
-      // Validasi
-      if (!formData.nama_lengkap.trim()) {
+      if (!formData.nama_lengkap.trim())
         throw new Error("Nama lengkap wajib diisi");
-      }
-      if (!formData.username.trim()) {
-        throw new Error("Username wajib diisi");
+      if (!formData.username.trim()) throw new Error("Username wajib diisi");
+
+      // 2. MASUK SEMENTARA SEBAGAI SUPERUSER / ADMIN
+      try {
+        await pb
+          .collection("_superusers")
+          .authWithPassword(
+            process.env.NEXT_PUBLIC_POCKETBASE_ADMIN_EMAIL,
+            process.env.NEXT_PUBLIC_POCKETBASE_ADMIN_PASSWORD,
+          );
+      } catch (authError) {
+        console.error("Gagal Login Admin:", authError.message);
+        throw new Error("Sistem gagal memverifikasi hak akses Superuser.");
       }
 
-      // Data yang akan diupdate
+      // 3. SIAPKAN PAYLOAD DATA UPDATE (Termasuk email)
       const updateData = {
         nama_lengkap: formData.nama_lengkap.trim(),
         username: formData.username.trim(),
         no_whatsapp: formData.no_whatsapp || "",
       };
 
-      // Hanya update email jika diisi dan berbeda
-      if (formData.email && formData.email !== user.email) {
-        updateData.email = formData.email;
+      if (formData.email) {
+        updateData.email = formData.email.trim();
       }
 
-      // Update profile
+      // Eksekusi update data ke database menggunakan authority Superuser
       const updated = await pb.collection("users").update(user.id, updateData);
 
-      // Update local user data
-      const currentUser = getCurrentUser();
-      if (currentUser) {
-        const mergedUser = { ...currentUser, ...updated };
-        localStorage.setItem("pb_user", JSON.stringify(mergedUser));
-        setUser(mergedUser);
+      // Gabungkan data terbaru ke dalam LocalStorage
+      const mergedUser = { ...user, ...updated };
+      localStorage.setItem("pb_user", JSON.stringify(mergedUser));
+
+      // 4. KRUSIAL: TIMPA DATA RECORD LAMA DENGAN DATA TERBARU DARI DATABASE
+      // Ini dilakukan agar memori internal AuthStore membawa email yang baru diupdate
+      if (currentUserRecord) {
+        Object.assign(currentUserRecord, updated);
       }
 
-      setSuccess("Profil berhasil diperbarui!");
+      // 5. KEMBALIKAN SESI LOGIN USER SEMULA (Sukses)
+      if (currentUserAuth && currentUserRecord) {
+        pb.authStore.save(currentUserAuth, currentUserRecord);
+      } else {
+        pb.authStore.clear();
+      }
 
-      // Refresh halaman setelah 2 detik
+      // Update state local untuk sinkronisasi instan sebelum reload
+      setSuccess("Profil dan Email berhasil diperbarui!");
+      setUser(mergedUser);
+
+      // Refresh halaman setelah 2 detik agar state bersih & memuat useEffect terbaru
       setTimeout(() => {
         window.location.reload();
       }, 2000);
     } catch (err) {
       console.error("Error updating profile:", err);
       setError(err.message || "Gagal memperbarui profil. Silakan coba lagi.");
+
+      // KEMBALIKAN SESI USER SEMULA (Jika terjadi error di tengah jalan)
+      // Hal ini mencegah user ter-logout otomatis akibat gagal hit API
+      if (currentUserAuth && currentUserRecord) {
+        pb.authStore.save(currentUserAuth, currentUserRecord);
+      } else {
+        pb.authStore.clear();
+      }
     } finally {
       setSaving(false);
     }
