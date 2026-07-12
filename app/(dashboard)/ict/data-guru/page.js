@@ -59,7 +59,7 @@ export default function DataGuru() {
       const [guru, kelas] = await Promise.all([
         pb.collection("users").getFullList({
           requestKey: null,
-          filter: `role = "guru walikelas" || role = "guru pendamping"`,
+          filter: `role = "guru walikelas" || role = "guru pendamping" || role = "guru mapel"`,
         }),
         pb.collection("kelas").getFullList({
           expand: "walikelas_id,pendamping_id",
