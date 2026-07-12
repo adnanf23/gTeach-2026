@@ -71,13 +71,9 @@ const LoginPage = () => {
         router.push("/admin");
       } else if (userRole === "ict") {
         router.push("/ict");
-      } else if (
-        userRole === "guru walikelas" 
-      ) {
+      } else if (userRole === "guru walikelas" || "guru pendamping") {
         router.push("/walikelas");
-      } else if (
-        userRole === "guru mapel" 
-      ) {
+      } else if (userRole === "guru mapel") {
         router.push("/guru-mapel");
       } else {
         pb.authStore.clear();

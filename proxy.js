@@ -33,13 +33,13 @@ export function proxy(request) {
 
   // BENTENG 2: Jika SUDAH login tapi malah membuka halaman /login lagi
   if (isAuthenticated && currentPath === "/login") {
-    if (userRole === "walikelas") {
+    if (userRole === "guru walikelas" || userRole === "guru pendamping") {
       return NextResponse.redirect(new URL("/walikelas", request.url));
     }
     if (userRole === "ict") {
       return NextResponse.redirect(new URL("/ict", request.url));
     }
-    return NextResponse.redirect(new URL("/guru", request.url));
+    return NextResponse.redirect(new URL("/walikelas", request.url));
   }
 
   // BENTENG 3: Hak Akses Spesifik (Mencegah Guru iseng masuk ke URL Admin)

@@ -62,18 +62,18 @@ const NAV = [
     icon: "absensi",
   },
   {
-    key: "pengajaran",
-    label: "Pengajaran",
-    href: "/ict/pengajaran",
+    key: "Ploting Guru",
+    label: "Ploting Guru",
+    href: "/ict/ploting-guru",
     icon: "pengajaran",
   },
+  { key: "nilai", label: "Rekap Nilai", href: "/ict/nilai", icon: "nilai" },
   {
-    key: "pembelajaran",
-    label: "Pembelajaran",
-    href: "/ict/pembelajaran",
+    key: "Manajemen Ujian",
+    label: "Manajemen Ujian",
+    href: "/ict/manajemen-ujian",
     icon: "pembelajaran",
   },
-  { key: "nilai", label: "Rekap Nilai", href: "/ict/nilai", icon: "nilai" },
   {
     key: "pengaturan ajaran",
     label: "Pengaturan",
@@ -144,6 +144,8 @@ export default function AdminLayout({ children }) {
       console.error("Gagal proses logout:", logError);
       // Tetap paksa pindah halaman jika terjadi error terduga
       router.replace("/login");
+    } finally {
+      location.reload();
     }
   };
 

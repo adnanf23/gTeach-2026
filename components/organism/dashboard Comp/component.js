@@ -253,7 +253,7 @@ export function KelasToolbarButtons({
         >
           <path d="M12 5v14M5 12h14" />
         </svg>
-        Tambah Kelas
+        Tambah Data
       </ActionButton>
     </div>
   );
@@ -500,9 +500,7 @@ export function ConfirmDeleteModal({ kelas, onConfirm, onCancel, loading }) {
           </svg>
         </div>
         <div>
-          <p className="text-[13px] font-semibold text-red-800">
-            Hapus Data?
-          </p>
+          <p className="text-[13px] font-semibold text-red-800">Hapus Data?</p>
           <p className="text-[12px] text-red-600 mt-0.5">
             Tindakan ini tidak dapat dibatalkan.
           </p>
