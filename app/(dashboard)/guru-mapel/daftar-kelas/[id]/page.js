@@ -261,7 +261,7 @@ export default function DetailKelasPage() {
       <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6">
         {/* Breadcrumb */}
         <button
-          onClick={() => router.push("/data-kelas")}
+          onClick={() => router.push("/guru-mapel/daftar-kelas")}
           className="mb-4 flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700"
         >
           <span aria-hidden>←</span> Data Kelas

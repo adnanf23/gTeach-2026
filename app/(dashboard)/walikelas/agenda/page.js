@@ -110,18 +110,79 @@ function Toast({ toast, onClose }) {
 function AgendaModal({ isOpen, onClose, onSubmit, initialData, defaultDate }) {
   const [deskripsi, setDeskripsi] = useState("");
   const [loading, setLoading] = useState(false);
+  const [listMapel, setListMapel] = useState(null);
+  const [kelas, setKelas] = useState(null);
+
+  // Mapel
+  const [mapel, setMapel] = useState("");
+
+  const user = getCurrentUser();
+
+  useEffect(() => {
+    async function fetchMapel() {
+      if (!user) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        // 1. Ambil data kelas
+        const kelas = await pb
+          .collection("kelas")
+          .getFirstListItem(
+            `walikelas_id = "${user.id}" || pendamping_id = "${user.id}"`,
+            { requestKey: null },
+          );
+
+        setKelas(kelas);
+
+        if (kelas) {
+          const fetchKhusus = pb.collection("mata_pelajaran").getFullList({
+            filter: `spesifik_kelas_id ~ "${kelas.id}"`,
+            requestKey: null,
+          });
+
+          const fetchTingkat = pb.collection("mata_pelajaran").getFullList({
+            filter: `target_tingkat ~ "${String(kelas.tingkat)}"`,
+            requestKey: null,
+          });
+
+          const [mapelKhusus, mapelTingkat] = await Promise.all([
+            fetchKhusus,
+            fetchTingkat,
+          ]);
+
+          // Gabungkan mapel & hapus duplikat berdasarkan ID
+          const combined = [...mapelKhusus, ...mapelTingkat];
+          const uniqueMapel = Array.from(
+            new Map(combined.map((item) => [item.id, item])).values(),
+          );
+
+          setListMapel(uniqueMapel);
+        }
+      } catch (error) {
+        console.error("Gagal mengambil data mapel:", error);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    fetchMapel();
+  }, [user?.id]); // Tambahkan dependency array agar fetch hanya berjalan saat user tersedia
 
   useEffect(() => {
     if (initialData) {
       setDeskripsi(initialData.deskripsi || "");
+      setMapel(initialData.mapel_id || ""); // <-- Set mapel saat edit
     } else {
       setDeskripsi("");
+      setMapel(""); // <-- Reset saat tambah baru
     }
   }, [initialData, isOpen]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!deskripsi.trim()) {
+    if (!deskripsi.trim() || !mapel) {
       return;
     }
 
@@ -129,6 +190,7 @@ function AgendaModal({ isOpen, onClose, onSubmit, initialData, defaultDate }) {
     try {
       const data = {
         deskripsi: deskripsi.trim(),
+        mapel_id: mapel, // <-- Tambahkan ini
         date: initialData ? initialData.date : defaultDate,
       };
 
@@ -164,18 +226,62 @@ function AgendaModal({ isOpen, onClose, onSubmit, initialData, defaultDate }) {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="mb-1.5 block text-xs font-medium text-slate-700">
-              Deskripsi Kegiatan <span className="text-red-500">*</span>
-            </label>
-            <textarea
-              value={deskripsi}
-              onChange={(e) => setDeskripsi(e.target.value)}
-              placeholder="Masukkan deskripsi kegiatan..."
-              rows={4}
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-              required
-              autoFocus
-            />
+            <div className="space-y-4">
+              {/* Dropdown Mata Pelajaran */}
+              <div>
+                <label
+                  htmlFor="mapel"
+                  className="mb-1.5 block text-xs font-medium text-slate-700"
+                >
+                  Mata Pelajaran <span className="text-red-500">*</span>
+                </label>
+                <select
+                  id="mapel"
+                  value={mapel}
+                  onChange={(e) => setMapel(e.target.value)}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  required
+                >
+                  <option value="" disabled>
+                    Pilih Mapel
+                  </option>
+                  {listMapel && listMapel.length > 0 ? (
+                    listMapel.map((m) => (
+                      <option
+                        key={m.id}
+                        value={m.id}
+                        className="text-slate-950"
+                      >
+                        {m.nama_mapel}
+                      </option>
+                    ))
+                  ) : (
+                    <option value="" disabled>
+                      Tidak ada mapel tersedia
+                    </option>
+                  )}
+                </select>
+              </div>
+
+              {/* Textarea Deskripsi Kegiatan */}
+              <div>
+                <label
+                  htmlFor="deskripsi"
+                  className="mb-1.5 block text-xs font-medium text-slate-700"
+                >
+                  Deskripsi Kegiatan <span className="text-red-500">*</span>
+                </label>
+                <textarea
+                  id="deskripsi"
+                  value={deskripsi}
+                  onChange={(e) => setDeskripsi(e.target.value)}
+                  placeholder="Masukkan deskripsi kegiatan..."
+                  rows={4}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  required
+                />
+              </div>
+            </div>
             <p className="mt-1 text-[10px] text-slate-400">
               Tanggal:{" "}
               {initialData
@@ -321,6 +427,7 @@ export default function AgendaMengajarPage() {
       const records = await pb.collection("agenda_mengajar").getFullList({
         filter: `kelas_id="${activeKelas.id}" && date >= "${startStr}" && date <= "${endStr}"`,
         sort: "date",
+        expand: "mapel_id",
         requestKey: null,
       });
 
@@ -389,6 +496,7 @@ export default function AgendaMengajarPage() {
       const created = await pb.collection("agenda_mengajar").create(
         {
           deskripsi: data.deskripsi,
+          mapel_id: data.mapel_id, // <-- Tambahkan ini
           date: data.date,
           kelas_id: activeKelas.id,
         },
@@ -419,6 +527,7 @@ export default function AgendaMengajarPage() {
         editingItem.id,
         {
           deskripsi: data.deskripsi,
+          mapel_id: mapel,
         },
         { requestKey: null },
       );
@@ -750,14 +859,30 @@ export default function AgendaMengajarPage() {
                         className="flex flex-col gap-2 rounded-lg border border-slate-100 p-3 transition hover:border-slate-200 sm:flex-row sm:items-center sm:justify-between"
                       >
                         <div className="flex-1">
+                          <span>
+                            {item.expand?.mapel_id?.nama_mapel ||
+                              item.nama_mapel ||
+                              "Tanpa Mapel"}
+                          </span>
                           <p className="text-sm font-medium text-slate-800">
                             {item.deskripsi}
                           </p>
                           <p className="text-xs text-slate-400">
-                            Kelas:{" "}
-                            {needsKelasPicker
-                              ? getKelasName(item.kelas_id)
-                              : kelas?.nama_kelas}
+                            <span>
+                              Dibuat:{" "}
+                              {item.created
+                                ? new Date(item.created).toLocaleString(
+                                    "id-ID",
+                                    {
+                                      day: "numeric",
+                                      month: "long",
+                                      year: "numeric",
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    },
+                                  )
+                                : "-"}
+                            </span>
                           </p>
                         </div>
                         <div className="flex flex-wrap items-center gap-2">

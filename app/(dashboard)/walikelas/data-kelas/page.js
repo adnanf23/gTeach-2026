@@ -219,7 +219,7 @@ export default function KelasSayaPage() {
     <div className="mx-auto max-w-6xl px-4 py-8">
       {/* Breadcrumb */}
       <div className="mb-6 text-xs text-slate-400 flex items-center gap-2">
-        <span>ICT</span> <span>/</span>{" "}
+        <span>Kelas</span> <span>/</span>{" "}
         <span className="text-slate-600 font-medium">Kelas Saya</span>
       </div>
 

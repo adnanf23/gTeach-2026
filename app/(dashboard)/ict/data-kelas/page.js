@@ -26,23 +26,22 @@ function KelasCard({ item, onDetail, onEdit, onDelete }) {
   const tingkat = TINGKAT_CONFIG[String(item.tingkat)];
 
   // Strip color per tingkat
-  const stripColor = {
-    blue:   "from-blue-400 to-indigo-500",
-    green:  "from-emerald-400 to-teal-500",
-    amber:  "from-amber-400 to-orange-500",
-    red:    "from-rose-400 to-pink-500",
-    purple: "from-purple-400 to-violet-500",
-  }[tingkat?.variant] || "from-gray-300 to-gray-400";
+  const stripColor =
+    {
+      blue: "from-blue-400 to-indigo-500",
+      green: "from-emerald-400 to-teal-500",
+      amber: "from-amber-400 to-orange-500",
+      red: "from-rose-400 to-pink-500",
+      purple: "from-purple-400 to-violet-500",
+    }[tingkat?.variant] || "from-gray-300 to-gray-400";
 
   return (
     <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden hover:shadow-md hover:border-blue-200 transition-all duration-200 flex flex-col">
-
       {/* Color strip */}
       <div className={cn("h-1.5 w-full bg-gradient-to-r", stripColor)} />
 
       {/* Body */}
       <div className="p-4 flex flex-col gap-3 flex-1">
-
         {/* Header: nama kelas + badge tingkat */}
         <div className="flex items-start justify-between gap-2">
           <button
@@ -52,7 +51,10 @@ function KelasCard({ item, onDetail, onEdit, onDelete }) {
             {item.nama_kelas}
           </button>
           {tingkat && (
-            <Badge variant={tingkat.variant} className="shrink-0 text-[10px] mt-0.5">
+            <Badge
+              variant={tingkat.variant}
+              className="shrink-0 text-[10px] mt-0.5"
+            >
               {tingkat.label}
             </Badge>
           )}
@@ -72,7 +74,9 @@ function KelasCard({ item, onDetail, onEdit, onDelete }) {
             </p>
             <p className="text-[13px] text-gray-700 font-medium truncate">
               {item.expand?.walikelas_id?.nama_lengkap || (
-                <span className="text-gray-400 italic font-normal">Belum ditetapkan</span>
+                <span className="text-gray-400 italic font-normal">
+                  Belum ditetapkan
+                </span>
               )}
             </p>
           </div>
@@ -81,14 +85,23 @@ function KelasCard({ item, onDetail, onEdit, onDelete }) {
         {/* Jumlah Siswa */}
         <div className="flex items-center gap-2 bg-gray-50 rounded-xl px-3 py-2">
           <div className="w-7 h-7 rounded-lg bg-blue-100 flex items-center justify-center shrink-0">
-            <svg width="13" height="13" fill="none" stroke="#2563eb" strokeWidth="2" viewBox="0 0 24 24">
-              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-              <circle cx="9" cy="7" r="4"/>
-              <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>
+            <svg
+              width="13"
+              height="13"
+              fill="none"
+              stroke="#2563eb"
+              strokeWidth="2"
+              viewBox="0 0 24 24"
+            >
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
             </svg>
           </div>
           <div>
-            <p className="text-[10px] text-gray-400 font-medium uppercase tracking-wider">Total Siswa</p>
+            <p className="text-[10px] text-gray-400 font-medium uppercase tracking-wider">
+              Total Siswa
+            </p>
             <div className="text-[13px] font-semibold text-gray-800">
               <SiswaCount kelasId={item.id} pb={pb} />
             </div>
@@ -115,9 +128,16 @@ function KelasCard({ item, onDetail, onEdit, onDelete }) {
           className="w-8 h-[30px] flex items-center justify-center text-red-500 bg-red-50 border border-red-100 rounded-lg hover:bg-red-100 transition"
           title="Hapus"
         >
-          <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-            <polyline points="3 6 5 6 21 6"/>
-            <path d="m19 6-.867 12.142A2 2 0 0 1 16.138 20H7.862a2 2 0 0 1-1.995-1.858L5 6m5 0V4a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2"/>
+          <svg
+            width="13"
+            height="13"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            viewBox="0 0 24 24"
+          >
+            <polyline points="3 6 5 6 21 6" />
+            <path d="m19 6-.867 12.142A2 2 0 0 1 16.138 20H7.862a2 2 0 0 1-1.995-1.858L5 6m5 0V4a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v2" />
           </svg>
         </button>
       </div>
@@ -160,23 +180,23 @@ function KelasCardSkeleton() {
 export default function DataKelasPage() {
   const router = useRouter();
 
-  const [kelas, setKelas]         = useState([]);
-  const [guruList, setGuruList]   = useState([]);
-  const [loading, setLoading]     = useState(false);
+  const [kelas, setKelas] = useState([]);
+  const [guruList, setGuruList] = useState([]);
+  const [loading, setLoading] = useState(false);
 
-  const [searchQuery, setSearchQuery]         = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [selectedTingkat, setSelectedTingkat] = useState("semua");
 
   const [modalTambah, setModalTambah] = useState(false);
-  const [modalEdit, setModalEdit]     = useState(false);
+  const [modalEdit, setModalEdit] = useState(false);
   const [modalImport, setModalImport] = useState(false);
   const [modalDelete, setModalDelete] = useState(false);
 
-  const [editTarget, setEditTarget]   = useState(null);
+  const [editTarget, setEditTarget] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
 
   const [submitLoading, setSubmitLoading] = useState(false);
-  const [toast, setToast]                 = useState(null);
+  const [toast, setToast] = useState(null);
 
   const showToast = (msg, type = "success") => {
     setToast({ msg, type });
@@ -227,9 +247,12 @@ export default function DataKelasPage() {
     const matchTingkat =
       selectedTingkat === "semua" || String(item.tingkat) === selectedTingkat;
     const namaKelas = item.nama_kelas?.toLowerCase() || "";
-    const namaWali  = item.expand?.walikelas_id?.nama_lengkap?.toLowerCase() || "";
-    const search    = searchQuery.toLowerCase();
-    return matchTingkat && (namaKelas.includes(search) || namaWali.includes(search));
+    const namaWali =
+      item.expand?.walikelas_id?.nama_lengkap?.toLowerCase() || "";
+    const search = searchQuery.toLowerCase();
+    return (
+      matchTingkat && (namaKelas.includes(search) || namaWali.includes(search))
+    );
   });
 
   // ─── CRUD ────────────────────────────────────────────────────────────────
@@ -242,7 +265,9 @@ export default function DataKelasPage() {
       await createSystemLog({
         type: "succes",
         msg: `User '${user?.nama_lengkap || "User"} ( ${user?.role} )' berhasil Menambahkan data kelas.`,
-        endpoint: currentPath(), statusCode: 200, payload: { form },
+        endpoint: currentPath(),
+        statusCode: 200,
+        payload: { form },
       });
       showToast("Kelas berhasil ditambahkan!");
       setModalTambah(false);
@@ -265,7 +290,8 @@ export default function DataKelasPage() {
       await createSystemLog({
         type: "succes",
         msg: `User '${user?.nama_lengkap || "User"} ( ${user?.role} )' berhasil Mengedit data kelas.`,
-        endpoint: currentPath(), statusCode: 200,
+        endpoint: currentPath(),
+        statusCode: 200,
         payload: { id_kelas: editTarget.id, data_baru: form },
       });
       setEditTarget(null);
@@ -286,7 +312,9 @@ export default function DataKelasPage() {
       await createSystemLog({
         type: "succes",
         msg: `User '${user?.nama_lengkap || "User"} ( ${user?.role} )' berhasil Menghapus data kelas.`,
-        endpoint: currentPath(), statusCode: 200, payload: {},
+        endpoint: currentPath(),
+        statusCode: 200,
+        payload: {},
       });
       showToast("Kelas berhasil dihapus.");
       setModalDelete(false);
@@ -307,15 +335,21 @@ export default function DataKelasPage() {
       const allUsers = await pb.collection("users").getFullList();
       for (const row of rows) {
         try {
-          const waliNama = row.expand?.walikelas_id?.nama_lengkap || row["walikelas_id"] || "";
-          const pendampingNama = row.expand?.walikelas_id?.nama_lengkap || row["pendamping_id"] || "";
+          const waliNama =
+            row.expand?.walikelas_id?.nama_lengkap || row["walikelas_id"] || "";
+          const pendampingNama =
+            row.expand?.walikelas_id?.nama_lengkap ||
+            row["pendamping_id"] ||
+            "";
           const waliUser = allUsers.find((u) => u.nama_lengkap === waliNama);
-           const pendampingUser = allUsers.find((u) => u.nama_lengkap === pendampingNama);
+          const pendampingUser = allUsers.find(
+            (u) => u.nama_lengkap === pendampingNama,
+          );
           await pb.collection("kelas").create({
-            nama_kelas:   row.nama_kelas || row["nama kelas"] || "",
+            nama_kelas: row.nama_kelas || row["nama kelas"] || "",
             walikelas_id: waliUser?.id || "",
-            pendamping_id: pendampingUser ?.id || "",
-            tingkat:      row.tingkat || 1,
+            pendamping_id: pendampingUser?.id || "",
+            tingkat: row.tingkat || 1,
           });
           success++;
         } catch (e) {
@@ -339,23 +373,36 @@ export default function DataKelasPage() {
     }
     const XLSX = await import("xlsx");
     const data = filteredKelas.map((item) => ({
-      "Nama Kelas":    item.nama_kelas || "",
-      "Wali Kelas":    item.expand?.walikelas_id?.nama_lengkap || "-",
-      "ID Wali Kelas": item.walikelas_id || "",
+      "Nama Kelas": item.nama_kelas || "",
+      "Wali Kelas": item.expand?.walikelas_id?.nama_lengkap || "-",
+      Pendamping: item.expand?.pendamping_id?.nama_lengkap || "",
     }));
     const ws = XLSX.utils.json_to_sheet(data);
     ws["!cols"] = [{ wch: 15 }, { wch: 25 }, { wch: 25 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Data Kelas");
-    XLSX.writeFile(wb, `Data_Kelas_${new Date().toISOString().split("T")[0]}.xlsx`);
+    XLSX.writeFile(
+      wb,
+      `Data_Kelas_${new Date().toISOString().split("T")[0]}.xlsx`,
+    );
     showToast("Data berhasil diexport ke Excel.");
   };
 
   const handleDownloadTemplate = async () => {
     const XLSX = await import("xlsx");
     const templateData = [
-      { nama_kelas: "1A", walikelas_id: "id_guru_pocketbase", tingkat: "1" },
-      { nama_kelas: "2B", walikelas_id: "id_guru_pocketbase_2", tingkat: "2" },
+      {
+        nama_kelas: "1A",
+        walikelas_id: "Nama Guru",
+        tingkat: "1",
+        pendamping_id: "Nama pendamping",
+      },
+      {
+        nama_kelas: "2B",
+        walikelas_id: "Nama Guru",
+        tingkat: "2",
+        pendamping_id: "Nama pendamping",
+      },
     ];
     const ws = XLSX.utils.json_to_sheet(templateData);
     ws["!cols"] = [{ wch: 27 }, { wch: 27 }, { wch: 27 }];
@@ -364,8 +411,14 @@ export default function DataKelasPage() {
     XLSX.writeFile(wb, "template_import_kelas.xlsx");
   };
 
-  const openEdit   = (item) => { setEditTarget(item);   setModalEdit(true);   };
-  const openDelete = (item) => { setDeleteTarget(item); setModalDelete(true); };
+  const openEdit = (item) => {
+    setEditTarget(item);
+    setModalEdit(true);
+  };
+  const openDelete = (item) => {
+    setDeleteTarget(item);
+    setModalDelete(true);
+  };
   const openDetail = (item) => router.push(`/ict/data-kelas/${item.id}`);
 
   // ─── Render ───────────────────────────────────────────────────────────────
@@ -389,9 +442,13 @@ export default function DataKelasPage() {
         <div className="relative flex-1">
           <svg
             className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4"
-            fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            viewBox="0 0 24 24"
           >
-            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+            <circle cx="11" cy="11" r="8" />
+            <path d="m21 21-4.35-4.35" />
           </svg>
           <input
             type="text"
@@ -408,7 +465,9 @@ export default function DataKelasPage() {
         >
           <option value="semua">Semua Tingkat</option>
           {Object.entries(TINGKAT_CONFIG).map(([value, config]) => (
-            <option key={value} value={value}>{config.label}</option>
+            <option key={value} value={value}>
+              {config.label}
+            </option>
           ))}
         </Select>
       </div>
@@ -416,13 +475,19 @@ export default function DataKelasPage() {
       {/* Card Grid */}
       {loading ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {[...Array(8)].map((_, i) => <KelasCardSkeleton key={i} />)}
+          {[...Array(8)].map((_, i) => (
+            <KelasCardSkeleton key={i} />
+          ))}
         </div>
       ) : filteredKelas.length === 0 ? (
         <div className="bg-white border border-gray-200 rounded-2xl py-16 text-center">
           <div className="text-3xl mb-3">📁</div>
-          <p className="font-medium text-gray-500 text-sm">Data tidak ditemukan</p>
-          <p className="text-xs text-gray-400 mt-1">Coba ubah filter atau tambah kelas baru</p>
+          <p className="font-medium text-gray-500 text-sm">
+            Data tidak ditemukan
+          </p>
+          <p className="text-xs text-gray-400 mt-1">
+            Coba ubah filter atau tambah kelas baru
+          </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -446,7 +511,10 @@ export default function DataKelasPage() {
         </span>
         {selectedTingkat !== "semua" && (
           <button
-            onClick={() => { setSelectedTingkat("semua"); setSearchQuery(""); }}
+            onClick={() => {
+              setSelectedTingkat("semua");
+              setSearchQuery("");
+            }}
             className="text-[12px] text-blue-500 hover:text-blue-700 transition"
           >
             Reset filter
@@ -455,7 +523,11 @@ export default function DataKelasPage() {
       </div>
 
       {/* Modals */}
-      <Modal isOpen={modalTambah} onClose={() => setModalTambah(false)} title="Tambah Kelas Baru">
+      <Modal
+        isOpen={modalTambah}
+        onClose={() => setModalTambah(false)}
+        title="Tambah Kelas Baru"
+      >
         <FormKelas
           onSubmit={handleTambah}
           onCancel={() => setModalTambah(false)}
@@ -464,13 +536,17 @@ export default function DataKelasPage() {
         />
       </Modal>
 
-      <Modal isOpen={modalEdit} onClose={() => setModalEdit(false)} title={`Edit Kelas — ${editTarget?.nama_kelas}`}>
+      <Modal
+        isOpen={modalEdit}
+        onClose={() => setModalEdit(false)}
+        title={`Edit Kelas — ${editTarget?.nama_kelas}`}
+      >
         <FormKelas
           initial={
             editTarget
               ? {
-                  nama_kelas:   editTarget.nama_kelas,
-                  tingkat:      String(editTarget.tingkat),
+                  nama_kelas: editTarget.nama_kelas,
+                  tingkat: String(editTarget.tingkat),
                   walikelas_id: editTarget.walikelas_id,
                 }
               : undefined
@@ -482,7 +558,12 @@ export default function DataKelasPage() {
         />
       </Modal>
 
-      <Modal isOpen={modalImport} onClose={() => setModalImport(false)} title="Import Data Kelas dari Excel" size="lg">
+      <Modal
+        isOpen={modalImport}
+        onClose={() => setModalImport(false)}
+        title="Import Data Kelas dari Excel"
+        size="lg"
+      >
         <ImportModal
           onImport={handleImport}
           onCancel={() => setModalImport(false)}
@@ -490,7 +571,12 @@ export default function DataKelasPage() {
         />
       </Modal>
 
-      <Modal isOpen={modalDelete} onClose={() => setModalDelete(false)} title="Konfirmasi Hapus" size="sm">
+      <Modal
+        isOpen={modalDelete}
+        onClose={() => setModalDelete(false)}
+        title="Konfirmasi Hapus"
+        size="sm"
+      >
         <ConfirmDeleteModal
           kelas={deleteTarget}
           onConfirm={handleDelete}

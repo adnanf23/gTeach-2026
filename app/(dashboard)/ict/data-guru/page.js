@@ -256,29 +256,9 @@ export default function DataGuru() {
         .collection("users")
         .getFullList({ requestKey: null });
 
-      // 1. SIMPAN SESI LOGIN OPERATOR SAAT INI
-      const currentUserAuth = pb.authStore.token;
-      const currentUserRecord = pb.authStore.record;
+      // Tidak perlu lagi login sebagai _superusers,
+      // karena operator (admin/ict) sudah punya izin create langsung.
 
-      // 2. MASUK SEBAGAI SUPERUSER / ADMIN
-      try {
-        await pb
-          .collection("_superusers")
-          .authWithPassword(
-            process.env.POCKETBASE_ADMIN_EMAIL,
-            process.env.POCKETBASE_ADMIN_PASSWORD,
-          );
-      } catch (authError) {
-        console.error(
-          "Gagal Login Admin. Periksa kembali email/password kamu:",
-          authError.message,
-        );
-        alert("Gagal masuk sistem sebagai Admin. Proses import dibatalkan.");
-        setLoading(false);
-        return;
-      }
-
-      // 3. MULAI PROSES LOOPING IMPORT DATA
       for (const row of rows) {
         try {
           const nama_lengkap = (
@@ -298,14 +278,12 @@ export default function DataGuru() {
 
           if (!nama_lengkap) continue;
 
-          // Normalisasi nama role
           if (role === "guru_walikelas") role = "guru walikelas";
           if (role === "guru_pendamping") role = "guru pendamping";
           if (role === "guru_mapel") role = "guru mapel";
 
           if (email === "") email = null;
 
-          // Cek apakah user sudah terdaftar (berdasarkan Email atau Nama Lengkap saja)
           const isExist = allUsers.find((u) => {
             const matchEmail = email && u.email?.toLowerCase() === email;
             const matchNama =
@@ -319,7 +297,6 @@ export default function DataGuru() {
             continue;
           }
 
-          // Payload Utama dengan Password Statis & Tanpa Field Username (Biarkan PocketBase generate otomatis)
           const payload = {
             nama_lengkap,
             role,
@@ -333,17 +310,14 @@ export default function DataGuru() {
           if (no_whatsapp) payload.no_whatsapp = no_whatsapp;
           if (jenis_kelamin) payload.jenis_kelamin = jenis_kelamin;
 
-          // Buat user baru di PocketBase
           const newGuru = await pb.collection("users").create(payload);
 
-          // Masukkan ke array lokal untuk pengecekan baris excel berikutnya
           allUsers.push({
             id: newGuru.id,
             nama_lengkap: payload.nama_lengkap,
             email: email || "",
           });
 
-          // Hubungkan otomatis ke tabel Kelas jika kolom nama_kelas tersedia di Excel
           const namaKelasExcel =
             row.nama_kelas || row["Kelas"] || row["Nama Kelas"];
           if (namaKelasExcel && newGuru) {
@@ -354,15 +328,10 @@ export default function DataGuru() {
             );
             if (kelasTerkait) {
               const updateKelasPayload = {};
-              if (role === "guru walikelas") {
+              if (role === "guru walikelas")
                 updateKelasPayload.walikelas_id = newGuru.id;
-              } else if (role === "guru_walikelas") {
-                updateKelasPayload.walikelas_id = newGuru.id;
-              } else if (role === "guru pendamping") {
+              else if (role === "guru pendamping")
                 updateKelasPayload.pendamping_id = newGuru.id;
-              } else if (role === "guru_pendamping") {
-                updateKelasPayload.pendamping_id = newGuru.id;
-              }
 
               if (Object.keys(updateKelasPayload).length > 0) {
                 await pb
@@ -379,13 +348,6 @@ export default function DataGuru() {
             e.data || e.message || e,
           );
         }
-      }
-
-      // 4. KEMBALIKAN SESI LOGIN OPERATOR SEMULA
-      if (currentUserAuth && currentUserRecord) {
-        pb.authStore.save(currentUserAuth, currentUserRecord);
-      } else {
-        pb.authStore.clear();
       }
 
       alert(

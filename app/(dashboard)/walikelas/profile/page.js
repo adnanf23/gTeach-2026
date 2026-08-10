@@ -290,8 +290,9 @@ export default function EditProfilePage() {
                 value={formData.username}
                 onChange={handleChange}
                 placeholder="Masukkan username"
-                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                className="w-full rounded-lg border bg-slate-50 border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                 required
+                disabled
               />
               <p className="mt-1 text-[10px] text-slate-400">
                 Username digunakan untuk login
