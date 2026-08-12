@@ -119,7 +119,6 @@ function TenagaCard({ label, person }) {
 const TABS = [
   { key: "overview", label: "Overview" },
   { key: "siswa", label: "Siswa" },
-  { key: "mapel", label: "Mata Pelajaran" },
 ];
 
 export default function DetailKelasPage() {
@@ -499,54 +498,6 @@ export default function DetailKelasPage() {
                 </>
               )}
             </div>
-          </div>
-        )}
-
-        {/* Tab: Mata Pelajaran */}
-        {activeTab === "mapel" && (
-          <div className="mt-5">
-            {plotingList.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-slate-200 bg-white py-10 text-center">
-                <p className="text-sm text-slate-400">
-                  Belum ada guru yang diploting untuk kelas ini.
-                </p>
-              </div>
-            ) : (
-              <div className="grid gap-3 sm:grid-cols-2">
-                {plotingList.map((p) => {
-                  const mapel = p.expand?.mapel_id;
-                  const guru = p.expand?.guru_id;
-                  const palette = paletteForKey(
-                    mapel?.id || mapel?.nama_mapel || "",
-                  );
-                  const kelasIds = Array.isArray(p.kelas_id)
-                    ? p.kelas_id
-                    : p.kelas_id
-                      ? [p.kelas_id]
-                      : [];
-                  return (
-                    <div
-                      key={p.id}
-                      className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
-                    >
-                      <span
-                        className={`inline-block rounded-full px-2.5 py-1 text-xs font-semibold ${palette.chip}`}
-                      >
-                        {mapel?.nama_mapel || "-"}
-                      </span>
-                      <p className="mt-2 text-sm font-medium text-slate-800">
-                        {guru?.nama_lengkap || "(guru tidak ditemukan)"}
-                      </p>
-                      {kelasIds.length > 1 && (
-                        <p className="mt-1 text-[10px] text-slate-400">
-                          Mengajar di {kelasIds.length} kelas
-                        </p>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
           </div>
         )}
       </div>

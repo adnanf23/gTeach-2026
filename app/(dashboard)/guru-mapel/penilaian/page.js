@@ -18,6 +18,18 @@ function nilaiColor(n) {
   return "text-red-600";
 }
 
+function getKelasBadge(kelas) {
+  if (!kelas) return "-";
+  const nama = kelas.nama_kelas || "";
+  const match = nama.match(/(\d+[A-Za-z]+)$/);
+  if (match) {
+    return match[1].toUpperCase();
+  }
+  const tingkat = kelas.tingkat || "";
+  const firstChar = nama.replace(/\d+/g, "").trim().charAt(0) || "A";
+  return `${tingkat}${firstChar}`;
+}
+
 export default function PenilaianGuruMapelPage() {
   const router = useRouter();
 
@@ -34,6 +46,12 @@ export default function PenilaianGuruMapelPage() {
   const selectedPloting = useMemo(
     () => plotingList.find((p) => p.id === selectedPlotingId) || null,
     [plotingList, selectedPlotingId],
+  );
+
+  // id mapel murni (bukan objek expand) dari ploting terpilih — dipakai utk filter
+  const selectedMapelId = useMemo(
+    () => firstOf(selectedPloting?.mapel_id) || null,
+    [selectedPloting],
   );
 
   // Kelas-kelas dalam ploting terpilih (kelas_id multi-select), plus jumlah siswa per kelas
@@ -54,7 +72,17 @@ export default function PenilaianGuruMapelPage() {
   const [nilaiMap, setNilaiMap] = useState({}); // { siswaId: { lingkupId: { id, nilai } } }
   const [loadingDetail, setLoadingDetail] = useState(false);
 
-  const [innerTab, setInnerTab] = useState("materi"); // 'materi' | 'nilai'
+  const [innerTab, setInnerTab] = useState("materi"); // 'materi' | 'nilai' | 'ujian'
+
+  // ---- Ujian ----
+  const [ujianAktif, setUjianAktif] = useState([]);
+  const [loadingUjianAktif, setLoadingUjianAktif] = useState(false);
+  const [selectedUjianId, setSelectedUjianId] = useState(null);
+  // nilaiUjian[siswaId] = { recordId, nilai }
+  const [nilaiUjian, setNilaiUjian] = useState({});
+  const [loadingNilaiUjian, setLoadingNilaiUjian] = useState(false);
+  const [savingUjianCell, setSavingUjianCell] = useState(null);
+  const [savedUjianFlash, setSavedUjianFlash] = useState(null);
 
   // ---- Form Lingkup Materi ----
   const [showLingkupForm, setShowLingkupForm] = useState(false);
@@ -197,10 +225,9 @@ export default function PenilaianGuruMapelPage() {
     };
   }, [selectedPloting]);
 
-  // 4. Ambil siswa (kelas terpilih), lingkup materi & TP (milik ploting DAN kelas terpilih),
-  //    dan nilai harian (khusus siswa kelas terpilih)
+  // 4. Ambil siswa (kelas terpilih), lingkup materi & TP, dan nilai harian
   useEffect(() => {
-    if (!selectedPloting || !selectedKelas) {
+    if (!selectedPloting || !selectedKelas || !selectedMapelId) {
       setSiswaList([]);
       setLingkupList([]);
       setTpByLingkup({});
@@ -220,7 +247,7 @@ export default function PenilaianGuruMapelPage() {
             requestKey: null,
           }),
           pb.collection("lingkup_materi").getFullList({
-            filter: `ploting_guru_id = "${selectedPloting.id}" && kelas_id ~ "${selectedKelas.id}"`,
+            filter: `mapel_id ~ "${selectedMapelId}" && kelas_id ~ "${selectedKelas.id}"`,
             requestKey: null,
           }),
         ]);
@@ -248,14 +275,8 @@ export default function PenilaianGuruMapelPage() {
         for (const s of siswaRecords) nilaiGrouped[s.id] = {};
 
         if (siswaRecords.length > 0 && lingkupRecords.length > 0) {
-          const siswaFilter = siswaRecords
-            .map((s) => `siswa_id = "${s.id}"`)
-            .join(" || ");
-          const lingkupFilter = lingkupRecords
-            .map((l) => `lingkup_materi_id = "${l.id}"`)
-            .join(" || ");
           const nilaiRecords = await pb.collection("nilai_harian").getFullList({
-            filter: `(${siswaFilter}) && (${lingkupFilter})`,
+            filter: `kelas_id ~ "${selectedKelas.id}" && mapel_id ~ "${selectedMapelId}"`,
             requestKey: null,
           });
           for (const n of nilaiRecords) {
@@ -283,7 +304,83 @@ export default function PenilaianGuruMapelPage() {
     return () => {
       isMounted = false;
     };
-  }, [selectedPloting, selectedKelas]);
+  }, [selectedPloting, selectedKelas, selectedMapelId]);
+
+  // 5. Ambil ujian yang aktif (status_akses = "buka") untuk kelas/tingkat terpilih
+  useEffect(() => {
+    if (!selectedKelas) {
+      setUjianAktif([]);
+      setSelectedUjianId(null);
+      return;
+    }
+    let isMounted = true;
+
+    async function fetchUjianAktif() {
+      setLoadingUjianAktif(true);
+      setSelectedUjianId(null);
+      try {
+        const ujianData = await pb.collection("pengaturan_ujian").getFullList({
+          filter: `status_akses = "buka" && (target_kelas_id ~ "${selectedKelas.id}" || target_tingkat ~ "${String(selectedKelas.tingkat)}")`,
+          requestKey: null,
+        });
+        if (!isMounted) return;
+        setUjianAktif(ujianData);
+      } catch (err) {
+        if (!err?.isAbort) {
+          console.error("Error fetching ujian aktif:", err);
+          if (isMounted) setError("Gagal memuat daftar ujian aktif.");
+        }
+      } finally {
+        if (isMounted) setLoadingUjianAktif(false);
+      }
+    }
+
+    fetchUjianAktif();
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedKelas]);
+
+  // 6. Ambil nilai_ujian saat ujian dipilih (khusus ploting_guru_id ini)
+  useEffect(() => {
+    if (!selectedUjianId || !selectedPloting || siswaList.length === 0) {
+      setNilaiUjian({});
+      return;
+    }
+    let isMounted = true;
+
+    async function fetchNilaiUjian() {
+      setLoadingNilaiUjian(true);
+      try {
+        const filterSiswa = siswaList
+          .map((s) => `siswa_id = "${s.id}"`)
+          .join(" || ");
+        const data = await pb.collection("nilai_ujian").getFullList({
+          filter: `pengaturan_ujian_id = "${selectedUjianId}" && ploting_guru_id = "${selectedPloting.id}" && (${filterSiswa})`,
+          requestKey: null,
+        });
+        if (!isMounted) return;
+        const map = {};
+        data.forEach((n) => {
+          const sid = firstOf(n.siswa_id);
+          map[sid] = { recordId: n.id, nilai: n.nilai };
+        });
+        setNilaiUjian(map);
+      } catch (err) {
+        if (!err?.isAbort) {
+          console.error("Error fetching nilai ujian:", err);
+          if (isMounted) setError("Gagal memuat nilai ujian.");
+        }
+      } finally {
+        if (isMounted) setLoadingNilaiUjian(false);
+      }
+    }
+
+    fetchNilaiUjian();
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedUjianId, selectedPloting, siswaList]);
 
   // ---------------- Handlers: Lingkup Materi ----------------
   function openAddLingkup() {
@@ -321,8 +418,8 @@ export default function PenilaianGuruMapelPage() {
       } else {
         const created = await pb.collection("lingkup_materi").create({
           ploting_guru_id: selectedPloting.id,
-          guru_id: selectedPloting.guru_id, // <-- tambahkan, isi dari ploting_guru
-          mapel_id: selectedPloting.mapel_id, // <-- tambahkan
+          guru_id: selectedPloting.guru_id || user.id,
+          mapel_id: selectedMapelId,
           kelas_id: [selectedKelas.id],
           nama_lingkup: lingkupForm.nama_lingkup.trim(),
           capaian_kompetensi: lingkupForm.capaian_kompetensi.trim(),
@@ -475,6 +572,9 @@ export default function PenilaianGuruMapelPage() {
           siswa_id: siswaId,
           lingkup_materi_id: lingkupId,
           nilai: clamped,
+          guru_id: selectedPloting?.guru_id || user.id,
+          kelas_id: selectedKelas.id,
+          mapel_id: selectedMapelId,
         });
         setNilaiMap((prev) => ({
           ...prev,
@@ -500,6 +600,57 @@ export default function PenilaianGuruMapelPage() {
       setError("Gagal menyimpan nilai. Periksa koneksi lalu coba lagi.");
     } finally {
       setSavingCell((k) => (k === key ? null : k));
+    }
+  }
+
+  // ---------------- Handlers: Nilai Ujian ----------------
+  function handleNilaiUjianChange(siswaId, rawValue) {
+    setNilaiUjian((prev) => ({
+      ...prev,
+      [siswaId]: { ...(prev[siswaId] || {}), nilai: rawValue },
+    }));
+  }
+
+  async function handleNilaiUjianBlur(siswaId) {
+    if (!selectedUjianId || !selectedPloting) return;
+    const existing = nilaiUjian[siswaId];
+    const rawValue = existing?.nilai;
+    if (rawValue === "" || rawValue === undefined || rawValue === null) return;
+
+    const nilaiNum = Number(rawValue);
+    if (Number.isNaN(nilaiNum)) return;
+
+    const clamped = Math.min(100, Math.max(0, nilaiNum));
+    setSavingUjianCell(siswaId);
+    setError("");
+    try {
+      let saved;
+      if (existing?.recordId) {
+        saved = await pb.collection("nilai_ujian").update(existing.recordId, {
+          nilai: clamped,
+        });
+      } else {
+        saved = await pb.collection("nilai_ujian").create({
+          siswa_id: siswaId,
+          ploting_guru_id: selectedPloting.id,
+          pengaturan_ujian_id: selectedUjianId,
+          nilai: clamped,
+        });
+      }
+      setNilaiUjian((prev) => ({
+        ...prev,
+        [siswaId]: { recordId: saved.id, nilai: clamped },
+      }));
+      setSavedUjianFlash(siswaId);
+      setTimeout(
+        () => setSavedUjianFlash((k) => (k === siswaId ? null : k)),
+        1200,
+      );
+    } catch (err) {
+      console.error("Error saving nilai ujian:", err);
+      setError("Gagal menyimpan nilai ujian. Periksa koneksi lalu coba lagi.");
+    } finally {
+      setSavingUjianCell((k) => (k === siswaId ? null : k));
     }
   }
 
@@ -652,18 +803,19 @@ export default function PenilaianGuruMapelPage() {
         </>
       )}
 
-      {/* ============ STEP 2: PILIH KELAS (dari kelas_id multi-select) ============ */}
+      {/* ============ STEP 2: PILIH KELAS ============ */}
       {selectedPloting && !selectedKelas && (
         <>
-          <h1 className="mb-1 text-lg font-bold text-slate-800">Pilih Kelas</h1>
-          <p className="mb-6 text-xs text-slate-500">
-            Mata pelajaran{" "}
-            <span className="font-semibold text-slate-700">
-              {selectedPloting.expand?.mapel_id?.nama_mapel}
-            </span>{" "}
-            — Lingkup Materi & Tujuan Pembelajaran akan dikelola secara terpisah
-            untuk setiap kelas.
-          </p>
+          <div className="mb-6">
+            <h1 className="text-lg font-bold text-slate-800">Pilih Kelas</h1>
+            <p className="text-xs text-slate-500 mt-1">
+              Pilih kelas untuk mengelola penilaian mata pelajaran{" "}
+              <span className="font-semibold text-slate-700">
+                {selectedPloting.expand?.mapel_id?.nama_mapel}
+              </span>
+              .
+            </p>
+          </div>
 
           {loadingKelasOptions ? (
             <LoadingGrid />
@@ -672,24 +824,23 @@ export default function PenilaianGuruMapelPage() {
               Belum ada kelas yang di-plotting untuk mata pelajaran ini.
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {kelasOptions.map(({ kelas, siswaCount }) => (
                 <button
                   key={kelas.id}
                   type="button"
                   onClick={() => setSelectedKelasId(kelas.id)}
-                  className="text-left rounded-2xl border border-slate-100 bg-white p-4 shadow-sm hover:border-blue-200 hover:shadow-md transition"
+                  className="text-left rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:border-blue-300 hover:shadow-md transition-all hover:-translate-y-0.5"
                 >
                   <div className="flex items-center gap-3">
-                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-600 font-bold text-white uppercase text-sm shadow-sm">
-                      {kelas.nama_kelas?.substring(0, 2) ||
-                        `${kelas.tingkat || 1}A`}
+                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-blue-600 font-bold text-white text-base shadow-sm">
+                      {getKelasBadge(kelas)}
                     </div>
                     <div>
                       <h3 className="text-sm font-bold text-slate-800">
                         {kelas.nama_kelas}
                       </h3>
-                      <p className="text-[11px] text-slate-400 mt-0.5">
+                      <p className="text-[10px] text-slate-400 mt-0.5">
                         Tingkat {kelas.tingkat || "—"} · {siswaCount} siswa
                       </p>
                     </div>
@@ -789,6 +940,17 @@ export default function PenilaianGuruMapelPage() {
               }`}
             >
               Tabel Penilaian
+            </button>
+            <button
+              type="button"
+              onClick={() => handleTabChange("ujian")}
+              className={`whitespace-nowrap rounded-lg px-4 py-2 text-xs font-semibold transition-all cursor-pointer min-w-[160px] flex-1 sm:flex-initial ${
+                innerTab === "ujian"
+                  ? "bg-white text-blue-600 shadow-sm border border-slate-200/50"
+                  : "text-slate-500 hover:text-slate-800 hover:bg-white/40"
+              }`}
+            >
+              Nilai Ujian {ujianAktif.length > 0 && `(${ujianAktif.length})`}
             </button>
           </div>
 
@@ -1211,6 +1373,122 @@ export default function PenilaianGuruMapelPage() {
                       ini juga langsung terlihat di dashboard wali kelas/guru
                       pendamping kelas {selectedKelas.nama_kelas}.
                     </p>
+                  )}
+                </div>
+              )}
+
+              {/* ---------------- TAB: NILAI UJIAN ---------------- */}
+              {innerTab === "ujian" && (
+                <div className="space-y-4">
+                  {loadingUjianAktif ? (
+                    <div className="rounded-xl border border-slate-100 bg-white p-8 text-center text-slate-400 text-xs">
+                      Memuat daftar ujian...
+                    </div>
+                  ) : ujianAktif.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500 text-xs">
+                      Belum ada ujian yang diaktifkan oleh Admin untuk kelas
+                      ini.
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex flex-wrap gap-2">
+                        {ujianAktif.map((u) => (
+                          <button
+                            key={u.id}
+                            type="button"
+                            onClick={() => setSelectedUjianId(u.id)}
+                            className={`text-xs font-bold px-4 py-2 rounded-full border transition-colors ${
+                              selectedUjianId === u.id
+                                ? "bg-blue-600 border-blue-600 text-white"
+                                : "bg-white border-slate-200 text-slate-600 hover:border-blue-300"
+                            }`}
+                          >
+                            {u.nama_ujian}
+                          </button>
+                        ))}
+                      </div>
+
+                      {!selectedUjianId ? (
+                        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500 text-xs">
+                          Pilih ujian di atas untuk mulai input nilai.
+                        </div>
+                      ) : loadingNilaiUjian ? (
+                        <div className="rounded-xl border border-slate-100 bg-white p-8 text-center text-slate-400 text-xs">
+                          Memuat nilai ujian...
+                        </div>
+                      ) : siswaList.length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500 text-xs">
+                          Belum ada siswa terdaftar di kelas ini.
+                        </div>
+                      ) : (
+                        <div className="overflow-x-auto rounded-xl border border-slate-100 shadow-sm">
+                          <table className="w-full min-w-[420px] text-xs">
+                            <thead>
+                              <tr className="bg-slate-50 text-left uppercase tracking-wider text-slate-400 text-[10px] font-semibold border-b border-slate-100">
+                                <th className="px-4 py-2.5 text-center w-10">
+                                  No
+                                </th>
+                                <th className="px-4 py-2.5 min-w-[180px]">
+                                  Nama Siswa
+                                </th>
+                                <th className="px-4 py-2.5 text-center min-w-[120px] bg-blue-50/60 text-blue-600">
+                                  Nilai Ujian
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 bg-white">
+                              {siswaList.map((s, idx) => {
+                                const cell = nilaiUjian[s.id];
+                                const isSaving = savingUjianCell === s.id;
+                                const isSaved = savedUjianFlash === s.id;
+                                return (
+                                  <tr
+                                    key={s.id}
+                                    className="hover:bg-slate-50/40 transition"
+                                  >
+                                    <td className="px-4 py-2 text-center text-slate-400 font-mono">
+                                      {idx + 1}
+                                    </td>
+                                    <td className="px-4 py-2 font-semibold text-slate-700">
+                                      {s.nama_siswa}
+                                    </td>
+                                    <td className="px-4 py-2 text-center bg-blue-50/20">
+                                      <div className="relative inline-block">
+                                        <input
+                                          type="number"
+                                          min={0}
+                                          max={100}
+                                          step="0.1"
+                                          value={cell?.nilai ?? ""}
+                                          onChange={(e) =>
+                                            handleNilaiUjianChange(
+                                              s.id,
+                                              e.target.value,
+                                            )
+                                          }
+                                          onBlur={() =>
+                                            handleNilaiUjianBlur(s.id)
+                                          }
+                                          className={`w-20 rounded-lg border px-2 py-1 text-center text-xs font-semibold outline-none transition ${
+                                            isSaved
+                                              ? "border-emerald-300 bg-emerald-50"
+                                              : "border-slate-200 focus:border-blue-500"
+                                          }`}
+                                          placeholder="—"
+                                        />
+                                        {isSaving && (
+                                          <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               )}

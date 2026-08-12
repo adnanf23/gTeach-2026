@@ -186,9 +186,7 @@ export default function AdminLayout({ children }) {
             <h1 className="text-lg font-semibold text-gray-800 leading-tight truncate">
               gTeach Space
             </h1>
-            <p className="text-[10.5px] text-gray-400">
-              {user?.role === "ict" ? "ICT Technical Server" : "Administrator"}
-            </p>
+            <p className="text-[10.5px] text-gray-400">{user?.role}</p>
           </div>
           <button
             className="ml-auto lg:hidden text-gray-400 hover:text-gray-600"

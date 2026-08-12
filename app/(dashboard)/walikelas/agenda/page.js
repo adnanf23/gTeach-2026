@@ -61,6 +61,31 @@ const BULAN = [
   "Desember",
 ];
 
+const METODE_PEMBELAJARAN = {
+  praktikum: "Praktikum",
+  diskusi: "Diskusi",
+  presentasi: "Presentasi",
+  "student centered": "Student Centered",
+  "teacher centered": "Teacher Centered",
+  assesmen: "Asesmen",
+  refleksi: "Refleksi",
+  ceramah: "Ceramah",
+};
+
+// Daftar jam pelajaran (urutan jam ke-1 sampai jam ke-10)
+const JAM_PELAJARAN = [
+  { value: 1, label: "Jam ke-1" },
+  { value: 2, label: "Jam ke-2" },
+  { value: 3, label: "Jam ke-3" },
+  { value: 4, label: "Jam ke-4" },
+  { value: 5, label: "Jam ke-5" },
+  { value: 6, label: "Jam ke-6" },
+  { value: 7, label: "Jam ke-7" },
+  { value: 8, label: "Jam ke-8" },
+  { value: 9, label: "Jam ke-9" },
+  { value: 10, label: "Jam ke-10" },
+];
+
 // =========================================================
 // Toast Notifikasi
 // =========================================================
@@ -105,84 +130,112 @@ function Toast({ toast, onClose }) {
 }
 
 // =========================================================
-// Modal Form Agenda (hanya deskripsi)
+// Modal Form Agenda (Lengkap sesuai database)
 // =========================================================
 function AgendaModal({ isOpen, onClose, onSubmit, initialData, defaultDate }) {
-  const [deskripsi, setDeskripsi] = useState("");
   const [loading, setLoading] = useState(false);
-  const [listMapel, setListMapel] = useState(null);
+  const [listMapel, setListMapel] = useState([]);
   const [kelas, setKelas] = useState(null);
-
-  // Mapel
-  const [mapel, setMapel] = useState("");
-
+  const [listKelas, setListKelas] = useState([]);
   const user = getCurrentUser();
 
+  // State terpisah untuk setiap field
+  const [deskripsi, setDeskripsi] = useState("");
+  const [mapelId, setMapelId] = useState("");
+  const [kelasId, setKelasId] = useState("");
+  const [date, setDate] = useState(defaultDate || toISODate(new Date()));
+  const [topik, setTopik] = useState("");
+  const [jamMapel, setJamMapel] = useState("");
+  const [metode, setMetode] = useState("");
+  const [siswaTidakHadir, setSiswaTidakHadir] = useState("");
+
+  // Load data untuk dropdown
   useEffect(() => {
-    async function fetchMapel() {
-      if (!user) {
-        setLoading(false);
-        return;
-      }
+    async function fetchData() {
+      if (!user || !isOpen) return;
 
       try {
-        // 1. Ambil data kelas
-        const kelas = await pb
-          .collection("kelas")
-          .getFirstListItem(
-            `walikelas_id = "${user.id}" || pendamping_id = "${user.id}"`,
-            { requestKey: null },
-          );
+        let kelasData = null;
+        let allKelas = [];
 
-        setKelas(kelas);
-
-        if (kelas) {
-          const fetchKhusus = pb.collection("mata_pelajaran").getFullList({
-            filter: `spesifik_kelas_id ~ "${kelas.id}"`,
+        if (user.role === "guru walikelas" || user.role === "guru pendamping") {
+          try {
+            kelasData = await pb
+              .collection("kelas")
+              .getFirstListItem(
+                `walikelas_id = "${user.id}" || pendamping_id = "${user.id}"`,
+                { requestKey: null },
+              );
+            setKelas(kelasData);
+          } catch (e) {
+            console.log("Tidak ada kelas yang ditugaskan");
+          }
+        } else if (user.role === "admin" || user.role === "ict") {
+          allKelas = await pb.collection("kelas").getFullList({
+            sort: "nama_kelas",
             requestKey: null,
           });
+          setListKelas(allKelas);
+        }
 
-          const fetchTingkat = pb.collection("mata_pelajaran").getFullList({
-            filter: `target_tingkat ~ "${String(kelas.tingkat)}"`,
-            requestKey: null,
-          });
-
+        let mapelData = [];
+        if (kelasData) {
           const [mapelKhusus, mapelTingkat] = await Promise.all([
-            fetchKhusus,
-            fetchTingkat,
+            pb.collection("mata_pelajaran").getFullList({
+              filter: `spesifik_kelas_id ~ "${kelasData.id}"`,
+              requestKey: null,
+            }),
+            pb.collection("mata_pelajaran").getFullList({
+              filter: `target_tingkat ~ "${String(kelasData.tingkat)}"`,
+              requestKey: null,
+            }),
           ]);
 
-          // Gabungkan mapel & hapus duplikat berdasarkan ID
           const combined = [...mapelKhusus, ...mapelTingkat];
-          const uniqueMapel = Array.from(
+          mapelData = Array.from(
             new Map(combined.map((item) => [item.id, item])).values(),
           );
-
-          setListMapel(uniqueMapel);
+          mapelData.sort((a, b) => a.nama_mapel.localeCompare(b.nama_mapel));
         }
+
+        setListMapel(mapelData);
       } catch (error) {
-        console.error("Gagal mengambil data mapel:", error);
-      } finally {
-        setLoading(false);
+        console.error("Gagal mengambil data:", error);
       }
     }
 
-    fetchMapel();
-  }, [user?.id]); // Tambahkan dependency array agar fetch hanya berjalan saat user tersedia
+    fetchData();
+  }, [user, isOpen]);
 
+  // Reset form ketika modal dibuka atau initialData berubah
   useEffect(() => {
+    if (!isOpen) return;
+
     if (initialData) {
       setDeskripsi(initialData.deskripsi || "");
-      setMapel(initialData.mapel_id || ""); // <-- Set mapel saat edit
+      setMapelId(initialData.mapel_id || "");
+      setKelasId(initialData.kelas_id || "");
+      setDate(initialData.date || defaultDate || toISODate(new Date()));
+      setTopik(initialData.topik || "");
+      setJamMapel(initialData.jam_mapel || "");
+      setMetode(initialData.metode || "");
+      setSiswaTidakHadir(initialData.siswa_tidak_hadir || "");
     } else {
       setDeskripsi("");
-      setMapel(""); // <-- Reset saat tambah baru
+      setMapelId("");
+      setKelasId("");
+      setDate(defaultDate || toISODate(new Date()));
+      setTopik("");
+      setJamMapel("");
+      setMetode("");
+      setSiswaTidakHadir("");
     }
-  }, [initialData, isOpen]);
+  }, [initialData, isOpen, defaultDate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!deskripsi.trim() || !mapel) {
+    if (!deskripsi.trim() || !mapelId) {
+      // Set message error di parent
       return;
     }
 
@@ -190,8 +243,13 @@ function AgendaModal({ isOpen, onClose, onSubmit, initialData, defaultDate }) {
     try {
       const data = {
         deskripsi: deskripsi.trim(),
-        mapel_id: mapel, // <-- Tambahkan ini
-        date: initialData ? initialData.date : defaultDate,
+        mapel_id: mapelId,
+        kelas_id: kelasId || (kelas ? kelas.id : ""),
+        date: date,
+        topik: topik.trim(),
+        jam_mapel: jamMapel ? parseInt(jamMapel) : null,
+        metode: metode || null,
+        siswa_tidak_hadir: siswaTidakHadir.trim(),
       };
 
       if (initialData) {
@@ -209,12 +267,14 @@ function AgendaModal({ isOpen, onClose, onSubmit, initialData, defaultDate }) {
 
   if (!isOpen) return null;
 
+  const isAdminOrIct = user?.role === "admin" || user?.role === "ict";
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
-      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+      <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-bold text-slate-800">
-            {initialData ? "Edit Agenda" : "Tambah Agenda Baru"}
+            {initialData ? "Edit Agenda Mengajar" : "Tambah Agenda Mengajar"}
           </h2>
           <button
             onClick={onClose}
@@ -225,69 +285,185 @@ function AgendaModal({ isOpen, onClose, onSubmit, initialData, defaultDate }) {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <div className="space-y-4">
-              {/* Dropdown Mata Pelajaran */}
-              <div>
-                <label
-                  htmlFor="mapel"
-                  className="mb-1.5 block text-xs font-medium text-slate-700"
-                >
-                  Mata Pelajaran <span className="text-red-500">*</span>
-                </label>
-                <select
-                  id="mapel"
-                  value={mapel}
-                  onChange={(e) => setMapel(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                  required
-                >
-                  <option value="" disabled>
-                    Pilih Mapel
-                  </option>
-                  {listMapel && listMapel.length > 0 ? (
-                    listMapel.map((m) => (
-                      <option
-                        key={m.id}
-                        value={m.id}
-                        className="text-slate-950"
-                      >
-                        {m.nama_mapel}
-                      </option>
-                    ))
-                  ) : (
-                    <option value="" disabled>
-                      Tidak ada mapel tersedia
+          {isAdminOrIct && (
+            <div>
+              <label
+                htmlFor="kelas_id"
+                className="mb-1.5 block text-xs font-medium text-slate-700"
+              >
+                Kelas <span className="text-red-500">*</span>
+              </label>
+              <select
+                id="kelas_id"
+                value={kelasId}
+                onChange={(e) => setKelasId(e.target.value)}
+                className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                required
+              >
+                <option value="" disabled>
+                  Pilih Kelas
+                </option>
+                {listKelas
+                  .sort((a, b) => a.nama_kelas.localeCompare(b.nama_kelas))
+                  .map((k) => (
+                    <option key={k.id} value={k.id}>
+                      {k.nama_kelas} (Tingkat {k.tingkat})
                     </option>
-                  )}
-                </select>
-              </div>
-
-              {/* Textarea Deskripsi Kegiatan */}
-              <div>
-                <label
-                  htmlFor="deskripsi"
-                  className="mb-1.5 block text-xs font-medium text-slate-700"
-                >
-                  Deskripsi Kegiatan <span className="text-red-500">*</span>
-                </label>
-                <textarea
-                  id="deskripsi"
-                  value={deskripsi}
-                  onChange={(e) => setDeskripsi(e.target.value)}
-                  placeholder="Masukkan deskripsi kegiatan..."
-                  rows={4}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                  required
-                />
-              </div>
+                  ))}
+              </select>
             </div>
+          )}
+
+          <div>
+            <label
+              htmlFor="mapel_id"
+              className="mb-1.5 block text-xs font-medium text-slate-700"
+            >
+              Mata Pelajaran <span className="text-red-500">*</span>
+            </label>
+            <select
+              id="mapel_id"
+              value={mapelId}
+              onChange={(e) => setMapelId(e.target.value)}
+              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              required
+            >
+              <option value="" disabled>
+                Pilih Mata Pelajaran
+              </option>
+              {listMapel.length > 0 ? (
+                listMapel.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.nama_mapel} ({m.kode_mapel})
+                  </option>
+                ))
+              ) : (
+                <option value="" disabled>
+                  Tidak ada mapel tersedia
+                </option>
+              )}
+            </select>
+          </div>
+
+          <div>
+            <label
+              htmlFor="topik"
+              className="mb-1.5 block text-xs font-medium text-slate-700"
+            >
+              Topik Pembelajaran
+            </label>
+            <input
+              id="topik"
+              type="text"
+              value={topik}
+              onChange={(e) => setTopik(e.target.value)}
+              placeholder="Masukkan topik pembelajaran..."
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+
+          <div>
+            <label
+              htmlFor="deskripsi"
+              className="mb-1.5 block text-xs font-medium text-slate-700"
+            >
+              Deskripsi Kegiatan <span className="text-red-500">*</span>
+            </label>
+            <textarea
+              id="deskripsi"
+              value={deskripsi}
+              onChange={(e) => setDeskripsi(e.target.value)}
+              placeholder="Masukkan deskripsi kegiatan pembelajaran..."
+              rows={3}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              required
+            />
+          </div>
+
+          <div>
+            <label
+              htmlFor="jam_mapel"
+              className="mb-1.5 block text-xs font-medium text-slate-700"
+            >
+              Jam Pelajaran <span className="text-red-500">*</span>
+            </label>
+            <select
+              id="jam_mapel"
+              value={jamMapel}
+              onChange={(e) => setJamMapel(e.target.value)}
+              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              required
+            >
+              <option value="" disabled>
+                Pilih Jam Pelajaran
+              </option>
+              {JAM_PELAJARAN.map((jam) => (
+                <option key={jam.value} value={jam.value}>
+                  {jam.label}
+                </option>
+              ))}
+            </select>
             <p className="mt-1 text-[10px] text-slate-400">
-              Tanggal:{" "}
-              {initialData
-                ? formatLong(initialData.date)
-                : formatLong(defaultDate)}
+              Pilih urutan jam pelajaran (jam ke-1 sampai jam ke-10)
             </p>
+          </div>
+
+          <div>
+            <label
+              htmlFor="metode"
+              className="mb-1.5 block text-xs font-medium text-slate-700"
+            >
+              Metode Pembelajaran
+            </label>
+            <select
+              id="metode"
+              value={metode}
+              onChange={(e) => setMetode(e.target.value)}
+              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="">Pilih Metode</option>
+              {Object.entries(METODE_PEMBELAJARAN)
+                .sort((a, b) => a[1].localeCompare(b[1]))
+                .map(([key, value]) => (
+                  <option key={key} value={key}>
+                    {value}
+                  </option>
+                ))}
+            </select>
+          </div>
+
+          <div>
+            <label
+              htmlFor="siswa_tidak_hadir"
+              className="mb-1.5 block text-xs font-medium text-slate-700"
+            >
+              Siswa Tidak Hadir
+            </label>
+            <input
+              id="siswa_tidak_hadir"
+              type="text"
+              value={siswaTidakHadir}
+              onChange={(e) => setSiswaTidakHadir(e.target.value)}
+              placeholder="Nama siswa yang tidak hadir (pisahkan dengan koma)"
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+
+          <div>
+            <label
+              htmlFor="date"
+              className="mb-1.5 block text-xs font-medium text-slate-700"
+            >
+              Tanggal <span className="text-red-500">*</span>
+            </label>
+            <input
+              id="date"
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              required
+            />
           </div>
 
           <div className="flex gap-3 pt-2">
@@ -319,18 +495,14 @@ export default function AgendaMengajarPage() {
   const router = useRouter();
   const today = useMemo(() => startOfDay(new Date()), []);
 
-  // Auth
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [user, setUser] = useState(null);
-
-  // Kelas
   const [kelas, setKelas] = useState(null);
   const [kelasOptions, setKelasOptions] = useState([]);
   const [needsKelasPicker, setNeedsKelasPicker] = useState(false);
   const [noKelasAssigned, setNoKelasAssigned] = useState(false);
   const [resolvingKelas, setResolvingKelas] = useState(true);
 
-  // Kalender
   const [viewDate, setViewDate] = useState(
     () => new Date(today.getFullYear(), today.getMonth(), 1),
   );
@@ -338,12 +510,10 @@ export default function AgendaMengajarPage() {
   const [loadingCalendar, setLoadingCalendar] = useState(false);
   const [message, setMessage] = useState(null);
 
-  // Detail
   const [selectedDate, setSelectedDate] = useState(null);
   const [detailItems, setDetailItems] = useState([]);
   const [loadingDetail, setLoadingDetail] = useState(false);
 
-  // Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
   const [modalDefaultDate, setModalDefaultDate] = useState(null);
@@ -391,7 +561,10 @@ export default function AgendaMengajarPage() {
             requestKey: null,
           });
           if (!cancelled) {
-            setKelasOptions(list);
+            const sorted = list.sort((a, b) =>
+              a.nama_kelas.localeCompare(b.nama_kelas),
+            );
+            setKelasOptions(sorted);
             setNeedsKelasPicker(true);
           }
         } catch (e) {
@@ -426,8 +599,8 @@ export default function AgendaMengajarPage() {
 
       const records = await pb.collection("agenda_mengajar").getFullList({
         filter: `kelas_id="${activeKelas.id}" && date >= "${startStr}" && date <= "${endStr}"`,
-        sort: "date",
-        expand: "mapel_id",
+        sort: "date,jam_mapel",
+        expand: "mapel_id,kelas_id",
         requestKey: null,
       });
 
@@ -479,7 +652,29 @@ export default function AgendaMengajarPage() {
       try {
         const dateStr = toISODate(date);
         const items = monthAgenda[dateStr] || [];
-        setDetailItems(items);
+
+        const refreshedItems = await Promise.all(
+          items.map(async (item) => {
+            try {
+              const fullItem = await pb
+                .collection("agenda_mengajar")
+                .getOne(item.id, {
+                  expand: "mapel_id,kelas_id",
+                  requestKey: null,
+                });
+              return fullItem;
+            } catch {
+              return item;
+            }
+          }),
+        );
+
+        // Sort berdasarkan jam_mapel (urutan jam ke-1, ke-2, dst)
+        const sortedItems = refreshedItems.sort(
+          (a, b) => (a.jam_mapel || 999) - (b.jam_mapel || 999),
+        );
+
+        setDetailItems(sortedItems);
       } finally {
         setLoadingDetail(false);
       }
@@ -488,62 +683,129 @@ export default function AgendaMengajarPage() {
   );
 
   // =========================================================
-  // CRUD Operations
+  // CRUD Operations with Validation
   // =========================================================
   const handleCreate = async (data) => {
     try {
-      const activeKelas = needsKelasPicker ? kelas : kelas;
-      const created = await pb.collection("agenda_mengajar").create(
+      const activeKelas = needsKelasPicker
+        ? data.kelas_id || kelas?.id
+        : kelas?.id;
+
+      // Validasi: Cek apakah sudah ada agenda dengan mapel dan jam yang sama di tanggal yang sama
+      const existing = await pb.collection("agenda_mengajar").getFullList({
+        filter: `kelas_id="${activeKelas}" && mapel_id="${data.mapel_id}" && date="${data.date}" && jam_mapel="${data.jam_mapel}"`,
+        requestKey: null,
+      });
+
+      if (existing.length > 0) {
+        setMessage({
+          type: "error",
+          text: `Mata pelajaran ini sudah memiliki agenda pada jam ke-${data.jam_mapel} tanggal ${formatLong(data.date)}.`,
+        });
+        return;
+      }
+
+      // Cek apakah jam tersebut sudah digunakan oleh mapel lain di tanggal yang sama
+      const existingJam = await pb.collection("agenda_mengajar").getFullList({
+        filter: `kelas_id="${activeKelas}" && date="${data.date}" && jam_mapel="${data.jam_mapel}"`,
+        requestKey: null,
+      });
+
+      if (existingJam.length > 0) {
+        setMessage({
+          type: "error",
+          text: `Jam ke-${data.jam_mapel} sudah digunakan oleh mata pelajaran lain pada tanggal ${formatLong(data.date)}.`,
+        });
+        return;
+      }
+
+      await pb.collection("agenda_mengajar").create(
         {
           deskripsi: data.deskripsi,
-          mapel_id: data.mapel_id, // <-- Tambahkan ini
+          mapel_id: data.mapel_id,
+          kelas_id: activeKelas,
           date: data.date,
-          kelas_id: activeKelas.id,
+          topik: data.topik,
+          jam_mapel: data.jam_mapel,
+          metode: data.metode,
+          siswa_tidak_hadir: data.siswa_tidak_hadir,
         },
-        {
-          requestKey: null,
-        },
+        { requestKey: null },
       );
+
       setMessage({ type: "success", text: "Agenda berhasil ditambahkan!" });
       await loadMonth();
       if (selectedDate) {
-        const dateStr = toISODate(selectedDate);
-        const items = monthAgenda[dateStr] || [];
-        setDetailItems([...items, created]);
+        await openDetail(selectedDate);
       }
+      location.reload();
     } catch (err) {
       console.error("Error creating agenda:", err);
       setMessage({ type: "error", text: "Gagal menambahkan agenda." });
       throw err;
-    } finally {
-      location.reload();
     }
   };
 
   const handleUpdate = async (data) => {
     if (!editingItem) return;
     try {
-      const updated = await pb.collection("agenda_mengajar").update(
+      const activeKelas = needsKelasPicker
+        ? data.kelas_id || kelas?.id
+        : kelas?.id;
+
+      // Validasi: Cek apakah ada agenda lain dengan mapel dan jam yang sama
+      const existing = await pb.collection("agenda_mengajar").getFullList({
+        filter: `kelas_id="${activeKelas}" && mapel_id="${data.mapel_id}" && date="${data.date}" && jam_mapel="${data.jam_mapel}" && id != "${editingItem.id}"`,
+        requestKey: null,
+      });
+
+      if (existing.length > 0) {
+        setMessage({
+          type: "error",
+          text: `Mata pelajaran ini sudah memiliki agenda pada jam ke-${data.jam_mapel} tanggal ${formatLong(data.date)}.`,
+        });
+        return;
+      }
+
+      // Cek apakah jam tersebut sudah digunakan oleh mapel lain
+      const existingJam = await pb.collection("agenda_mengajar").getFullList({
+        filter: `kelas_id="${activeKelas}" && date="${data.date}" && jam_mapel="${data.jam_mapel}" && id != "${editingItem.id}"`,
+        requestKey: null,
+      });
+
+      if (existingJam.length > 0) {
+        setMessage({
+          type: "error",
+          text: `Jam ke-${data.jam_mapel} sudah digunakan oleh mata pelajaran lain pada tanggal ${formatLong(data.date)}.`,
+        });
+        return;
+      }
+
+      await pb.collection("agenda_mengajar").update(
         editingItem.id,
         {
           deskripsi: data.deskripsi,
-          mapel_id: mapel,
+          mapel_id: data.mapel_id,
+          kelas_id: data.kelas_id || editingItem.kelas_id,
+          date: data.date || editingItem.date,
+          topik: data.topik,
+          jam_mapel: data.jam_mapel,
+          metode: data.metode,
+          siswa_tidak_hadir: data.siswa_tidak_hadir,
         },
         { requestKey: null },
       );
+
       setMessage({ type: "success", text: "Agenda berhasil diperbarui!" });
       await loadMonth();
       if (selectedDate) {
-        const dateStr = toISODate(selectedDate);
-        const items = monthAgenda[dateStr] || [];
-        setDetailItems(items);
+        await openDetail(selectedDate);
       }
+      location.reload();
     } catch (err) {
       console.error("Error updating agenda:", err);
       setMessage({ type: "error", text: "Gagal memperbarui agenda." });
       throw err;
-    } finally {
-      location.reload();
     }
   };
 
@@ -555,9 +817,7 @@ export default function AgendaMengajarPage() {
       setMessage({ type: "success", text: "Agenda berhasil dihapus!" });
       await loadMonth();
       if (selectedDate) {
-        const dateStr = toISODate(selectedDate);
-        const items = monthAgenda[dateStr] || [];
-        setDetailItems(items);
+        await openDetail(selectedDate);
       }
       location.reload();
     } catch (err) {
@@ -580,9 +840,6 @@ export default function AgendaMengajarPage() {
     openDetail(today);
   }
 
-  // =========================================================
-  // Open Modal with Default Values
-  // =========================================================
   const openAddModal = (date) => {
     setEditingItem(null);
     setModalDefaultDate(date ? toISODate(date) : toISODate(new Date()));
@@ -605,14 +862,6 @@ export default function AgendaMengajarPage() {
     while (arr.length % 7 !== 0) arr.push(null);
     return arr;
   }, [viewDate]);
-
-  // =========================================================
-  // Get Kelas Name
-  // =========================================================
-  const getKelasName = (kelasId) => {
-    const found = kelasOptions.find((k) => k.id === kelasId);
-    return found?.nama_kelas || "Kelas tidak ditemukan";
-  };
 
   // =========================================================
   // Render
@@ -654,7 +903,6 @@ export default function AgendaMengajarPage() {
       <Toast toast={message} onClose={() => setMessage(null)} />
 
       <div className="mx-auto max-w-5xl px-4 py-6">
-        {/* Pemilih kelas (admin / ict) */}
         {needsKelasPicker && (
           <div className="mb-6 rounded-xl border border-slate-200 bg-white p-4">
             <label className="mb-1 block text-sm font-medium text-slate-700">
@@ -673,20 +921,20 @@ export default function AgendaMengajarPage() {
               <option value="" disabled>
                 -- Pilih kelas --
               </option>
-              {kelasOptions.map((k) => (
-                <option key={k.id} value={k.id}>
-                  {k.nama_kelas}
-                </option>
-              ))}
+              {kelasOptions
+                .sort((a, b) => a.nama_kelas.localeCompare(b.nama_kelas))
+                .map((k) => (
+                  <option key={k.id} value={k.id}>
+                    {k.nama_kelas} (Tingkat {k.tingkat})
+                  </option>
+                ))}
             </select>
           </div>
         )}
 
         {activeKelas && (
           <>
-            {/* Kartu kalender */}
             <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
-              {/* Header + Tombol Tambah */}
               <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <span className="text-base font-semibold text-slate-900 sm:text-sm md:text-base">
@@ -714,7 +962,6 @@ export default function AgendaMengajarPage() {
                 </div>
               </div>
 
-              {/* Navigasi bulan */}
               <div className="mb-4 flex flex-wrap items-center justify-center gap-2 sm:justify-between">
                 <button
                   onClick={() => goToMonth(-1)}
@@ -732,7 +979,6 @@ export default function AgendaMengajarPage() {
                 </button>
               </div>
 
-              {/* Header hari */}
               <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-medium text-slate-500 sm:gap-1.5 sm:text-xs">
                 {HARI_PENDEK.map((h) => (
                   <div key={h} className="py-1">
@@ -741,7 +987,6 @@ export default function AgendaMengajarPage() {
                 ))}
               </div>
 
-              {/* Grid tanggal */}
               <div className="mt-1 grid grid-cols-7 gap-1 sm:gap-1.5">
                 {loadingCalendar &&
                   Array.from({ length: 35 }).map((_, i) => (
@@ -789,7 +1034,6 @@ export default function AgendaMengajarPage() {
                           {date.getDate()}
                         </span>
 
-                        {/* Badge jumlah agenda */}
                         {summary && summary.total > 0 && (
                           <span className="mt-0.5 text-[8px] font-medium text-indigo-600 sm:text-[9px]">
                             {summary.total} agenda
@@ -800,7 +1044,6 @@ export default function AgendaMengajarPage() {
                   })}
               </div>
 
-              {/* Legenda */}
               <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3 text-[11px] text-slate-500 sm:gap-3 sm:text-xs">
                 <span className="flex items-center gap-1">
                   <span className="h-2 w-2 rounded-full bg-indigo-500" />
@@ -813,7 +1056,6 @@ export default function AgendaMengajarPage() {
               </div>
             </div>
 
-            {/* Panel detail agenda per tanggal */}
             {selectedDate && (
               <div className="mt-6 rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
@@ -852,82 +1094,147 @@ export default function AgendaMengajarPage() {
                     </button>
                   </div>
                 ) : (
-                  <div className="space-y-2">
-                    {detailItems.map((item) => (
+                  <div className="space-y-3">
+                    {detailItems.map((item, index) => (
                       <div
                         key={item.id}
-                        className="flex flex-col gap-2 rounded-lg border border-slate-100 p-3 transition hover:border-slate-200 sm:flex-row sm:items-center sm:justify-between"
+                        className="rounded-lg border border-slate-100 p-4 transition hover:border-slate-200"
                       >
-                        <div className="flex-1">
-                          <span>
-                            {item.expand?.mapel_id?.nama_mapel ||
-                              item.nama_mapel ||
-                              "Tanpa Mapel"}
-                          </span>
-                          <p className="text-sm font-medium text-slate-800">
-                            {item.deskripsi}
-                          </p>
-                          <p className="text-xs text-slate-400">
-                            <span>
-                              Dibuat:{" "}
-                              {item.created
-                                ? new Date(item.created).toLocaleString(
-                                    "id-ID",
-                                    {
-                                      day: "numeric",
-                                      month: "long",
-                                      year: "numeric",
-                                      hour: "2-digit",
-                                      minute: "2-digit",
-                                    },
-                                  )
-                                : "-"}
-                            </span>
-                          </p>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <button
-                            onClick={() => {
-                              setEditingItem(item);
-                              setModalDefaultDate(null);
-                              setIsModalOpen(true);
-                            }}
-                            className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-blue-600"
-                            title="Edit"
-                          >
-                            <svg
-                              className="h-4 w-4"
-                              fill="none"
-                              viewBox="0 0 24 24"
-                              stroke="currentColor"
-                              strokeWidth={2}
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="flex-1 space-y-1.5">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-indigo-100 text-xs font-semibold text-indigo-700">
+                                {index + 1}
+                              </span>
+                              <span className="rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-medium text-indigo-700">
+                                {item.expand?.mapel_id?.nama_mapel ||
+                                  item.nama_mapel ||
+                                  "Tanpa Mapel"}
+                              </span>
+                              {item.expand?.mapel_id?.kode_mapel && (
+                                <span className="text-xs text-slate-400">
+                                  {item.expand.mapel_id.kode_mapel}
+                                </span>
+                              )}
+                              {item.jam_mapel && (
+                                <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-700">
+                                  Jam ke-{item.jam_mapel}
+                                </span>
+                              )}
+                            </div>
+
+                            {item.topik && (
+                              <p className="text-sm font-semibold text-slate-800">
+                                📚 {item.topik}
+                              </p>
+                            )}
+
+                            <p className="text-sm text-slate-700">
+                              {item.deskripsi}
+                            </p>
+
+                            <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
+                              {item.metode && (
+                                <span className="flex items-center gap-1">
+                                  <span className="text-slate-400">
+                                    Metode:
+                                  </span>
+                                  <span className="font-medium text-slate-700">
+                                    {METODE_PEMBELAJARAN[item.metode] ||
+                                      item.metode}
+                                  </span>
+                                </span>
+                              )}
+
+                              {item.siswa_tidak_hadir && (
+                                <span className="flex items-center gap-1">
+                                  <span className="text-slate-400">
+                                    Tidak Hadir:
+                                  </span>
+                                  <span className="font-medium text-rose-600">
+                                    {item.siswa_tidak_hadir}
+                                  </span>
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-3 text-[10px] text-slate-400">
+                              <span>
+                                Dibuat:{" "}
+                                {new Date(item.created).toLocaleString(
+                                  "id-ID",
+                                  {
+                                    day: "numeric",
+                                    month: "long",
+                                    year: "numeric",
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  },
+                                )}
+                              </span>
+                              {item.updated &&
+                                item.updated !== item.created && (
+                                  <span>
+                                    Diperbarui:{" "}
+                                    {new Date(item.updated).toLocaleString(
+                                      "id-ID",
+                                      {
+                                        day: "numeric",
+                                        month: "long",
+                                        year: "numeric",
+                                        hour: "2-digit",
+                                        minute: "2-digit",
+                                      },
+                                    )}
+                                  </span>
+                                )}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => {
+                                setEditingItem(item);
+                                setModalDefaultDate(null);
+                                setIsModalOpen(true);
+                              }}
+                              className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-blue-600"
+                              title="Edit"
                             >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                              />
-                            </svg>
-                          </button>
-                          <button
-                            onClick={() => handleDelete(item.id)}
-                            className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                            title="Hapus"
-                          >
-                            <svg
-                              className="h-4 w-4"
-                              fill="none"
-                              viewBox="0 0 24 24"
-                              stroke="currentColor"
-                              strokeWidth={2}
+                              <svg
+                                className="h-4 w-4"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                                strokeWidth={2}
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                                />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={() => handleDelete(item.id)}
+                              className="rounded p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                              title="Hapus"
                             >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                              />
-                            </svg>
-                          </button>
+                              <svg
+                                className="h-4 w-4"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                                strokeWidth={2}
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                />
+                              </svg>
+                            </button>
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -950,7 +1257,6 @@ export default function AgendaMengajarPage() {
         )}
       </div>
 
-      {/* Modal */}
       <AgendaModal
         isOpen={isModalOpen}
         onClose={() => {

@@ -7,14 +7,21 @@ import { pb, isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
 // Sesuaikan kalau nama role guru mapel di sistemmu berbeda.
 const ALLOWED_ROLES = ["guru mapel"];
 
-function getInitials(name) {
-  if (!name) return "-";
-  const parts = name.trim().split(/\s+/);
-  return parts
-    .slice(0, 2)
-    .map((p) => p[0])
-    .join("")
-    .toUpperCase();
+function getKelasInitials(kelas) {
+  if (!kelas) return "-";
+
+  const nama = kelas.nama_kelas || "";
+  const tingkat = kelas.tingkat || "";
+
+  // Coba ambil format "1A", "1B", "1C" dari nama_kelas
+  const match = nama.match(/(\d+[A-Za-z]+)$/);
+  if (match) {
+    return match[1].toUpperCase();
+  }
+
+  // Fallback: gabungkan tingkat dan huruf pertama dari nama_kelas
+  const firstChar = nama.replace(/\d+/g, "").trim().charAt(0) || "A";
+  return `${tingkat}${firstChar}`;
 }
 
 const PALETTES = [
@@ -25,6 +32,7 @@ const PALETTES = [
   { chip: "bg-rose-50 text-rose-700 ring-1 ring-inset ring-rose-100" },
   { chip: "bg-violet-50 text-violet-700 ring-1 ring-inset ring-violet-100" },
 ];
+
 function paletteForKey(key) {
   const str = key || "";
   let hash = 0;
@@ -290,7 +298,7 @@ export default function DataKelasListPage() {
               >
                 <div className="flex items-center gap-3">
                   <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-600 font-bold text-white uppercase text-sm shadow-sm">
-                    {getInitials(kelas.nama_kelas) || `${kelas.tingkat || 1}A`}
+                    {getKelasInitials(kelas)}
                   </div>
                   <div className="min-w-0">
                     <h3 className="text-sm font-bold text-slate-800 truncate">

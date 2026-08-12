@@ -1,910 +1,1499 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { pb, isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
 
-// =========================================================
-// Helper tanggal
-// =========================================================
-function pad(n) {
-  return String(n).padStart(2, "0");
+// Role yang boleh mengakses halaman ini
+const ALLOWED_ROLES = ["guru mapel"];
+
+function firstOf(val) {
+  return Array.isArray(val) ? val[0] : val;
 }
 
-function toISODate(d) {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+function nilaiColor(n) {
+  if (n === null || n === undefined || Number.isNaN(n)) return "text-slate-400";
+  if (n >= 80) return "text-emerald-600";
+  if (n >= 60) return "text-amber-600";
+  return "text-red-600";
 }
 
-function isSameDate(a, b) {
-  return a && b && toISODate(a) === toISODate(b);
+function getKelasBadge(kelas) {
+  if (!kelas) return "-";
+  const nama = kelas.nama_kelas || "";
+  const match = nama.match(/(\d+[A-Za-z]+)$/);
+  if (match) {
+    return match[1].toUpperCase();
+  }
+  const tingkat = kelas.tingkat || "";
+  const firstChar = nama.replace(/\d+/g, "").trim().charAt(0) || "A";
+  return `${tingkat}${firstChar}`;
 }
 
-function startOfDay(d) {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
+function getInitials(name) {
+  if (!name) return "?";
+  const parts = name.trim().split(/\s+/);
+  return parts
+    .slice(0, 2)
+    .map((p) => p[0])
+    .join("")
+    .toUpperCase();
 }
 
-function formatLong(d) {
-  const date = new Date(d);
-  const hari = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
-  const bulan = [
-    "Januari",
-    "Februari",
-    "Maret",
-    "April",
-    "Mei",
-    "Juni",
-    "Juli",
-    "Agustus",
-    "September",
-    "Oktober",
-    "November",
-    "Desember",
-  ];
-  return `${hari[date.getDay()]}, ${date.getDate()} ${bulan[date.getMonth()]} ${date.getFullYear()}`;
-}
-
-const HARI_PENDEK = ["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Min"];
-const BULAN = [
-  "Januari",
-  "Februari",
-  "Maret",
-  "April",
-  "Mei",
-  "Juni",
-  "Juli",
-  "Agustus",
-  "September",
-  "Oktober",
-  "November",
-  "Desember",
-];
-
-// =========================================================
-// Toast Notifikasi
-// =========================================================
-function Toast({ toast, onClose }) {
-  useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(onClose, 4000);
-    return () => clearTimeout(t);
-  }, [toast, onClose]);
-
-  if (!toast) return null;
-  const isSuccess = toast.type === "success";
-
-  return (
-    <div className="pointer-events-none fixed inset-x-0 top-4 z-50 flex justify-center px-4">
-      <div
-        role="alert"
-        className={`pointer-events-auto flex w-full max-w-sm items-start gap-3 rounded-xl border px-4 py-3 shadow-lg animate-[toast-in_0.2s_ease-out] ${
-          isSuccess
-            ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-            : "border-rose-200 bg-rose-50 text-rose-800"
-        }`}
-      >
-        <span
-          className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-xs font-bold text-white ${
-            isSuccess ? "bg-emerald-500" : "bg-rose-500"
-          }`}
-        >
-          {isSuccess ? "✓" : "!"}
-        </span>
-        <p className="flex-1 text-sm font-medium">{toast.text}</p>
-        <button
-          onClick={onClose}
-          className="text-lg leading-none text-current opacity-50 hover:opacity-100"
-          aria-label="Tutup notifikasi"
-        >
-          ×
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// =========================================================
-// Modal Form Agenda (mapel & kelas sudah ditentukan dari konteks,
-// jadi form cuma perlu deskripsi)
-// =========================================================
-function AgendaModal({
-  isOpen,
-  onClose,
-  onSubmit,
-  initialData,
-  defaultDate,
-  mapelNama,
-  kelasNama,
-}) {
-  const [deskripsi, setDeskripsi] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    if (initialData) {
-      setDeskripsi(initialData.deskripsi || "");
-    } else {
-      setDeskripsi("");
-    }
-  }, [initialData, isOpen]);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!deskripsi.trim()) return;
-
-    setLoading(true);
-    try {
-      const data = {
-        deskripsi: deskripsi.trim(),
-        date: initialData ? initialData.date : defaultDate,
-      };
-      if (initialData) data.id = initialData.id;
-
-      await onSubmit(data);
-      onClose();
-    } catch (err) {
-      console.error("Error submitting agenda:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
-      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-bold text-slate-800">
-            {initialData ? "Edit Agenda" : "Tambah Agenda Baru"}
-          </h2>
-          <button
-            onClick={onClose}
-            className="text-slate-400 hover:text-slate-600"
-          >
-            ×
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
-            <span className="font-medium text-slate-700">{mapelNama}</span> ·{" "}
-            {kelasNama}
-          </div>
-
-          <div>
-            <label
-              htmlFor="deskripsi"
-              className="mb-1.5 block text-xs font-medium text-slate-700"
-            >
-              Deskripsi Kegiatan <span className="text-red-500">*</span>
-            </label>
-            <textarea
-              id="deskripsi"
-              value={deskripsi}
-              onChange={(e) => setDeskripsi(e.target.value)}
-              placeholder="Masukkan deskripsi kegiatan..."
-              rows={4}
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-              required
-            />
-          </div>
-
-          <p className="text-[10px] text-slate-400">
-            Tanggal:{" "}
-            {initialData
-              ? formatLong(initialData.date)
-              : formatLong(defaultDate)}
-          </p>
-
-          <div className="flex gap-3 pt-2">
-            <button
-              type="submit"
-              disabled={loading}
-              className="flex-1 rounded-lg bg-indigo-600 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-50"
-            >
-              {loading ? "Menyimpan..." : initialData ? "Update" : "Simpan"}
-            </button>
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 rounded-lg border border-slate-200 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50"
-            >
-              Batal
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-// =========================================================
-// Step 1: Pilih Mapel
-// =========================================================
-function PilihMapelStep({ mapelOptions, onPilih }) {
-  return (
-    <div className="mx-auto max-w-3xl px-4 py-8">
-      <h1 className="text-xl font-bold text-slate-900">Agenda Mengajar</h1>
-      <p className="mt-1 text-sm text-slate-500">
-        Pilih mata pelajaran yang ingin Anda kelola agendanya.
-      </p>
-
-      {mapelOptions.length === 0 ? (
-        <div className="mt-6 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
-          <p className="text-sm text-slate-400">
-            Anda belum diploting mengajar mata pelajaran apa pun. Hubungi
-            admin/ICT.
-          </p>
-        </div>
-      ) : (
-        <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {mapelOptions.map((m) => (
-            <button
-              key={m.id}
-              onClick={() => onPilih(m)}
-              className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-indigo-300 hover:bg-indigo-50/40"
-            >
-              <div>
-                <p className="font-semibold text-slate-800">{m.nama_mapel}</p>
-                <p className="text-xs text-slate-400">{m.kode_mapel}</p>
-              </div>
-              <span className="text-slate-300">→</span>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// =========================================================
-// Step 2: Pilih Kelas
-// =========================================================
-function PilihKelasStep({ mapel, kelasOptions, onPilih, onBack }) {
-  return (
-    <div className="mx-auto max-w-3xl px-4 py-8">
-      <button
-        onClick={onBack}
-        className="mb-4 flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-slate-700"
-      >
-        ← Ganti mata pelajaran
-      </button>
-      <h1 className="text-xl font-bold text-slate-900">{mapel.nama_mapel}</h1>
-      <p className="mt-1 text-sm text-slate-500">
-        Pilih kelas untuk mengelola agenda mengajar.
-      </p>
-
-      {kelasOptions.length === 0 ? (
-        <div className="mt-6 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
-          <p className="text-sm text-slate-400">
-            Belum ada kelas yang diploting untuk mapel ini.
-          </p>
-        </div>
-      ) : (
-        <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
-          {kelasOptions.map((k) => (
-            <button
-              key={k.id}
-              onClick={() => onPilih(k)}
-              className="rounded-xl border border-slate-200 bg-white p-4 text-center shadow-sm transition hover:border-indigo-300 hover:bg-indigo-50/40"
-            >
-              <p className="font-semibold text-slate-800">{k.nama_kelas}</p>
-              <p className="text-xs text-slate-400">Tingkat {k.tingkat}</p>
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// =========================================================
-// Main Page
-// =========================================================
-export default function AgendaMengajarGuruMapelPage() {
+export default function PenilaianGuruMapelPage() {
   const router = useRouter();
-  const today = useMemo(() => startOfDay(new Date()), []);
 
-  // Auth
-  const [checkingAuth, setCheckingAuth] = useState(true);
   const [user, setUser] = useState(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [unauthorized, setUnauthorized] = useState(false);
+  const [error, setError] = useState("");
 
-  // Ploting guru (sumber mapel + kelas yang diampu)
+  // Step 1: pilih mapel
   const [plotingList, setPlotingList] = useState([]);
   const [loadingPloting, setLoadingPloting] = useState(true);
+  const [selectedPlotingId, setSelectedPlotingId] = useState(null);
 
-  // Step: "mapel" | "kelas" | "kalender"
-  const [step, setStep] = useState("mapel");
-  const [selectedMapel, setSelectedMapel] = useState(null);
-  const [selectedKelas, setSelectedKelas] = useState(null);
-
-  // Kalender
-  const [viewDate, setViewDate] = useState(
-    () => new Date(today.getFullYear(), today.getMonth(), 1),
+  const selectedPloting = useMemo(
+    () => plotingList.find((p) => p.id === selectedPlotingId) || null,
+    [plotingList, selectedPlotingId],
   );
-  const [monthAgenda, setMonthAgenda] = useState({});
-  const [loadingCalendar, setLoadingCalendar] = useState(false);
-  const [message, setMessage] = useState(null);
 
-  // Detail
-  const [selectedDate, setSelectedDate] = useState(null);
-  const [detailItems, setDetailItems] = useState([]);
+  const selectedMapelId = useMemo(
+    () => firstOf(selectedPloting?.mapel_id) || null,
+    [selectedPloting],
+  );
 
-  // Modal
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingItem, setEditingItem] = useState(null);
-  const [modalDefaultDate, setModalDefaultDate] = useState(null);
+  // Kelas-kelas dalam ploting terpilih
+  const [kelasOptions, setKelasOptions] = useState([]);
+  const [loadingKelasOptions, setLoadingKelasOptions] = useState(false);
+  const [selectedKelasId, setSelectedKelasId] = useState(null);
 
-  // =========================================================
-  // Auth
-  // =========================================================
+  const selectedKelas = useMemo(
+    () =>
+      kelasOptions.find((k) => k.kelas.id === selectedKelasId)?.kelas || null,
+    [kelasOptions, selectedKelasId],
+  );
+
+  // Step 3: data inti
+  const [siswaList, setSiswaList] = useState([]);
+  const [lingkupList, setLingkupList] = useState([]);
+  const [tpByLingkup, setTpByLingkup] = useState({});
+  const [nilaiMap, setNilaiMap] = useState({});
+  const [loadingDetail, setLoadingDetail] = useState(false);
+
+  const [innerTab, setInnerTab] = useState("materi");
+
+  // Ujian
+  const [ujianAktif, setUjianAktif] = useState([]);
+  const [loadingUjianAktif, setLoadingUjianAktif] = useState(false);
+  const [selectedUjianId, setSelectedUjianId] = useState(null);
+  const [nilaiUjian, setNilaiUjian] = useState({});
+  const [loadingNilaiUjian, setLoadingNilaiUjian] = useState(false);
+  const [savingUjianCell, setSavingUjianCell] = useState(null);
+  const [savedUjianFlash, setSavedUjianFlash] = useState(null);
+
+  // Form Lingkup Materi
+  const [showLingkupForm, setShowLingkupForm] = useState(false);
+  const [lingkupForm, setLingkupForm] = useState({
+    nama_lingkup: "",
+    capaian_kompetensi: "",
+  });
+  const [editingLingkupId, setEditingLingkupId] = useState(null);
+  const [savingLingkup, setSavingLingkup] = useState(false);
+
+  // Form Tujuan Pembelajaran
+  const [addingTpFor, setAddingTpFor] = useState(null);
+  const [tpDraft, setTpDraft] = useState("");
+  const [editingTp, setEditingTp] = useState(null);
+  const [savingTp, setSavingTp] = useState(false);
+
+  // Nilai
+  const [savingCell, setSavingCell] = useState(null);
+  const [savedFlash, setSavedFlash] = useState(null);
+
+  // 1. Cek auth & role
   useEffect(() => {
-    if (!isAuthenticated()) {
-      router.replace("/login");
+    const currentUser = getCurrentUser();
+
+    if (!isAuthenticated() || !currentUser) {
+      router.push("/login");
       return;
     }
-    setUser(getCurrentUser());
-    setCheckingAuth(false);
+
+    if (!ALLOWED_ROLES.includes(currentUser.role)) {
+      setUnauthorized(true);
+      setAuthChecked(true);
+      setLoadingPloting(false);
+      return;
+    }
+
+    setUser(currentUser);
+    setAuthChecked(true);
   }, [router]);
 
-  // =========================================================
-  // Ambil ploting_guru milik user (mapel + kelas yang diampu)
-  // =========================================================
+  // 2. Ambil semua ploting_guru
   useEffect(() => {
-    if (!user) return;
-    let cancelled = false;
+    if (!authChecked || unauthorized || !user?.id) return;
+    let isMounted = true;
 
     async function fetchPloting() {
       setLoadingPloting(true);
+      setError("");
       try {
         const records = await pb.collection("ploting_guru").getFullList({
-          filter: `guru_id="${user.id}"`,
+          filter: `guru_id = "${user.id}"`,
           expand: "mapel_id,kelas_id",
           requestKey: null,
         });
-        if (!cancelled) setPlotingList(records);
-      } catch (e) {
-        if (!cancelled) {
-          setMessage({
-            type: "error",
-            text: "Gagal memuat data ploting mengajar.",
-          });
-        }
+        records.sort((a, b) =>
+          (a.expand?.mapel_id?.nama_mapel || "").localeCompare(
+            b.expand?.mapel_id?.nama_mapel || "",
+          ),
+        );
+        if (!isMounted) return;
+        setPlotingList(records);
+        if (records.length === 1) setSelectedPlotingId(records[0].id);
+      } catch (err) {
+        console.error("Error fetching ploting_guru:", err);
+        if (isMounted) setError("Gagal memuat daftar mata pelajaran Anda.");
       } finally {
-        if (!cancelled) setLoadingPloting(false);
+        if (isMounted) setLoadingPloting(false);
       }
     }
 
     fetchPloting();
     return () => {
-      cancelled = true;
+      isMounted = false;
     };
-  }, [user?.id]);
+  }, [authChecked, unauthorized, user]);
 
-  // Daftar mapel unik yang diampu guru ini
-  const mapelOptions = useMemo(() => {
-    const map = new Map();
-    for (const r of plotingList) {
-      const m = r.expand?.mapel_id;
-      if (m && !map.has(m.id)) map.set(m.id, m);
-    }
-    return Array.from(map.values());
-  }, [plotingList]);
-
-  // Daftar kelas untuk mapel yang sedang dipilih (gabungan dari semua record ploting)
-  const kelasOptions = useMemo(() => {
-    if (!selectedMapel) return [];
-    const map = new Map();
-    for (const r of plotingList) {
-      if (r.mapel_id !== selectedMapel.id) continue;
-      const kelasArr = r.expand?.kelas_id || [];
-      for (const k of kelasArr) {
-        if (!map.has(k.id)) map.set(k.id, k);
-      }
-    }
-    return Array.from(map.values()).sort((a, b) =>
-      a.nama_kelas.localeCompare(b.nama_kelas),
-    );
-  }, [plotingList, selectedMapel]);
-
-  // =========================================================
-  // Load Month Agenda (difilter mapel + kelas → agenda milik guru ini saja,
-  // tapi tetap nulis/baca ke collection agenda_mengajar yang sama dengan
-  // walikelas, jadi otomatis sinkron)
-  // =========================================================
-  const loadMonth = useCallback(async () => {
-    if (!selectedKelas || !selectedMapel) return;
-
-    setLoadingCalendar(true);
-    try {
-      const year = viewDate.getFullYear();
-      const month = viewDate.getMonth();
-      const first = new Date(year, month, 1);
-      const last = new Date(year, month + 1, 0);
-      const startStr = `${toISODate(first)} 00:00:00`;
-      const endStr = `${toISODate(last)} 23:59:59`;
-
-      const records = await pb.collection("agenda_mengajar").getFullList({
-        filter: `kelas_id="${selectedKelas.id}" && mapel_id="${selectedMapel.id}" && date >= "${startStr}" && date <= "${endStr}"`,
-        sort: "date",
-        requestKey: null,
-      });
-
-      const grouped = {};
-      for (const r of records) {
-        const key = toISODate(new Date(r.date));
-        if (!grouped[key]) grouped[key] = [];
-        grouped[key].push(r);
-      }
-      setMonthAgenda(grouped);
-    } catch (e) {
-      setMessage({
-        type: "error",
-        text: "Gagal memuat data agenda bulan ini.",
-      });
-    } finally {
-      setLoadingCalendar(false);
-    }
-  }, [selectedKelas, selectedMapel, viewDate]);
-
+  // 3. Bangun daftar kelas
   useEffect(() => {
-    if (step === "kalender") loadMonth();
-  }, [loadMonth, step]);
-
-  // =========================================================
-  // Day Summary
-  // =========================================================
-  function daySummary(date) {
-    const key = toISODate(date);
-    const items = monthAgenda[key] || [];
-    return items.length > 0 ? { total: items.length } : null;
-  }
-
-  // =========================================================
-  // Open Detail
-  // =========================================================
-  function openDetail(date) {
-    setSelectedDate(date);
-    setMessage(null);
-    const key = toISODate(date);
-    setDetailItems(monthAgenda[key] || []);
-  }
-
-  // =========================================================
-  // CRUD Operations
-  // =========================================================
-  const handleCreate = async (data) => {
-    try {
-      const created = await pb.collection("agenda_mengajar").create(
-        {
-          deskripsi: data.deskripsi,
-          date: data.date,
-          kelas_id: selectedKelas.id,
-          mapel_id: selectedMapel.id,
-        },
-        { requestKey: null },
-      );
-      setMessage({ type: "success", text: "Agenda berhasil ditambahkan!" });
-      await loadMonth();
-      if (selectedDate && isSameDate(selectedDate, new Date(data.date))) {
-        setDetailItems((prev) => [...prev, created]);
-      }
-    } catch (err) {
-      console.error("Error creating agenda:", err);
-      setMessage({ type: "error", text: "Gagal menambahkan agenda." });
-      throw err;
+    if (!selectedPloting) {
+      setKelasOptions([]);
+      setSelectedKelasId(null);
+      return;
     }
-  };
+    let isMounted = true;
 
-  const handleUpdate = async (data) => {
-    if (!editingItem) return;
+    async function fetchKelasOptions() {
+      setLoadingKelasOptions(true);
+      setError("");
+      setSelectedKelasId(null);
+      try {
+        const kelasArr = Array.isArray(selectedPloting.expand?.kelas_id)
+          ? selectedPloting.expand.kelas_id
+          : selectedPloting.expand?.kelas_id
+            ? [selectedPloting.expand.kelas_id]
+            : [];
+
+        const counts = await Promise.all(
+          kelasArr.map((k) =>
+            pb
+              .collection("siswa")
+              .getList(1, 1, {
+                filter: `kelas_id = "${k.id}"`,
+                requestKey: null,
+                fields: "id",
+              })
+              .then((r) => r.totalItems)
+              .catch(() => 0),
+          ),
+        );
+
+        const options = kelasArr
+          .map((k, idx) => ({ kelas: k, siswaCount: counts[idx] }))
+          .sort((a, b) => {
+            const t =
+              (Number(a.kelas.tingkat) || 0) - (Number(b.kelas.tingkat) || 0);
+            if (t !== 0) return t;
+            return (a.kelas.nama_kelas || "").localeCompare(
+              b.kelas.nama_kelas || "",
+            );
+          });
+
+        if (!isMounted) return;
+        setKelasOptions(options);
+        if (options.length === 1) setSelectedKelasId(options[0].kelas.id);
+      } catch (err) {
+        console.error("Error building kelas options:", err);
+        if (isMounted)
+          setError("Gagal memuat daftar kelas untuk mata pelajaran ini.");
+      } finally {
+        if (isMounted) setLoadingKelasOptions(false);
+      }
+    }
+
+    fetchKelasOptions();
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedPloting]);
+
+  // 4. Ambil siswa, lingkup materi & TP, dan nilai
+  useEffect(() => {
+    if (!selectedPloting || !selectedKelas || !selectedMapelId) {
+      setSiswaList([]);
+      setLingkupList([]);
+      setTpByLingkup({});
+      setNilaiMap({});
+      return;
+    }
+    let isMounted = true;
+
+    async function fetchDetail() {
+      setLoadingDetail(true);
+      setError("");
+      try {
+        const [siswaRecords, lingkupRecords] = await Promise.all([
+          pb.collection("siswa").getFullList({
+            filter: `kelas_id = "${selectedKelas.id}"`,
+            sort: "nama_siswa",
+            requestKey: null,
+          }),
+          pb.collection("lingkup_materi").getFullList({
+            filter: `mapel_id ~ "${selectedMapelId}" && kelas_id ~ "${selectedKelas.id}"`,
+            requestKey: null,
+          }),
+        ]);
+
+        let tpGrouped = {};
+        if (lingkupRecords.length > 0) {
+          const tpFilter = lingkupRecords
+            .map((l) => `lingkup_materi_id = "${l.id}"`)
+            .join(" || ");
+          const tpRecords = await pb
+            .collection("tujuan_pembelajaran")
+            .getFullList({
+              filter: tpFilter,
+              sort: "urutan",
+              requestKey: null,
+            });
+          for (const tp of tpRecords) {
+            const lid = firstOf(tp.lingkup_materi_id);
+            if (!tpGrouped[lid]) tpGrouped[lid] = [];
+            tpGrouped[lid].push(tp);
+          }
+        }
+
+        let nilaiGrouped = {};
+        for (const s of siswaRecords) nilaiGrouped[s.id] = {};
+
+        if (siswaRecords.length > 0 && lingkupRecords.length > 0) {
+          const nilaiRecords = await pb.collection("nilai_harian").getFullList({
+            filter: `kelas_id ~ "${selectedKelas.id}" && mapel_id ~ "${selectedMapelId}"`,
+            requestKey: null,
+          });
+          for (const n of nilaiRecords) {
+            const sid = firstOf(n.siswa_id);
+            const lid = firstOf(n.lingkup_materi_id);
+            if (!nilaiGrouped[sid]) nilaiGrouped[sid] = {};
+            nilaiGrouped[sid][lid] = { id: n.id, nilai: n.nilai };
+          }
+        }
+
+        if (!isMounted) return;
+        setSiswaList(siswaRecords);
+        setLingkupList(lingkupRecords);
+        setTpByLingkup(tpGrouped);
+        setNilaiMap(nilaiGrouped);
+      } catch (err) {
+        console.error("Error fetching detail:", err);
+        if (isMounted) setError("Gagal memuat data materi/nilai kelas ini.");
+      } finally {
+        if (isMounted) setLoadingDetail(false);
+      }
+    }
+
+    fetchDetail();
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedPloting, selectedKelas, selectedMapelId]);
+
+  // 5. Ambil ujian aktif
+  useEffect(() => {
+    if (!selectedKelas) {
+      setUjianAktif([]);
+      setSelectedUjianId(null);
+      return;
+    }
+    let isMounted = true;
+
+    async function fetchUjianAktif() {
+      setLoadingUjianAktif(true);
+      setSelectedUjianId(null);
+      try {
+        const ujianData = await pb.collection("pengaturan_ujian").getFullList({
+          filter: `status_akses = "buka" && (target_kelas_id ~ "${selectedKelas.id}" || target_tingkat ~ "${String(selectedKelas.tingkat)}")`,
+          requestKey: null,
+        });
+        if (!isMounted) return;
+        setUjianAktif(ujianData);
+      } catch (err) {
+        if (!err?.isAbort) {
+          console.error("Error fetching ujian aktif:", err);
+          if (isMounted) setError("Gagal memuat daftar ujian aktif.");
+        }
+      } finally {
+        if (isMounted) setLoadingUjianAktif(false);
+      }
+    }
+
+    fetchUjianAktif();
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedKelas]);
+
+  // 6. Ambil nilai ujian
+  useEffect(() => {
+    if (!selectedUjianId || !selectedPloting || siswaList.length === 0) {
+      setNilaiUjian({});
+      return;
+    }
+    let isMounted = true;
+
+    async function fetchNilaiUjian() {
+      setLoadingNilaiUjian(true);
+      try {
+        const filterSiswa = siswaList
+          .map((s) => `siswa_id = "${s.id}"`)
+          .join(" || ");
+        const data = await pb.collection("nilai_ujian").getFullList({
+          filter: `pengaturan_ujian_id = "${selectedUjianId}" && ploting_guru_id = "${selectedPloting.id}" && (${filterSiswa})`,
+          requestKey: null,
+        });
+        if (!isMounted) return;
+        const map = {};
+        data.forEach((n) => {
+          const sid = firstOf(n.siswa_id);
+          map[sid] = { recordId: n.id, nilai: n.nilai };
+        });
+        setNilaiUjian(map);
+      } catch (err) {
+        if (!err?.isAbort) {
+          console.error("Error fetching nilai ujian:", err);
+          if (isMounted) setError("Gagal memuat nilai ujian.");
+        }
+      } finally {
+        if (isMounted) setLoadingNilaiUjian(false);
+      }
+    }
+
+    fetchNilaiUjian();
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedUjianId, selectedPloting, siswaList]);
+
+  // Handlers: Lingkup Materi
+  function openAddLingkup() {
+    setEditingLingkupId(null);
+    setLingkupForm({ nama_lingkup: "", capaian_kompetensi: "" });
+    setShowLingkupForm(true);
+  }
+
+  function openEditLingkup(l) {
+    setEditingLingkupId(l.id);
+    setLingkupForm({
+      nama_lingkup: l.nama_lingkup || "",
+      capaian_kompetensi: l.capaian_kompetensi || "",
+    });
+    setShowLingkupForm(true);
+  }
+
+  async function submitLingkup() {
+    if (!lingkupForm.nama_lingkup.trim() || !selectedPloting || !selectedKelas)
+      return;
+    setSavingLingkup(true);
+    setError("");
+    try {
+      if (editingLingkupId) {
+        const updated = await pb
+          .collection("lingkup_materi")
+          .update(editingLingkupId, {
+            kelas_id: [selectedKelas.id],
+            nama_lingkup: lingkupForm.nama_lingkup.trim(),
+            capaian_kompetensi: lingkupForm.capaian_kompetensi.trim(),
+          });
+        setLingkupList((prev) =>
+          prev.map((l) => (l.id === updated.id ? updated : l)),
+        );
+      } else {
+        const created = await pb.collection("lingkup_materi").create({
+          ploting_guru_id: selectedPloting.id,
+          guru_id: selectedPloting.guru_id || user.id,
+          mapel_id: selectedMapelId,
+          kelas_id: [selectedKelas.id],
+          nama_lingkup: lingkupForm.nama_lingkup.trim(),
+          capaian_kompetensi: lingkupForm.capaian_kompetensi.trim(),
+        });
+        setLingkupList((prev) => [...prev, created]);
+        setTpByLingkup((prev) => ({ ...prev, [created.id]: [] }));
+      }
+      setShowLingkupForm(false);
+      setEditingLingkupId(null);
+      setLingkupForm({ nama_lingkup: "", capaian_kompetensi: "" });
+    } catch (err) {
+      console.error("Error saving lingkup materi:", err);
+      setError("Gagal menyimpan lingkup materi.");
+    } finally {
+      setSavingLingkup(false);
+    }
+  }
+
+  async function deleteLingkup(id) {
+    if (!confirm("Hapus lingkup materi ini?")) return;
+    try {
+      await pb.collection("lingkup_materi").delete(id);
+      setLingkupList((prev) => prev.filter((l) => l.id !== id));
+      setTpByLingkup((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      setNilaiMap((prev) => {
+        const next = {};
+        for (const sid of Object.keys(prev)) {
+          const row = { ...prev[sid] };
+          delete row[id];
+          next[sid] = row;
+        }
+        return next;
+      });
+    } catch (err) {
+      console.error("Error deleting lingkup materi:", err);
+      setError("Gagal menghapus lingkup materi.");
+    }
+  }
+
+  // Handlers: Tujuan Pembelajaran
+  async function submitTp(lingkupId) {
+    if (!tpDraft.trim()) return;
+    setSavingTp(true);
+    setError("");
+    try {
+      const urutan = (tpByLingkup[lingkupId]?.length || 0) + 1;
+      const created = await pb.collection("tujuan_pembelajaran").create({
+        lingkup_materi_id: lingkupId,
+        deskripsi: tpDraft.trim(),
+        urutan,
+      });
+      setTpByLingkup((prev) => ({
+        ...prev,
+        [lingkupId]: [...(prev[lingkupId] || []), created],
+      }));
+      setTpDraft("");
+      setAddingTpFor(null);
+    } catch (err) {
+      console.error("Error saving tujuan pembelajaran:", err);
+      setError("Gagal menyimpan tujuan pembelajaran.");
+    } finally {
+      setSavingTp(false);
+    }
+  }
+
+  async function updateTp() {
+    if (!editingTp?.deskripsi?.trim()) return;
+    setSavingTp(true);
+    setError("");
     try {
       const updated = await pb
-        .collection("agenda_mengajar")
-        .update(
-          editingItem.id,
-          { deskripsi: data.deskripsi },
-          { requestKey: null },
-        );
-      setMessage({ type: "success", text: "Agenda berhasil diperbarui!" });
-      await loadMonth();
-      setDetailItems((prev) =>
-        prev.map((it) => (it.id === updated.id ? updated : it)),
+        .collection("tujuan_pembelajaran")
+        .update(editingTp.id, {
+          deskripsi: editingTp.deskripsi.trim(),
+        });
+      setTpByLingkup((prev) => ({
+        ...prev,
+        [editingTp.lingkupId]: (prev[editingTp.lingkupId] || []).map((t) =>
+          t.id === updated.id ? updated : t,
+        ),
+      }));
+      setEditingTp(null);
+    } catch (err) {
+      console.error("Error updating tujuan pembelajaran:", err);
+      setError("Gagal memperbarui tujuan pembelajaran.");
+    } finally {
+      setSavingTp(false);
+    }
+  }
+
+  async function deleteTp(lingkupId, tpId) {
+    if (!confirm("Hapus tujuan pembelajaran ini?")) return;
+    try {
+      await pb.collection("tujuan_pembelajaran").delete(tpId);
+      setTpByLingkup((prev) => ({
+        ...prev,
+        [lingkupId]: (prev[lingkupId] || []).filter((t) => t.id !== tpId),
+      }));
+    } catch (err) {
+      console.error("Error deleting tujuan pembelajaran:", err);
+      setError("Gagal menghapus tujuan pembelajaran.");
+    }
+  }
+
+  // Handlers: Nilai Harian
+  function handleNilaiChange(siswaId, lingkupId, rawValue) {
+    setNilaiMap((prev) => ({
+      ...prev,
+      [siswaId]: {
+        ...prev[siswaId],
+        [lingkupId]: {
+          ...(prev[siswaId]?.[lingkupId] || {}),
+          nilai: rawValue,
+        },
+      },
+    }));
+  }
+
+  async function handleNilaiBlur(siswaId, lingkupId) {
+    const cell = nilaiMap[siswaId]?.[lingkupId];
+    const rawValue = cell?.nilai;
+    if (rawValue === "" || rawValue === undefined || rawValue === null) return;
+
+    const nilaiNum = Number(rawValue);
+    if (Number.isNaN(nilaiNum)) return;
+
+    const clamped = Math.min(100, Math.max(0, nilaiNum));
+    const key = `${siswaId}_${lingkupId}`;
+    setSavingCell(key);
+    setError("");
+    try {
+      if (cell?.id) {
+        await pb.collection("nilai_harian").update(cell.id, { nilai: clamped });
+      } else {
+        const created = await pb.collection("nilai_harian").create({
+          siswa_id: siswaId,
+          lingkup_materi_id: lingkupId,
+          nilai: clamped,
+          guru_id: selectedPloting?.guru_id || user.id,
+          kelas_id: selectedKelas.id,
+          mapel_id: selectedMapelId,
+        });
+        setNilaiMap((prev) => ({
+          ...prev,
+          [siswaId]: {
+            ...prev[siswaId],
+            [lingkupId]: { id: created.id, nilai: clamped },
+          },
+        }));
+      }
+      if (clamped !== nilaiNum) {
+        setNilaiMap((prev) => ({
+          ...prev,
+          [siswaId]: {
+            ...prev[siswaId],
+            [lingkupId]: { ...prev[siswaId]?.[lingkupId], nilai: clamped },
+          },
+        }));
+      }
+      setSavedFlash(key);
+      setTimeout(() => setSavedFlash((k) => (k === key ? null : k)), 1200);
+    } catch (err) {
+      console.error("Error saving nilai:", err);
+      setError("Gagal menyimpan nilai. Periksa koneksi lalu coba lagi.");
+    } finally {
+      setSavingCell((k) => (k === key ? null : k));
+    }
+  }
+
+  // Handlers: Nilai Ujian
+  function handleNilaiUjianChange(siswaId, rawValue) {
+    setNilaiUjian((prev) => ({
+      ...prev,
+      [siswaId]: { ...(prev[siswaId] || {}), nilai: rawValue },
+    }));
+  }
+
+  async function handleNilaiUjianBlur(siswaId) {
+    if (!selectedUjianId || !selectedPloting) return;
+    const existing = nilaiUjian[siswaId];
+    const rawValue = existing?.nilai;
+    if (rawValue === "" || rawValue === undefined || rawValue === null) return;
+
+    const nilaiNum = Number(rawValue);
+    if (Number.isNaN(nilaiNum)) return;
+
+    const clamped = Math.min(100, Math.max(0, nilaiNum));
+    setSavingUjianCell(siswaId);
+    setError("");
+    try {
+      let saved;
+      if (existing?.recordId) {
+        saved = await pb.collection("nilai_ujian").update(existing.recordId, {
+          nilai: clamped,
+        });
+      } else {
+        saved = await pb.collection("nilai_ujian").create({
+          siswa_id: siswaId,
+          ploting_guru_id: selectedPloting.id,
+          pengaturan_ujian_id: selectedUjianId,
+          nilai: clamped,
+        });
+      }
+      setNilaiUjian((prev) => ({
+        ...prev,
+        [siswaId]: { recordId: saved.id, nilai: clamped },
+      }));
+      setSavedUjianFlash(siswaId);
+      setTimeout(
+        () => setSavedUjianFlash((k) => (k === siswaId ? null : k)),
+        1200,
       );
     } catch (err) {
-      console.error("Error updating agenda:", err);
-      setMessage({ type: "error", text: "Gagal memperbarui agenda." });
-      throw err;
+      console.error("Error saving nilai ujian:", err);
+      setError("Gagal menyimpan nilai ujian. Periksa koneksi lalu coba lagi.");
+    } finally {
+      setSavingUjianCell((k) => (k === siswaId ? null : k));
     }
-  };
+  }
 
-  const handleDelete = async (id) => {
-    if (!confirm("Yakin ingin menghapus agenda ini?")) return;
-
-    try {
-      await pb.collection("agenda_mengajar").delete(id, { requestKey: null });
-      setMessage({ type: "success", text: "Agenda berhasil dihapus!" });
-      await loadMonth();
-      setDetailItems((prev) => prev.filter((it) => it.id !== id));
-    } catch (err) {
-      console.error("Error deleting agenda:", err);
-      setMessage({ type: "error", text: "Gagal menghapus agenda." });
+  // Nilai akhir realtime
+  const nilaiAkhirBySiswa = useMemo(() => {
+    const result = {};
+    for (const s of siswaList) {
+      const row = nilaiMap[s.id] || {};
+      const nums = lingkupList
+        .map((l) => row[l.id]?.nilai)
+        .filter(
+          (v) =>
+            v !== "" &&
+            v !== undefined &&
+            v !== null &&
+            !Number.isNaN(Number(v)),
+        )
+        .map(Number);
+      result[s.id] = nums.length
+        ? nums.reduce((a, b) => a + b, 0) / nums.length
+        : null;
     }
-  };
+    return result;
+  }, [siswaList, lingkupList, nilaiMap]);
 
-  // =========================================================
-  // Navigation
-  // =========================================================
-  function goToMonth(offset) {
-    setViewDate(
-      (prev) => new Date(prev.getFullYear(), prev.getMonth() + offset, 1),
+  const rataRataKelas = useMemo(() => {
+    const vals = Object.values(nilaiAkhirBySiswa).filter((v) => v !== null);
+    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+  }, [nilaiAkhirBySiswa]);
+
+  function handleTabChange(tab) {
+    setInnerTab(tab);
+  }
+
+  function backToMapel() {
+    setSelectedPlotingId(null);
+  }
+
+  function backToKelas() {
+    setSelectedKelasId(null);
+  }
+
+  // Render
+  if (!authChecked) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center text-slate-500">
+        Memeriksa sesi login...
+      </div>
     );
   }
 
-  function goToToday() {
-    setViewDate(new Date(today.getFullYear(), today.getMonth(), 1));
-    openDetail(today);
-  }
-
-  function openAddModal(date) {
-    setEditingItem(null);
-    setModalDefaultDate(date ? toISODate(date) : toISODate(new Date()));
-    setIsModalOpen(true);
-  }
-
-  function pilihMapel(m) {
-    setSelectedMapel(m);
-    setSelectedKelas(null);
-    setStep("kelas");
-  }
-
-  function pilihKelas(k) {
-    setSelectedKelas(k);
-    setSelectedDate(null);
-    setDetailItems([]);
-    setMonthAgenda({});
-    setViewDate(new Date(today.getFullYear(), today.getMonth(), 1));
-    setStep("kalender");
-  }
-
-  function backKeMapel() {
-    setStep("mapel");
-    setSelectedMapel(null);
-    setSelectedKelas(null);
-  }
-
-  function backKeKelas() {
-    setStep("kelas");
-    setSelectedKelas(null);
-    setSelectedDate(null);
-    setDetailItems([]);
-  }
-
-  // =========================================================
-  // Build Calendar Grid
-  // =========================================================
-  const cells = useMemo(() => {
-    const year = viewDate.getFullYear();
-    const month = viewDate.getMonth();
-    const firstOfMonth = new Date(year, month, 1);
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    const leading = (firstOfMonth.getDay() + 6) % 7;
-
-    const arr = [];
-    for (let i = 0; i < leading; i++) arr.push(null);
-    for (let d = 1; d <= daysInMonth; d++) arr.push(new Date(year, month, d));
-    while (arr.length % 7 !== 0) arr.push(null);
-    return arr;
-  }, [viewDate]);
-
-  // =========================================================
-  // Render
-  // =========================================================
-  if (checkingAuth || loadingPloting) {
+  if (unauthorized) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50">
-        <p className="text-slate-500">Memuat...</p>
+      <div className="mx-auto mt-16 max-w-md rounded-xl border border-red-200 bg-red-50 p-6 text-center">
+        <h1 className="text-lg font-semibold text-red-700">Akses Ditolak</h1>
+        <p className="mt-2 text-sm text-red-600">
+          Halaman ini hanya dapat diakses oleh guru mata pelajaran.
+        </p>
       </div>
     );
   }
 
   return (
     <div className="min-h-screen bg-slate-50 pb-16">
-      <style>{`
-        @keyframes toast-in {
-          from { opacity: 0; transform: translateY(-8px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-      `}</style>
-      <Toast toast={message} onClose={() => setMessage(null)} />
+      <div className="mx-auto max-w-6xl px-4 py-8">
+        {/* Breadcrumb */}
+        <div className="mb-6 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+          <button
+            type="button"
+            onClick={backToMapel}
+            className={`${selectedPloting ? "hover:text-slate-600 cursor-pointer" : "text-slate-600 font-medium"}`}
+          >
+            Penilaian
+          </button>
+          {selectedPloting && (
+            <>
+              <span>/</span>
+              <button
+                type="button"
+                onClick={backToKelas}
+                className={`${selectedKelas ? "hover:text-slate-600 cursor-pointer" : "text-slate-600 font-medium"}`}
+              >
+                {selectedPloting.expand?.mapel_id?.nama_mapel ||
+                  "Mata Pelajaran"}
+              </button>
+            </>
+          )}
+          {selectedKelas && (
+            <>
+              <span>/</span>
+              <span className="text-slate-600 font-medium">
+                {selectedKelas.nama_kelas}
+              </span>
+            </>
+          )}
+        </div>
 
-      {step === "mapel" && (
-        <PilihMapelStep mapelOptions={mapelOptions} onPilih={pilihMapel} />
-      )}
-
-      {step === "kelas" && selectedMapel && (
-        <PilihKelasStep
-          mapel={selectedMapel}
-          kelasOptions={kelasOptions}
-          onPilih={pilihKelas}
-          onBack={backKeMapel}
-        />
-      )}
-
-      {step === "kalender" && selectedMapel && selectedKelas && (
-        <div className="mx-auto max-w-5xl px-4 py-6">
-          {/* Breadcrumb */}
-          <div className="mb-4 flex flex-wrap items-center gap-1 text-xs text-slate-500">
-            <button
-              onClick={backKeMapel}
-              className="hover:text-indigo-600 hover:underline"
-            >
-              {selectedMapel.nama_mapel}
-            </button>
-            <span>/</span>
-            <button
-              onClick={backKeKelas}
-              className="hover:text-indigo-600 hover:underline"
-            >
-              {selectedKelas.nama_kelas}
-            </button>
+        {error && (
+          <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+            {error}
           </div>
+        )}
 
-          {/* Kartu kalender */}
-          <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <span className="text-base font-semibold text-slate-900 sm:text-sm md:text-base">
-                  {BULAN[viewDate.getMonth()]} {viewDate.getFullYear()}
-                </span>
-                <button
-                  onClick={goToToday}
-                  className="flex-shrink-0 rounded-lg bg-indigo-50 px-2.5 py-1 text-xs font-medium text-indigo-700 hover:bg-indigo-100"
-                >
-                  Hari ini
-                </button>
-                <span className="ml-2 rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-medium text-indigo-700">
-                  {selectedKelas.nama_kelas}
-                </span>
-                <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600">
-                  {selectedMapel.nama_mapel}
-                </span>
-              </div>
-              <button
-                onClick={() => openAddModal(selectedDate || today)}
-                className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700"
-              >
-                + Tambah
-              </button>
-            </div>
+        {/* STEP 1: PILIH MATA PELAJARAN */}
+        {!selectedPloting && (
+          <>
+            <h1 className="mb-1 text-lg font-bold text-slate-800">
+              Pilih Mata Pelajaran
+            </h1>
+            <p className="mb-6 text-xs text-slate-500">
+              Pilih mata pelajaran yang ingin Anda kelola penilaiannya.
+            </p>
 
-            {/* Navigasi bulan */}
-            <div className="mb-4 flex flex-wrap items-center justify-center gap-2 sm:justify-between">
-              <button
-                onClick={() => goToMonth(-1)}
-                className="order-2 flex-1 rounded-lg border border-slate-200 px-2 py-1.5 text-xs text-slate-600 hover:bg-slate-50 sm:order-none sm:flex-none sm:px-3 sm:text-sm"
-              >
-                <span aria-hidden>←</span>{" "}
-                <span className="hidden sm:inline">Sebelumnya</span>
-              </button>
-              <button
-                onClick={() => goToMonth(1)}
-                className="order-3 flex-1 rounded-lg border border-slate-200 px-2 py-1.5 text-xs text-slate-600 hover:bg-slate-50 sm:order-none sm:flex-none sm:px-3 sm:text-sm"
-              >
-                <span className="hidden sm:inline">Berikutnya</span>{" "}
-                <span aria-hidden>→</span>
-              </button>
-            </div>
-
-            {/* Header hari */}
-            <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-medium text-slate-500 sm:gap-1.5 sm:text-xs">
-              {HARI_PENDEK.map((h) => (
-                <div key={h} className="py-1">
-                  {h}
-                </div>
-              ))}
-            </div>
-
-            {/* Grid tanggal */}
-            <div className="mt-1 grid grid-cols-7 gap-1 sm:gap-1.5">
-              {loadingCalendar &&
-                Array.from({ length: 35 }).map((_, i) => (
+            {loadingPloting ? (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {[1, 2, 3].map((i) => (
                   <div
                     key={i}
-                    className="aspect-square animate-pulse rounded-lg bg-slate-100"
+                    className="h-20 animate-pulse rounded-2xl bg-slate-100"
                   />
                 ))}
-
-              {!loadingCalendar &&
-                cells.map((date, i) => {
-                  if (!date) return <div key={i} className="aspect-square" />;
-
-                  const isFuture = date > today;
-                  const isToday = isSameDate(date, today);
-                  const isSelected =
-                    selectedDate && isSameDate(date, selectedDate);
-                  const summary = daySummary(date);
-
+              </div>
+            ) : plotingList.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500">
+                Anda belum di-plotting mengajar mata pelajaran apapun.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {plotingList.map((p) => {
+                  const mapel = p.expand?.mapel_id;
+                  const kelasArr = Array.isArray(p.expand?.kelas_id)
+                    ? p.expand.kelas_id
+                    : p.expand?.kelas_id
+                      ? [p.expand.kelas_id]
+                      : [];
                   return (
                     <button
-                      key={i}
-                      disabled={isFuture}
-                      onClick={() => openDetail(date)}
-                      className={`relative flex aspect-square min-w-0 flex-col items-center justify-start overflow-hidden rounded-md border p-0.5 text-left transition sm:rounded-lg sm:p-1
-                        ${
-                          isFuture
-                            ? "cursor-not-allowed border-transparent text-slate-300"
-                            : "cursor-pointer border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/40"
-                        }
-                        ${isSelected ? "border-indigo-500 bg-indigo-50 ring-1 ring-indigo-500" : ""}
-                      `}
+                      key={p.id}
+                      type="button"
+                      onClick={() => setSelectedPlotingId(p.id)}
+                      className="text-left rounded-2xl border border-slate-100 bg-white p-4 shadow-sm hover:border-blue-200 hover:shadow-md transition"
                     >
-                      <span
-                        className={`mt-0.5 text-[10px] font-medium sm:text-xs ${
-                          isToday
-                            ? "flex h-4 w-4 items-center justify-center rounded-full bg-indigo-600 text-white sm:h-5 sm:w-5"
-                            : "text-slate-700"
-                        }`}
-                      >
-                        {date.getDate()}
+                      <span className="text-[9px] font-mono bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold uppercase">
+                        {mapel?.kode_mapel || "MPL"}
                       </span>
-
-                      {summary && summary.total > 0 && (
-                        <span className="mt-0.5 text-[8px] font-medium text-indigo-600 sm:text-[9px]">
-                          {summary.total} agenda
-                        </span>
-                      )}
+                      <h3 className="text-sm font-bold text-slate-800 mt-2">
+                        {mapel?.nama_mapel || "—"}
+                      </h3>
+                      <p className="text-[11px] text-slate-400 mt-1">
+                        Diampu di {kelasArr.length} kelas
+                      </p>
                     </button>
                   );
                 })}
-            </div>
-
-            {/* Legenda */}
-            <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3 text-[11px] text-slate-500 sm:gap-3 sm:text-xs">
-              <span className="flex items-center gap-1">
-                <span className="h-2 w-2 rounded-full bg-indigo-500" />
-                Ada agenda
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="h-2 w-2 rounded-full border border-slate-300" />
-                Tidak ada agenda
-              </span>
-            </div>
-          </div>
-
-          {/* Panel detail agenda per tanggal */}
-          {selectedDate && (
-            <div className="mt-6 rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <h2 className="text-base font-semibold text-slate-900">
-                    Agenda Mengajar
-                  </h2>
-                  <p className="text-sm text-slate-500">
-                    {formatLong(selectedDate)}
-                  </p>
-                </div>
-                <button
-                  onClick={() => openAddModal(selectedDate)}
-                  className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700"
-                >
-                  + Tambah Agenda
-                </button>
               </div>
+            )}
+          </>
+        )}
 
-              {detailItems.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
-                  <p className="text-sm text-slate-400">
-                    Belum ada agenda untuk tanggal ini
-                  </p>
+        {/* STEP 2: PILIH KELAS */}
+        {selectedPloting && !selectedKelas && (
+          <>
+            <h1 className="mb-1 text-lg font-bold text-slate-800">
+              Pilih Kelas
+            </h1>
+            <p className="mb-6 text-xs text-slate-500">
+              Pilih kelas untuk mengelola penilaian mata pelajaran{" "}
+              <span className="font-semibold text-slate-700">
+                {selectedPloting.expand?.mapel_id?.nama_mapel}
+              </span>
+              .
+            </p>
+
+            {loadingKelasOptions ? (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {[1, 2, 3].map((i) => (
+                  <div
+                    key={i}
+                    className="h-28 animate-pulse rounded-2xl bg-slate-100"
+                  />
+                ))}
+              </div>
+            ) : kelasOptions.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500">
+                Belum ada kelas yang di-plotting untuk mata pelajaran ini.
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                {kelasOptions.map(({ kelas, siswaCount }) => (
                   <button
-                    onClick={() => openAddModal(selectedDate)}
-                    className="mt-2 text-sm font-semibold text-indigo-600 hover:underline"
+                    key={kelas.id}
+                    type="button"
+                    onClick={() => setSelectedKelasId(kelas.id)}
+                    className="group rounded-2xl border border-slate-200 bg-white p-4 text-center shadow-sm transition hover:border-indigo-300 hover:bg-indigo-50/40 hover:shadow-md hover:-translate-y-0.5"
                   >
-                    Tambah agenda sekarang
-                  </button>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {detailItems.map((item) => (
-                    <div
-                      key={item.id}
-                      className="flex flex-col gap-2 rounded-lg border border-slate-100 p-3 transition hover:border-slate-200 sm:flex-row sm:items-center sm:justify-between"
-                    >
-                      <div className="flex-1">
-                        <p className="text-sm font-medium text-slate-800">
-                          {item.deskripsi}
-                        </p>
-                        <p className="text-xs text-slate-400">
-                          Dibuat:{" "}
-                          {item.created
-                            ? new Date(item.created).toLocaleString("id-ID", {
-                                day: "numeric",
-                                month: "long",
-                                year: "numeric",
-                                hour: "2-digit",
-                                minute: "2-digit",
-                              })
-                            : "-"}
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <button
-                          onClick={() => {
-                            setEditingItem(item);
-                            setModalDefaultDate(null);
-                            setIsModalOpen(true);
-                          }}
-                          className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-blue-600"
-                          title="Edit"
-                        >
-                          <svg
-                            className="h-4 w-4"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                            strokeWidth={2}
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                            />
-                          </svg>
-                        </button>
-                        <button
-                          onClick={() => handleDelete(item.id)}
-                          className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                          title="Hapus"
-                        >
-                          <svg
-                            className="h-4 w-4"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                            strokeWidth={2}
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                            />
-                          </svg>
-                        </button>
-                      </div>
+                    <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-xl bg-indigo-600 text-lg font-bold text-white shadow-sm group-hover:bg-indigo-700">
+                      {getKelasBadge(kelas)}
                     </div>
-                  ))}
-                </div>
-              )}
+                    <p className="mt-2 text-sm font-semibold text-slate-800 group-hover:text-indigo-700">
+                      {kelas.nama_kelas}
+                    </p>
+                    <p className="text-[10px] text-slate-400">
+                      Tingkat {kelas.tingkat || "—"} · {siswaCount} siswa
+                    </p>
+                  </button>
+                ))}
+              </div>
+            )}
+          </>
+        )}
 
-              <div className="mt-4 flex justify-end border-t border-slate-100 pt-4">
-                <button
-                  onClick={() => setSelectedDate(null)}
-                  className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50"
-                >
-                  Tutup
-                </button>
+        {/* STEP 3: KELOLA MATERI & NILAI */}
+        {selectedPloting && selectedKelas && (
+          <>
+            {/* Gradient hero */}
+            <div className="mb-6 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 p-5 text-white shadow-sm">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-[11px] uppercase tracking-wider text-blue-100 font-semibold">
+                    {selectedPloting.expand?.mapel_id?.nama_mapel ||
+                      "Mata Pelajaran"}
+                  </p>
+                  <h1 className="text-lg font-bold mt-0.5">
+                    {selectedKelas.nama_kelas}
+                  </h1>
+                  <p className="text-xs text-blue-100 mt-1">
+                    Lingkup Materi khusus untuk kelas ini
+                  </p>
+                </div>
+                <div className="flex gap-4 text-center">
+                  <div className="rounded-xl bg-white/10 px-4 py-2">
+                    <p className="text-[10px] uppercase text-blue-100">Siswa</p>
+                    <p className="text-lg font-bold">{siswaList.length}</p>
+                  </div>
+                  <div className="rounded-xl bg-white/10 px-4 py-2">
+                    <p className="text-[10px] uppercase text-blue-100">
+                      Lingkup Materi
+                    </p>
+                    <p className="text-lg font-bold">{lingkupList.length}</p>
+                  </div>
+                  <div className="rounded-xl bg-white/10 px-4 py-2">
+                    <p className="text-[10px] uppercase text-blue-100">
+                      Rata-rata Kelas
+                    </p>
+                    <p className="text-lg font-bold">
+                      {rataRataKelas !== null ? rataRataKelas.toFixed(1) : "—"}
+                    </p>
+                  </div>
+                </div>
               </div>
             </div>
-          )}
-        </div>
-      )}
 
-      {/* Modal */}
-      <AgendaModal
-        isOpen={isModalOpen}
-        onClose={() => {
-          setIsModalOpen(false);
-          setEditingItem(null);
-          setModalDefaultDate(null);
-        }}
-        onSubmit={editingItem ? handleUpdate : handleCreate}
-        initialData={editingItem}
-        defaultDate={modalDefaultDate || toISODate(today)}
-        mapelNama={selectedMapel?.nama_mapel}
-        kelasNama={selectedKelas?.nama_kelas}
-      />
+            {/* Selector kelas cepat */}
+            {kelasOptions.length > 1 && (
+              <div className="mb-6 flex items-center gap-2 overflow-x-auto no-scrollbar">
+                <span className="text-[11px] font-medium text-slate-400 shrink-0">
+                  Ganti kelas:
+                </span>
+                {kelasOptions.map(({ kelas }) => (
+                  <button
+                    key={kelas.id}
+                    type="button"
+                    onClick={() => setSelectedKelasId(kelas.id)}
+                    className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold border transition ${
+                      kelas.id === selectedKelasId
+                        ? "bg-blue-600 text-white border-blue-600"
+                        : "bg-white text-slate-500 border-slate-200 hover:border-blue-300"
+                    }`}
+                  >
+                    {kelas.nama_kelas}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Inner tab navigation */}
+            <div className="mb-6 flex items-center gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1 no-scrollbar w-full sm:w-fit">
+              <button
+                type="button"
+                onClick={() => handleTabChange("materi")}
+                className={`whitespace-nowrap rounded-lg px-4 py-2 text-xs font-semibold transition-all cursor-pointer min-w-[160px] flex-1 sm:flex-initial ${
+                  innerTab === "materi"
+                    ? "bg-white text-blue-600 shadow-sm border border-slate-200/50"
+                    : "text-slate-500 hover:text-slate-800 hover:bg-white/40"
+                }`}
+              >
+                Lingkup Materi & TP
+              </button>
+              <button
+                type="button"
+                onClick={() => handleTabChange("nilai")}
+                className={`whitespace-nowrap rounded-lg px-4 py-2 text-xs font-semibold transition-all cursor-pointer min-w-[160px] flex-1 sm:flex-initial ${
+                  innerTab === "nilai"
+                    ? "bg-white text-blue-600 shadow-sm border border-slate-200/50"
+                    : "text-slate-500 hover:text-slate-800 hover:bg-white/40"
+                }`}
+              >
+                Tabel Penilaian
+              </button>
+              <button
+                type="button"
+                onClick={() => handleTabChange("ujian")}
+                className={`whitespace-nowrap rounded-lg px-4 py-2 text-xs font-semibold transition-all cursor-pointer min-w-[160px] flex-1 sm:flex-initial ${
+                  innerTab === "ujian"
+                    ? "bg-white text-blue-600 shadow-sm border border-slate-200/50"
+                    : "text-slate-500 hover:text-slate-800 hover:bg-white/40"
+                }`}
+              >
+                Nilai Ujian {ujianAktif.length > 0 && `(${ujianAktif.length})`}
+              </button>
+            </div>
+
+            {loadingDetail ? (
+              <div className="space-y-3">
+                <div className="h-24 animate-pulse rounded-2xl bg-slate-100" />
+                <div className="h-24 animate-pulse rounded-2xl bg-slate-100" />
+                <div className="h-24 animate-pulse rounded-2xl bg-slate-100" />
+              </div>
+            ) : (
+              <>
+                {/* TAB: LINGKUP MATERI & TP */}
+                {innerTab === "materi" && (
+                  <div className="space-y-4">
+                    <div className="rounded-xl border border-amber-100 bg-amber-50/60 px-4 py-2.5 text-[11px] text-amber-700">
+                      Lingkup Materi & Tujuan Pembelajaran di bawah ini{" "}
+                      <strong>
+                        khusus untuk kelas {selectedKelas.nama_kelas}
+                      </strong>
+                      .
+                    </div>
+
+                    <div className="flex justify-end">
+                      {!showLingkupForm && (
+                        <button
+                          type="button"
+                          onClick={openAddLingkup}
+                          className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 transition"
+                        >
+                          + Tambah Lingkup Materi
+                        </button>
+                      )}
+                    </div>
+
+                    {showLingkupForm && (
+                      <div className="rounded-2xl border border-blue-100 bg-blue-50/40 p-4 space-y-3">
+                        <h3 className="text-xs font-bold text-slate-700">
+                          {editingLingkupId
+                            ? "Edit Lingkup Materi"
+                            : "Lingkup Materi Baru"}
+                        </h3>
+                        <div>
+                          <label className="text-[11px] font-medium text-slate-500">
+                            Nama Lingkup Materi
+                          </label>
+                          <input
+                            type="text"
+                            value={lingkupForm.nama_lingkup}
+                            onChange={(e) =>
+                              setLingkupForm((f) => ({
+                                ...f,
+                                nama_lingkup: e.target.value,
+                              }))
+                            }
+                            placeholder="Contoh: Bilangan Cacah"
+                            className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-blue-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[11px] font-medium text-slate-500">
+                            Capaian Kompetensi
+                          </label>
+                          <textarea
+                            value={lingkupForm.capaian_kompetensi}
+                            onChange={(e) =>
+                              setLingkupForm((f) => ({
+                                ...f,
+                                capaian_kompetensi: e.target.value,
+                              }))
+                            }
+                            rows={2}
+                            placeholder="Deskripsi capaian kompetensi..."
+                            className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-blue-500 resize-none"
+                          />
+                        </div>
+                        <div className="flex gap-2 justify-end">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowLingkupForm(false);
+                              setEditingLingkupId(null);
+                            }}
+                            className="rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-500 hover:bg-slate-100"
+                          >
+                            Batal
+                          </button>
+                          <button
+                            type="button"
+                            disabled={
+                              savingLingkup || !lingkupForm.nama_lingkup.trim()
+                            }
+                            onClick={submitLingkup}
+                            className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                          >
+                            {savingLingkup ? "Menyimpan..." : "Simpan"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {lingkupList.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500 text-xs">
+                        Belum ada lingkup materi untuk kelas ini.
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {lingkupList.map((l, idx) => (
+                          <div
+                            key={l.id}
+                            className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex items-start gap-3">
+                                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600 text-xs font-bold">
+                                  {idx + 1}
+                                </div>
+                                <div>
+                                  <h3 className="text-sm font-bold text-slate-800">
+                                    {l.nama_lingkup}
+                                  </h3>
+                                  {l.capaian_kompetensi && (
+                                    <p className="text-[11px] text-slate-500 mt-1 max-w-xl">
+                                      {l.capaian_kompetensi}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex gap-1 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => openEditLingkup(l)}
+                                  className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-blue-600"
+                                  title="Edit"
+                                >
+                                  <svg
+                                    className="h-4 w-4"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                    strokeWidth={2}
+                                  >
+                                    <path
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                                    />
+                                  </svg>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => deleteLingkup(l.id)}
+                                  className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                                  title="Hapus"
+                                >
+                                  <svg
+                                    className="h-4 w-4"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                    stroke="currentColor"
+                                    strokeWidth={2}
+                                  >
+                                    <path
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                    />
+                                  </svg>
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Tujuan Pembelajaran */}
+                            <div className="mt-3 pl-10 space-y-1.5">
+                              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                                Tujuan Pembelajaran
+                              </p>
+                              {(tpByLingkup[l.id] || []).length === 0 &&
+                                addingTpFor !== l.id && (
+                                  <p className="text-[11px] text-slate-400 italic">
+                                    Belum ada tujuan pembelajaran.
+                                  </p>
+                                )}
+                              <ul className="space-y-1">
+                                {(tpByLingkup[l.id] || []).map((tp, tIdx) =>
+                                  editingTp?.id === tp.id ? (
+                                    <li
+                                      key={tp.id}
+                                      className="flex gap-2 items-center"
+                                    >
+                                      <input
+                                        type="text"
+                                        value={editingTp.deskripsi}
+                                        onChange={(e) =>
+                                          setEditingTp((prev) => ({
+                                            ...prev,
+                                            deskripsi: e.target.value,
+                                          }))
+                                        }
+                                        className="flex-1 rounded-lg border border-slate-200 px-2 py-1 text-[11px] outline-none focus:border-blue-500"
+                                      />
+                                      <button
+                                        type="button"
+                                        disabled={savingTp}
+                                        onClick={updateTp}
+                                        className="text-[11px] font-semibold text-blue-600 hover:underline"
+                                      >
+                                        Simpan
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingTp(null)}
+                                        className="text-[11px] text-slate-400 hover:underline"
+                                      >
+                                        Batal
+                                      </button>
+                                    </li>
+                                  ) : (
+                                    <li
+                                      key={tp.id}
+                                      className="flex items-start justify-between gap-2 group"
+                                    >
+                                      <span className="text-[11px] text-slate-600">
+                                        <span className="text-slate-400 font-mono">
+                                          {tIdx + 1}.
+                                        </span>{" "}
+                                        {tp.deskripsi}
+                                      </span>
+                                      <span className="flex gap-2 shrink-0 opacity-0 group-hover:opacity-100 transition">
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setEditingTp({
+                                              id: tp.id,
+                                              lingkupId: l.id,
+                                              deskripsi: tp.deskripsi,
+                                            })
+                                          }
+                                          className="text-[10px] font-semibold text-blue-600 hover:underline"
+                                        >
+                                          Edit
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => deleteTp(l.id, tp.id)}
+                                          className="text-[10px] font-semibold text-red-500 hover:underline"
+                                        >
+                                          Hapus
+                                        </button>
+                                      </span>
+                                    </li>
+                                  ),
+                                )}
+                              </ul>
+
+                              {addingTpFor === l.id ? (
+                                <div className="flex gap-2 items-center pt-1">
+                                  <input
+                                    type="text"
+                                    autoFocus
+                                    value={tpDraft}
+                                    onChange={(e) => setTpDraft(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") submitTp(l.id);
+                                      if (e.key === "Escape") {
+                                        setAddingTpFor(null);
+                                        setTpDraft("");
+                                      }
+                                    }}
+                                    placeholder="Tulis tujuan pembelajaran..."
+                                    className="flex-1 rounded-lg border border-slate-200 px-2 py-1 text-[11px] outline-none focus:border-blue-500"
+                                  />
+                                  <button
+                                    type="button"
+                                    disabled={savingTp || !tpDraft.trim()}
+                                    onClick={() => submitTp(l.id)}
+                                    className="text-[11px] font-semibold text-blue-600 hover:underline disabled:opacity-40"
+                                  >
+                                    Simpan
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setAddingTpFor(null);
+                                      setTpDraft("");
+                                    }}
+                                    className="text-[11px] text-slate-400 hover:underline"
+                                  >
+                                    Batal
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setAddingTpFor(l.id);
+                                    setTpDraft("");
+                                  }}
+                                  className="text-[11px] font-semibold text-blue-600 hover:underline pt-1"
+                                >
+                                  + Tambah Tujuan Pembelajaran
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* TAB: TABEL PENILAIAN */}
+                {innerTab === "nilai" && (
+                  <div className="space-y-3">
+                    {lingkupList.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500 text-xs">
+                        Tambahkan lingkup materi terlebih dahulu.
+                      </div>
+                    ) : siswaList.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500 text-xs">
+                        Belum ada siswa terdaftar di kelas ini.
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto rounded-xl border border-slate-100 shadow-sm">
+                        <table className="w-full min-w-[640px] text-xs">
+                          <thead>
+                            <tr className="bg-slate-50 text-left uppercase tracking-wider text-slate-400 text-[10px] font-semibold border-b border-slate-100">
+                              <th className="px-4 py-2.5 text-center w-10 sticky left-0 bg-slate-50">
+                                No
+                              </th>
+                              <th className="px-4 py-2.5 sticky left-10 bg-slate-50 min-w-[160px]">
+                                Nama Siswa
+                              </th>
+                              {lingkupList.map((l) => (
+                                <th
+                                  key={l.id}
+                                  className="px-3 py-2.5 text-center min-w-[110px]"
+                                  title={l.nama_lingkup}
+                                >
+                                  <span className="line-clamp-2 normal-case font-semibold text-slate-500">
+                                    {l.nama_lingkup}
+                                  </span>
+                                </th>
+                              ))}
+                              <th className="px-4 py-2.5 text-center min-w-[100px] bg-blue-50/60 text-blue-600">
+                                Nilai Akhir
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 bg-white">
+                            {siswaList.map((s, idx) => {
+                              const akhir = nilaiAkhirBySiswa[s.id];
+                              return (
+                                <tr
+                                  key={s.id}
+                                  className="hover:bg-slate-50/40 transition"
+                                >
+                                  <td className="px-4 py-2 text-center text-slate-400 font-mono sticky left-0 bg-white">
+                                    {idx + 1}
+                                  </td>
+                                  <td className="px-4 py-2 font-semibold text-slate-700 sticky left-10 bg-white">
+                                    {s.nama_siswa}
+                                  </td>
+                                  {lingkupList.map((l) => {
+                                    const cell = nilaiMap[s.id]?.[l.id];
+                                    const key = `${s.id}_${l.id}`;
+                                    const isSaving = savingCell === key;
+                                    const isSaved = savedFlash === key;
+                                    return (
+                                      <td
+                                        key={l.id}
+                                        className="px-3 py-2 text-center"
+                                      >
+                                        <div className="relative inline-block">
+                                          <input
+                                            type="number"
+                                            min={0}
+                                            max={100}
+                                            value={cell?.nilai ?? ""}
+                                            onChange={(e) =>
+                                              handleNilaiChange(
+                                                s.id,
+                                                l.id,
+                                                e.target.value,
+                                              )
+                                            }
+                                            onBlur={() =>
+                                              handleNilaiBlur(s.id, l.id)
+                                            }
+                                            className={`w-16 rounded-lg border px-2 py-1 text-center text-xs outline-none transition ${
+                                              isSaved
+                                                ? "border-emerald-300 bg-emerald-50"
+                                                : "border-slate-200 focus:border-blue-500"
+                                            }`}
+                                            placeholder="—"
+                                          />
+                                          {isSaving && (
+                                            <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
+                                          )}
+                                        </div>
+                                      </td>
+                                    );
+                                  })}
+                                  <td className="px-4 py-2 text-center bg-blue-50/30">
+                                    <span
+                                      className={`font-bold ${nilaiColor(akhir)}`}
+                                    >
+                                      {akhir !== null ? akhir.toFixed(1) : "—"}
+                                    </span>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* TAB: NILAI UJIAN */}
+                {innerTab === "ujian" && (
+                  <div className="space-y-4">
+                    {loadingUjianAktif ? (
+                      <div className="rounded-xl border border-slate-100 bg-white p-8 text-center text-slate-400 text-xs">
+                        Memuat daftar ujian...
+                      </div>
+                    ) : ujianAktif.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500 text-xs">
+                        Belum ada ujian yang diaktifkan oleh Admin untuk kelas
+                        ini.
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex flex-wrap gap-2">
+                          {ujianAktif.map((u) => (
+                            <button
+                              key={u.id}
+                              type="button"
+                              onClick={() => setSelectedUjianId(u.id)}
+                              className={`text-xs font-bold px-4 py-2 rounded-full border transition-colors ${
+                                selectedUjianId === u.id
+                                  ? "bg-blue-600 border-blue-600 text-white"
+                                  : "bg-white border-slate-200 text-slate-600 hover:border-blue-300"
+                              }`}
+                            >
+                              {u.nama_ujian}
+                            </button>
+                          ))}
+                        </div>
+
+                        {!selectedUjianId ? (
+                          <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500 text-xs">
+                            Pilih ujian di atas untuk mulai input nilai.
+                          </div>
+                        ) : loadingNilaiUjian ? (
+                          <div className="rounded-xl border border-slate-100 bg-white p-8 text-center text-slate-400 text-xs">
+                            Memuat nilai ujian...
+                          </div>
+                        ) : siswaList.length === 0 ? (
+                          <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500 text-xs">
+                            Belum ada siswa terdaftar di kelas ini.
+                          </div>
+                        ) : (
+                          <div className="overflow-x-auto rounded-xl border border-slate-100 shadow-sm">
+                            <table className="w-full min-w-[420px] text-xs">
+                              <thead>
+                                <tr className="bg-slate-50 text-left uppercase tracking-wider text-slate-400 text-[10px] font-semibold border-b border-slate-100">
+                                  <th className="px-4 py-2.5 text-center w-10">
+                                    No
+                                  </th>
+                                  <th className="px-4 py-2.5 min-w-[180px]">
+                                    Nama Siswa
+                                  </th>
+                                  <th className="px-4 py-2.5 text-center min-w-[120px] bg-blue-50/60 text-blue-600">
+                                    Nilai Ujian
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-100 bg-white">
+                                {siswaList.map((s, idx) => {
+                                  const cell = nilaiUjian[s.id];
+                                  const isSaving = savingUjianCell === s.id;
+                                  const isSaved = savedUjianFlash === s.id;
+                                  return (
+                                    <tr
+                                      key={s.id}
+                                      className="hover:bg-slate-50/40 transition"
+                                    >
+                                      <td className="px-4 py-2 text-center text-slate-400 font-mono">
+                                        {idx + 1}
+                                      </td>
+                                      <td className="px-4 py-2 font-semibold text-slate-700">
+                                        {s.nama_siswa}
+                                      </td>
+                                      <td className="px-4 py-2 text-center bg-blue-50/20">
+                                        <div className="relative inline-block">
+                                          <input
+                                            type="number"
+                                            min={0}
+                                            max={100}
+                                            step="0.1"
+                                            value={cell?.nilai ?? ""}
+                                            onChange={(e) =>
+                                              handleNilaiUjianChange(
+                                                s.id,
+                                                e.target.value,
+                                              )
+                                            }
+                                            onBlur={() =>
+                                              handleNilaiUjianBlur(s.id)
+                                            }
+                                            className={`w-20 rounded-lg border px-2 py-1 text-center text-xs font-semibold outline-none transition ${
+                                              isSaved
+                                                ? "border-emerald-300 bg-emerald-50"
+                                                : "border-slate-200 focus:border-blue-500"
+                                            }`}
+                                            placeholder="—"
+                                          />
+                                          {isSaving && (
+                                            <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
+                                          )}
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }

@@ -38,6 +38,13 @@ export default function DataSiswaPage() {
   const [openModal, setOpenModal] = useState(false);
   const [modalMode, setModalMode] = useState(null);
 
+  // Import progress
+  const [importState, setImportState] = useState("idle"); // idle | processing | success
+  const [importProgress, setImportProgress] = useState({
+    current: 0,
+    total: 0,
+  });
+
   const [form, setForm] = useState({
     nama_siswa: "",
     nis: "",
@@ -129,10 +136,13 @@ export default function DataSiswaPage() {
   };
 
   function handleCloseModal() {
+    if (importState === "processing") return; // cegah tutup saat import berjalan
     setOpenModal(false);
     setModalMode(null);
     setEditTarget(null);
     setDeleteTarget(null);
+    setImportState("idle");
+    setImportProgress({ current: 0, total: 0 });
     setForm({
       nama_siswa: "",
       nis: "",
@@ -149,6 +159,8 @@ export default function DataSiswaPage() {
 
   function openImport() {
     setModalMode("import");
+    setImportState("idle");
+    setImportProgress({ current: 0, total: 0 });
     setOpenModal(true);
   }
 
@@ -271,8 +283,14 @@ export default function DataSiswaPage() {
   };
 
   async function handleImport(rows) {
+    setImportState("processing");
+    setImportProgress({ current: 0, total: rows.length });
+
     const allKelas = await pb.collection("kelas").getFullList();
-    for (const row of rows) {
+    let successCount = 0;
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
       try {
         const cariKelas = row.expand?.kelas_id?.nama_kelas || row["kelas_id"];
         const kelas = allKelas.find((d) => d.nama_kelas === cariKelas);
@@ -289,13 +307,32 @@ export default function DataSiswaPage() {
           jenis_kelamin: jkClean || "",
           kelas_id: kelas ? kelas.id : "",
         });
+        successCount++;
       } catch (error) {
         console.log("Gagal import baris:", error);
+      } finally {
+        setImportProgress((prev) => ({ ...prev, current: i + 1 }));
       }
     }
-    showToast("Proses import selesai");
+
+    setImportState("success");
+    const user = currentUser();
+    await createSystemLog({
+      type: "succes",
+      msg: `User '${user?.nama_lengkap || "User"} ( ${user?.role} )' berhasil Import data Siswa (${successCount}/${rows.length}).`,
+      endpoint: currentPath(),
+      statusCode: 200,
+      payload: { total: rows.length, success: successCount },
+    });
     fetchSiswa();
-    handleCloseModal();
+
+    setTimeout(() => {
+      showToast(`Berhasil import ${successCount} dari ${rows.length} data`);
+      setOpenModal(false);
+      setModalMode(null);
+      setImportState("idle");
+      setImportProgress({ current: 0, total: 0 });
+    }, 1300);
   }
 
   async function handleExportDefault() {
@@ -306,9 +343,9 @@ export default function DataSiswaPage() {
     const XLSX = await import("xlsx");
     const data = dataSiswa.map((item) => ({
       NAMA_SISWA: item.nama_siswa || "",
+      JENIS_KELAMIN: item.jenis_kelamin || "",
       NIS: item.nis || "",
       NISN: item.nisn || "",
-      JENIS_KELAMIN: item.jenis_kelamin || "",
       KELAS: item.expand?.kelas_id?.nama_kelas || "",
       CREATED: formatID(item.created) || "",
       UPDATED: formatID(item.updated) || "",
@@ -565,7 +602,11 @@ export default function DataSiswaPage() {
             modalMode === "hapus"
               ? "Hapus Siswa"
               : modalMode === "import"
-                ? "Import Data Siswa"
+                ? importState === "processing"
+                  ? "Mengimport Data..."
+                  : importState === "success"
+                    ? "Import Selesai"
+                    : "Import Data Siswa"
                 : modalMode === "edit"
                   ? "Edit Data Siswa"
                   : "Tambah Siswa"
@@ -579,7 +620,11 @@ export default function DataSiswaPage() {
               onCancel={handleCloseModal}
             />
           ) : modalMode === "import" ? (
-            <ImportModal onClose={handleCloseModal} onImport={handleImport} />
+            importState === "idle" ? (
+              <ImportModal onClose={handleCloseModal} onImport={handleImport} />
+            ) : (
+              <ImportProgress state={importState} progress={importProgress} />
+            )
           ) : (
             <FormMentahan onSubmit={handlSubmit}>
               <Field label="Nama Lengkap">
@@ -681,6 +726,120 @@ export default function DataSiswaPage() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── Import Progress ──────────────────────────────────────────────────────────
+
+function ImportProgress({ state, progress }) {
+  const circumference = 100.53; // 2 * PI * r(16)
+  const percent =
+    progress.total > 0
+      ? Math.round((progress.current / progress.total) * 100)
+      : 0;
+
+  return (
+    <div className="flex flex-col items-center justify-center py-10 px-4 gap-5">
+      {state === "processing" ? (
+        <>
+          <div className="relative w-16 h-16">
+            <svg className="w-16 h-16" viewBox="0 0 36 36">
+              <circle
+                cx="18"
+                cy="18"
+                r="16"
+                fill="none"
+                stroke="#E5E7EB"
+                strokeWidth="3"
+              />
+              <circle
+                cx="18"
+                cy="18"
+                r="16"
+                fill="none"
+                stroke="#3B82F6"
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeDasharray={circumference}
+                strokeDashoffset={
+                  circumference - (percent / 100) * circumference
+                }
+                transform="rotate(-90 18 18)"
+                style={{ transition: "stroke-dashoffset 0.25s ease" }}
+              />
+            </svg>
+            <div className="absolute inset-0 flex items-center justify-center text-[11px] font-bold text-blue-600">
+              {percent}%
+            </div>
+          </div>
+
+          <div className="text-center">
+            <p className="text-[13px] font-semibold text-gray-700">
+              Mengimport data...
+            </p>
+            <p className="text-[12px] text-gray-400 mt-1">
+              {progress.current} dari {progress.total} baris diproses
+            </p>
+          </div>
+
+          <div className="w-full max-w-[220px] h-1.5 bg-gray-100 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-blue-500 rounded-full transition-all duration-300 ease-out"
+              style={{ width: `${percent}%` }}
+            />
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="w-16 h-16 rounded-full bg-green-50 flex items-center justify-center animate-[pop_0.3s_ease-out]">
+            <svg
+              className="w-8 h-8 text-green-500"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path
+                d="M20 6 9 17l-5-5"
+                style={{
+                  strokeDasharray: 30,
+                  strokeDashoffset: 30,
+                  animation: "checkDraw 0.4s ease-out forwards",
+                }}
+              />
+            </svg>
+          </div>
+          <div className="text-center">
+            <p className="text-[13px] font-semibold text-gray-700">
+              Import selesai!
+            </p>
+            <p className="text-[12px] text-gray-400 mt-1">
+              {progress.total} baris berhasil diproses
+            </p>
+          </div>
+        </>
+      )}
+
+      <style jsx>{`
+        @keyframes checkDraw {
+          to {
+            stroke-dashoffset: 0;
+          }
+        }
+        @keyframes pop {
+          0% {
+            transform: scale(0.6);
+            opacity: 0;
+          }
+          100% {
+            transform: scale(1);
+            opacity: 1;
+          }
+        }
+      `}</style>
     </div>
   );
 }

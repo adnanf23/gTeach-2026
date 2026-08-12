@@ -36,12 +36,12 @@ const icons = {
 // Array NAV utama untuk Walikelas
 const NAV = [
   { key: "overview", label: "Overview", href: "/guru-mapel", icon: "overview" },
-  {
-    key: "absensi",
-    label: "Absensi Kelas",
-    href: "/guru-mapel/absensi",
-    icon: "absensi",
-  },
+  // {
+  //   key: "absensi",
+  //   label: "Absensi Kelas",
+  //   href: "/guru-mapel/absensi",
+  //   icon: "absensi",
+  // },
   {
     key: "kelas",
     label: "Daftar Kelas",
@@ -108,9 +108,9 @@ export default function WalikelasLayout({ children }) {
       Cookies.remove("pb_auth", { path: "/" });
       setUser(null);
       router.replace("/login");
+      location.reload();
     } catch (logError) {
       console.error("Gagal proses logout:", logError);
-      router.replace("/login");
     }
   };
 
@@ -172,7 +172,7 @@ export default function WalikelasLayout({ children }) {
             <h1 className="text-lg font-semibold text-gray-800 leading-tight truncate">
               gTeach Space
             </h1>
-            <p className="text-[10.5px] text-gray-400">Wali Kelas</p>
+            <p className="text-[10.5px] text-gray-400">{user?.role}</p>
           </div>
           <button
             className="ml-auto lg:hidden text-gray-400 hover:text-gray-600"

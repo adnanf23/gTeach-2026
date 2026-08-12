@@ -78,6 +78,12 @@ export default function DetailPenilaianPage() {
         }
         setPloting(plotingData);
 
+        // NOTE: query lingkup_materi & nilai_harian di bawah SENGAJA memakai
+        // kombinasi mapel_id + kelas_id (bukan ploting_guru_id), karena
+        // ploting_guru_id bisa berubah kalau admin reset/ganti ploting guru.
+        // Halaman "Penilaian Guru Mapel" juga harus memakai filter yang sama
+        // (lihat penilaian-guru-mapel-page.jsx) supaya kedua halaman selalu
+        // menampilkan data yang identik.
         const [siswaData, lingkupData] = await Promise.all([
           pb.collection("siswa").getFullList({
             filter: `kelas_id = "${kelasData.id}"`,
@@ -208,6 +214,9 @@ export default function DetailPenilaianPage() {
           { requestKey: null },
         );
       } else {
+        // PENTING: selalu sertakan kelas_id & mapel_id agar record ini
+        // ikut kebaca oleh query lain (mis. halaman Penilaian Guru Mapel)
+        // yang memfilter berdasarkan kelas_id/mapel_id.
         saved = await pb.collection("nilai_harian").create(
           {
             siswa_id: siswaId,
@@ -324,7 +333,7 @@ export default function DetailPenilaianPage() {
           capaian_kompetensi: formLM.capaian_kompetensi.trim(),
           guru_id: ploting.guru_id || user.id,
           mapel_id: mapelId,
-          kelas_id: kelas.id,
+          kelas_id: [kelas.id],
         },
         { requestKey: null },
       );
