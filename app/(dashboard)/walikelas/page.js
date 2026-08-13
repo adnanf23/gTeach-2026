@@ -380,7 +380,7 @@ export default function OverviewWaliKelasPage() {
   return (
     <div className="min-h-screen bg-slate-50 pb-16">
       {/* Header */}
-      <div className="border-b border-slate-200 bg-white">
+      <div className="border-b border-slate-200">
         <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
           <p className="text-xs font-medium uppercase tracking-wide text-indigo-500">
             {hariIndo()}

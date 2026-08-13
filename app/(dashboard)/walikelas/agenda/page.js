@@ -72,18 +72,13 @@ const METODE_PEMBELAJARAN = {
   ceramah: "Ceramah",
 };
 
-// Daftar jam pelajaran (urutan jam ke-1 sampai jam ke-10)
+// Daftar jam pelajaran sesuai dengan skema database
+// Nilai yang tersedia: "1 dan 2", "3 dan 4", "5 dan 6", "7 dan 8"
 const JAM_PELAJARAN = [
-  { value: 1, label: "Jam ke-1" },
-  { value: 2, label: "Jam ke-2" },
-  { value: 3, label: "Jam ke-3" },
-  { value: 4, label: "Jam ke-4" },
-  { value: 5, label: "Jam ke-5" },
-  { value: 6, label: "Jam ke-6" },
-  { value: 7, label: "Jam ke-7" },
-  { value: 8, label: "Jam ke-8" },
-  { value: 9, label: "Jam ke-9" },
-  { value: 10, label: "Jam ke-10" },
+  { value: "1 dan 2", label: "Jam ke-1 & 2" },
+  { value: "3 dan 4", label: "Jam ke-3 & 4" },
+  { value: "5 dan 6", label: "Jam ke-5 & 6" },
+  { value: "7 dan 8", label: "Jam ke-7 & 8" },
 ];
 
 // =========================================================
@@ -247,7 +242,7 @@ function AgendaModal({ isOpen, onClose, onSubmit, initialData, defaultDate }) {
         kelas_id: kelasId || (kelas ? kelas.id : ""),
         date: date,
         topik: topik.trim(),
-        jam_mapel: jamMapel ? parseInt(jamMapel) : null,
+        jam_mapel: jamMapel || null,
         metode: metode || null,
         siswa_tidak_hadir: siswaTidakHadir.trim(),
       };
@@ -404,7 +399,7 @@ function AgendaModal({ isOpen, onClose, onSubmit, initialData, defaultDate }) {
               ))}
             </select>
             <p className="mt-1 text-[10px] text-slate-400">
-              Pilih urutan jam pelajaran (jam ke-1 sampai jam ke-10)
+              Pilih sesi jam pelajaran (1-2, 3-4, 5-6, atau 7-8)
             </p>
           </div>
 
@@ -669,10 +664,15 @@ export default function AgendaMengajarPage() {
           }),
         );
 
-        // Sort berdasarkan jam_mapel (urutan jam ke-1, ke-2, dst)
-        const sortedItems = refreshedItems.sort(
-          (a, b) => (a.jam_mapel || 999) - (b.jam_mapel || 999),
-        );
+        // Sort berdasarkan jam_mapel (urutan: 1 dan 2, 3 dan 4, 5 dan 6, 7 dan 8)
+        const jamOrder = ["1 dan 2", "3 dan 4", "5 dan 6", "7 dan 8"];
+        const sortedItems = refreshedItems.sort((a, b) => {
+          const indexA = jamOrder.indexOf(a.jam_mapel);
+          const indexB = jamOrder.indexOf(b.jam_mapel);
+          return (
+            (indexA === -1 ? 999 : indexA) - (indexB === -1 ? 999 : indexB)
+          );
+        });
 
         setDetailItems(sortedItems);
       } finally {
@@ -700,7 +700,7 @@ export default function AgendaMengajarPage() {
       if (existing.length > 0) {
         setMessage({
           type: "error",
-          text: `Mata pelajaran ini sudah memiliki agenda pada jam ke-${data.jam_mapel} tanggal ${formatLong(data.date)}.`,
+          text: `Mata pelajaran ini sudah memiliki agenda pada ${data.jam_mapel} tanggal ${formatLong(data.date)}.`,
         });
         return;
       }
@@ -714,7 +714,7 @@ export default function AgendaMengajarPage() {
       if (existingJam.length > 0) {
         setMessage({
           type: "error",
-          text: `Jam ke-${data.jam_mapel} sudah digunakan oleh mata pelajaran lain pada tanggal ${formatLong(data.date)}.`,
+          text: `Jam ${data.jam_mapel} sudah digunakan oleh mata pelajaran lain pada tanggal ${formatLong(data.date)}.`,
         });
         return;
       }
@@ -762,7 +762,7 @@ export default function AgendaMengajarPage() {
       if (existing.length > 0) {
         setMessage({
           type: "error",
-          text: `Mata pelajaran ini sudah memiliki agenda pada jam ke-${data.jam_mapel} tanggal ${formatLong(data.date)}.`,
+          text: `Mata pelajaran ini sudah memiliki agenda pada ${data.jam_mapel} tanggal ${formatLong(data.date)}.`,
         });
         return;
       }
@@ -776,7 +776,7 @@ export default function AgendaMengajarPage() {
       if (existingJam.length > 0) {
         setMessage({
           type: "error",
-          text: `Jam ke-${data.jam_mapel} sudah digunakan oleh mata pelajaran lain pada tanggal ${formatLong(data.date)}.`,
+          text: `Jam ${data.jam_mapel} sudah digunakan oleh mata pelajaran lain pada tanggal ${formatLong(data.date)}.`,
         });
         return;
       }
@@ -1118,7 +1118,7 @@ export default function AgendaMengajarPage() {
                               )}
                               {item.jam_mapel && (
                                 <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-700">
-                                  Jam ke-{item.jam_mapel}
+                                  {item.jam_mapel}
                                 </span>
                               )}
                             </div>
