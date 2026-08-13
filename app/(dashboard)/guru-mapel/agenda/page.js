@@ -476,18 +476,18 @@ function PilihKelasStep({ mapel, kelasOptions, onPilih, onBack }) {
               <button
                 key={k.id}
                 onClick={() => onPilih(k)}
-                className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-all duration-200 hover:border-blue-400 hover:shadow-md hover:shadow-blue-100 hover:bg-blue-50/40 active:scale-[0.98]"
+                className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-all duration-300 hover:border-blue-600 hover:shadow-lg hover:shadow-blue-200 hover:bg-blue-600 active:scale-[0.98]"
               >
-                {/* Nama Kelas */}
-                <h3 className="text-base font-semibold text-slate-900 group-hover:text-blue-700 transition-colors duration-200">
+                {/* Nama Kelas - putih saat hover */}
+                <h3 className="text-base font-semibold text-slate-900 group-hover:text-white transition-colors duration-300">
                   {k.nama_kelas}
                 </h3>
 
-                {/* Detail kelas */}
-                <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500 group-hover:text-slate-600 transition-colors duration-200">
+                {/* Detail kelas - putih/transparan saat hover */}
+                <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500 group-hover:text-blue-100 transition-colors duration-300">
                   <span className="flex items-center gap-1">
                     <svg
-                      className="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-500 transition-colors duration-200"
+                      className="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-200 transition-colors duration-300"
                       fill="none"
                       viewBox="0 0 24 24"
                       stroke="currentColor"
@@ -502,26 +502,10 @@ function PilihKelasStep({ mapel, kelasOptions, onPilih, onBack }) {
                     </svg>
                     Tingkat {k.tingkat}
                   </span>
-                  <span className="flex items-center gap-1">
-                    <svg
-                      className="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-500 transition-colors duration-200"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"
-                      />
-                    </svg>
-                    {k.jumlah_siswa || 0} siswa
-                  </span>
                 </div>
 
-                {/* Arrow indicator dengan efek biru */}
-                <div className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 group-hover:text-blue-500 group-hover:translate-x-1 transition-all duration-200">
+                {/* Arrow indicator - putih saat hover */}
+                <div className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 group-hover:text-white group-hover:translate-x-1.5 transition-all duration-300">
                   <svg
                     className="w-5 h-5"
                     fill="none"
@@ -537,11 +521,13 @@ function PilihKelasStep({ mapel, kelasOptions, onPilih, onBack }) {
                   </svg>
                 </div>
 
-                {/* Border bottom gradient biru on hover */}
-                <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-500 to-blue-400 scale-x-0 group-hover:scale-x-100 transition-transform duration-300 origin-left" />
+                {/* Efek shimmer/kilau saat hover */}
+                <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/15 to-white/0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 pointer-events-none" />
 
-                {/* Efek overlay biru transparan saat hover */}
-                <div className="absolute inset-0 bg-gradient-to-r from-blue-500/0 via-blue-500/0 to-blue-500/0 group-hover:from-blue-500/[0.03] group-hover:via-blue-500/[0.02] group-hover:to-blue-500/[0.05] transition-all duration-300 pointer-events-none" />
+                {/* Badge kecil di pojok kanan atas */}
+                <div className="absolute top-3 right-12 text-[10px] font-medium text-slate-400 group-hover:text-blue-200 transition-colors duration-300">
+                  {k.tingkat}
+                </div>
               </button>
             ))}
         </div>

@@ -746,13 +746,11 @@ export default function PenilaianGuruMapelPage() {
           </>
         )}
       </div>
-
       {error && (
         <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
           {error}
         </div>
       )}
-
       {/* ============ STEP 1: PILIH MATA PELAJARAN ============ */}
       {!selectedPloting && (
         <>
@@ -802,8 +800,7 @@ export default function PenilaianGuruMapelPage() {
           )}
         </>
       )}
-
-      {/* ============ STEP 2: PILIH KELAS ============ */}
+      {/* // ============ STEP 2: PILIH KELAS ============ */}
       {selectedPloting && !selectedKelas && (
         <>
           <div className="mb-6">
@@ -824,26 +821,79 @@ export default function PenilaianGuruMapelPage() {
               Belum ada kelas yang di-plotting untuk mata pelajaran ini.
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {kelasOptions.map(({ kelas, siswaCount }) => (
                 <button
                   key={kelas.id}
                   type="button"
                   onClick={() => setSelectedKelasId(kelas.id)}
-                  className="text-left rounded-2xl border border-slate-200 bg-white p-5 shadow-sm hover:border-blue-300 hover:shadow-md transition-all hover:-translate-y-0.5"
+                  className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-all duration-300 hover:border-blue-600 hover:shadow-lg hover:shadow-blue-200 hover:bg-blue-600 active:scale-[0.98]"
                 >
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-blue-600 font-bold text-white text-base shadow-sm">
-                      {getKelasBadge(kelas)}
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-bold text-slate-800">
-                        {kelas.nama_kelas}
-                      </h3>
-                      <p className="text-[10px] text-slate-400 mt-0.5">
-                        Tingkat {kelas.tingkat || "—"} · {siswaCount} siswa
-                      </p>
-                    </div>
+                  {/* Nama Kelas - putih saat hover */}
+                  <h3 className="text-base font-semibold text-slate-900 group-hover:text-white transition-colors duration-300">
+                    {kelas.nama_kelas}
+                  </h3>
+
+                  {/* Detail kelas - putih/transparan saat hover */}
+                  <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500 group-hover:text-blue-100 transition-colors duration-300">
+                    <span className="flex items-center gap-1">
+                      <svg
+                        className="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-200 transition-colors duration-300"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M19 21v-2a4 4 0 00-4-4H9a4 4 0 00-4 4v2"
+                        />
+                        <circle cx="12" cy="7" r="4" />
+                      </svg>
+                      Tingkat {kelas.tingkat}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <svg
+                        className="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-200 transition-colors duration-300"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"
+                        />
+                      </svg>
+                      {siswaCount} siswa
+                    </span>
+                  </div>
+
+                  {/* Arrow indicator - putih saat hover */}
+                  <div className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 group-hover:text-white group-hover:translate-x-1.5 transition-all duration-300">
+                    <svg
+                      className="w-5 h-5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2.5}
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M9 5l7 7-7 7"
+                      />
+                    </svg>
+                  </div>
+
+                  {/* Efek shimmer/kilau saat hover */}
+                  <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/15 to-white/0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 pointer-events-none" />
+
+                  {/* Badge kecil di pojok kanan atas */}
+                  <div className="absolute top-3 right-12 text-[10px] font-medium text-slate-400 group-hover:text-blue-200 transition-colors duration-300">
+                    {getKelasBadge(kelas)}
                   </div>
                 </button>
               ))}
@@ -851,7 +901,6 @@ export default function PenilaianGuruMapelPage() {
           )}
         </>
       )}
-
       {/* ============ STEP 3: KELOLA MATERI & NILAI ============ */}
       {selectedPloting && selectedKelas && (
         <>

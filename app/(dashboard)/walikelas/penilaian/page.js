@@ -115,91 +115,124 @@ export default function PilihMapelPenilaian() {
 
   if (loading) {
     return (
-      <div className="p-10 text-center font-semibold text-gray-500">
-        Memuat data kelas & mata pelajaran...
+      <div className="flex min-h-[60vh] items-center justify-center text-slate-500">
+        <div className="text-center">
+          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-blue-600" />
+          <p className="mt-3 text-sm">Memuat data kelas & mata pelajaran...</p>
+        </div>
       </div>
     );
   }
 
   if (!currentKelas) {
     return (
-      <div className="p-10 text-center font-semibold text-red-500">
-        Anda belum terdaftar sebagai wali kelas atau pendamping di kelas
-        manapun.
+      <div className="mx-auto mt-16 max-w-md rounded-xl border border-red-200 bg-red-50 p-6 text-center">
+        <h1 className="text-lg font-semibold text-red-700">Akses Ditolak</h1>
+        <p className="mt-2 text-sm text-red-600">
+          Anda belum terdaftar sebagai wali kelas atau pendamping di kelas
+          manapun.
+        </p>
       </div>
     );
   }
 
   return (
-    <section className="py-10 lg:p-10 space-y-6">
+    <section className="mx-auto max-w-6xl px-4 py-6">
       {/* Banner */}
-      <div className="w-full">
-        <div className="relative overflow-hidden bg-gradient-to-r from-blue-600 via-blue-600 to-blue-700 text-white rounded-3xl p-6 md:p-8 shadow-lg h-auto flex flex-col justify-between">
+      <div className="w-full mb-6">
+        <div className="relative overflow-hidden bg-gradient-to-r from-blue-600 via-blue-600 to-blue-700 text-white rounded-2xl p-6 md:p-8 shadow-lg">
           <div className="absolute right-0 bottom-0 w-80 h-80 bg-white/5 rounded-full translate-x-10 translate-y-20 pointer-events-none" />
           <div className="absolute right-20 bottom-[-40px] w-64 h-64 bg-white/5 rounded-full pointer-events-none" />
 
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 z-10">
-            <div className="flex items-start space-x-4">
-              <div className="space-y-1">
-                <span className="text-xs uppercase tracking-widest text-blue-200 font-semibold block">
-                  Tingkat {currentKelas.tingkat}
-                </span>
-                <h1 className="text-2xl md:text-3xl font-extrabold tracking-wide uppercase">
-                  {currentKelas.nama_kelas}
-                </h1>
-              </div>
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 z-10 relative">
+            <div>
+              <span className="text-xs uppercase tracking-widest text-blue-200 font-semibold block">
+                Tingkat {currentKelas.tingkat}
+              </span>
+              <h1 className="text-2xl md:text-3xl font-extrabold tracking-wide mt-1">
+                {currentKelas.nama_kelas}
+              </h1>
+              <p className="text-sm text-blue-100 mt-1">
+                Pilih mata pelajaran untuk mengelola penilaian
+              </p>
             </div>
           </div>
         </div>
       </div>
 
       {/* Grid Mapel */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 py-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {mapel.length === 0 ? (
-          <div className="col-span-full text-center py-8 text-gray-400 font-medium">
-            Belum ada mata pelajaran untuk kelas ini.
+          <div className="col-span-full rounded-xl border border-dashed border-slate-300 bg-slate-50 p-12 text-center">
+            <p className="text-sm text-slate-400">
+              Belum ada mata pelajaran untuk kelas ini.
+            </p>
           </div>
         ) : (
           mapel.map((item) => (
-            <div
+            <button
               key={item.id}
               onClick={() => router.push(`/walikelas/penilaian/${item.id}`)}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") router.push(`/penilaian/${item.id}`);
-              }}
-              className="w-full p-5 bg-white border border-gray-100 rounded-2xl shadow-sm hover:shadow-md hover:border-blue-200 active:scale-[0.98] transition-all duration-200 flex flex-col justify-between cursor-pointer"
+              className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-all duration-300 hover:border-blue-600 hover:shadow-lg hover:shadow-blue-200 hover:bg-blue-600 active:scale-[0.98]"
             >
-              <div className="space-y-4">
-                <div>
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-blue-600 block mb-1">
-                    Mata Pelajaran
-                  </span>
-                  <h2 className="text-xl font-extrabold text-gray-900 tracking-wide uppercase">
-                    {item.nama_mapel || item.nama}
-                  </h2>
+              {/* Kode Mapel - Badge */}
+              <div className="flex items-start justify-between">
+                <span className="text-[10px] font-bold uppercase tracking-widest text-blue-600 group-hover:text-blue-200 transition-colors duration-300">
+                  {item.kode_mapel || "MPL"}
+                </span>
+                <span className="text-[10px] font-medium text-slate-400 group-hover:text-blue-200 transition-colors duration-300">
+                  {currentKelas.nama_kelas?.split(" ")[0] || "Kelas"}
+                </span>
+              </div>
+
+              {/* Nama Mapel - putih saat hover */}
+              <h2 className="text-lg font-extrabold text-slate-900 group-hover:text-white transition-colors duration-300 mt-2 tracking-wide">
+                {item.nama_mapel || item.nama}
+              </h2>
+
+              <hr className="border-slate-100 group-hover:border-blue-500/30 my-3 transition-colors duration-300" />
+
+              {/* Guru Pengampu */}
+              <div className="flex items-center gap-3">
+                <div className="flex-shrink-0 flex items-center justify-center w-9 h-9 rounded-full bg-blue-50 border border-blue-100 text-blue-600 font-bold text-xs group-hover:bg-white/20 group-hover:border-white/30 group-hover:text-white transition-colors duration-300">
+                  {item.guru_pengampu !== "Belum ditentukan" &&
+                  item.guru_pengampu !== "Walikelas"
+                    ? item.guru_pengampu.substring(0, 2).toUpperCase()
+                    : "G"}
                 </div>
-
-                <hr className="border-gray-100" />
-
-                <div className="flex items-center space-x-3">
-                  <div className="flex-shrink-0 flex items-center justify-center w-10 h-10 rounded-full bg-blue-50 border border-blue-100 text-blue-600 font-bold text-sm">
-                    {item.guru_pengampu !== "Belum ditentukan"
-                      ? item.guru_pengampu.substring(0, 2).toUpperCase()
-                      : "G"}
-                  </div>
-                  <div>
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400 block">
-                      Guru Pengampu
-                    </span>
-                    <p className="text-sm font-bold text-gray-800 tracking-wide mt-0.5">
-                      {item.guru_pengampu}
-                    </p>
-                  </div>
+                <div className="flex-1 min-w-0">
+                  <span className="text-[9px] font-bold uppercase tracking-widest text-slate-400 group-hover:text-blue-200 transition-colors duration-300 block">
+                    Guru Pengampu
+                  </span>
+                  <p className="text-sm font-semibold text-slate-700 group-hover:text-white transition-colors duration-300 truncate">
+                    {item.guru_pengampu}
+                  </p>
                 </div>
               </div>
-            </div>
+
+              {/* Arrow indicator - putih saat hover */}
+              <div className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 group-hover:text-white group-hover:translate-x-1.5 transition-all duration-300">
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2.5}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M9 5l7 7-7 7"
+                  />
+                </svg>
+              </div>
+
+              {/* Efek shimmer/kilau saat hover */}
+              <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/15 to-white/0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 pointer-events-none" />
+
+              {/* Border bottom gradient on hover */}
+              <div className="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-500 to-blue-400 scale-x-0 group-hover:scale-x-100 transition-transform duration-300 origin-left" />
+            </button>
           ))
         )}
       </div>
