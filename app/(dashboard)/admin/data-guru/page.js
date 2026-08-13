@@ -59,7 +59,7 @@ export default function DataGuru() {
       const [guru, kelas] = await Promise.all([
         pb.collection("users").getFullList({
           requestKey: null,
-          filter: `role = "guru walikelas" || role = "guru pendamping"`,
+          filter: `role = "guru walikelas" || role = "guru pendamping" || role = "guru mapel"`,
         }),
         pb.collection("kelas").getFullList({
           expand: "walikelas_id,pendamping_id",
@@ -114,6 +114,8 @@ export default function DataGuru() {
       username: item.username || "",
       email: item.email || "",
       no_whatsapp: item.no_whatsapp || "",
+      // role di PocketBase disimpan pakai spasi ("guru walikelas", dst),
+      // jadi value ini HARUS persis sama dengan value <option> di Select role.
       role: item.role || "",
       kelas_id: kelasGuru?.id || "",
       jenis_kelamin: item.jenis_kelamin || "",
@@ -182,9 +184,10 @@ export default function DataGuru() {
 
         if (form.kelas_id) {
           const updateKelasPayload = {};
-          if (form.role === "guru_walikelas") {
+          // FIX: value role sekarang pakai spasi, samain dengan value <option>
+          if (form.role === "guru walikelas") {
             updateKelasPayload.walikelas_id = form.id;
-          } else if (form.role === "guru_pendamping") {
+          } else if (form.role === "guru pendamping") {
             updateKelasPayload.pendamping_id = form.id;
           } else {
             updateKelasPayload.walikelas_id = form.id;
@@ -200,9 +203,10 @@ export default function DataGuru() {
 
         if (form.kelas_id && guruRecord) {
           const updateKelasPayload = {};
-          if (form.role === "guru_walikelas") {
+          // FIX: value role sekarang pakai spasi, samain dengan value <option>
+          if (form.role === "guru walikelas") {
             updateKelasPayload.walikelas_id = guruRecord.id;
-          } else if (form.role === "guru_pendamping") {
+          } else if (form.role === "guru pendamping") {
             updateKelasPayload.pendamping_id = guruRecord.id;
           } else {
             updateKelasPayload.walikelas_id = guruRecord.id;
@@ -256,29 +260,9 @@ export default function DataGuru() {
         .collection("users")
         .getFullList({ requestKey: null });
 
-      // 1. SIMPAN SESI LOGIN OPERATOR SAAT INI
-      const currentUserAuth = pb.authStore.token;
-      const currentUserRecord = pb.authStore.record;
+      // Tidak perlu lagi login sebagai _superusers,
+      // karena operator (admin/ict) sudah punya izin create langsung.
 
-      // 2. MASUK SEBAGAI SUPERUSER / ADMIN
-      try {
-        await pb
-          .collection("_superusers")
-          .authWithPassword(
-            process.env.POCKETBASE_ADMIN_EMAIL,
-            process.env.POCKETBASE_ADMIN_PASSWORD,
-          );
-      } catch (authError) {
-        console.error(
-          "Gagal Login Admin. Periksa kembali email/password kamu:",
-          authError.message,
-        );
-        alert("Gagal masuk sistem sebagai Admin. Proses import dibatalkan.");
-        setLoading(false);
-        return;
-      }
-
-      // 3. MULAI PROSES LOOPING IMPORT DATA
       for (const row of rows) {
         try {
           const nama_lengkap = (
@@ -298,14 +282,14 @@ export default function DataGuru() {
 
           if (!nama_lengkap) continue;
 
-          // Normalisasi nama role
+          // Normalisasi value dari Excel (boleh underscore atau spasi)
+          // menjadi value asli PocketBase (pakai spasi)
           if (role === "guru_walikelas") role = "guru walikelas";
           if (role === "guru_pendamping") role = "guru pendamping";
           if (role === "guru_mapel") role = "guru mapel";
 
           if (email === "") email = null;
 
-          // Cek apakah user sudah terdaftar (berdasarkan Email atau Nama Lengkap saja)
           const isExist = allUsers.find((u) => {
             const matchEmail = email && u.email?.toLowerCase() === email;
             const matchNama =
@@ -319,7 +303,6 @@ export default function DataGuru() {
             continue;
           }
 
-          // Payload Utama dengan Password Statis & Tanpa Field Username (Biarkan PocketBase generate otomatis)
           const payload = {
             nama_lengkap,
             role,
@@ -333,17 +316,14 @@ export default function DataGuru() {
           if (no_whatsapp) payload.no_whatsapp = no_whatsapp;
           if (jenis_kelamin) payload.jenis_kelamin = jenis_kelamin;
 
-          // Buat user baru di PocketBase
           const newGuru = await pb.collection("users").create(payload);
 
-          // Masukkan ke array lokal untuk pengecekan baris excel berikutnya
           allUsers.push({
             id: newGuru.id,
             nama_lengkap: payload.nama_lengkap,
             email: email || "",
           });
 
-          // Hubungkan otomatis ke tabel Kelas jika kolom nama_kelas tersedia di Excel
           const namaKelasExcel =
             row.nama_kelas || row["Kelas"] || row["Nama Kelas"];
           if (namaKelasExcel && newGuru) {
@@ -354,15 +334,10 @@ export default function DataGuru() {
             );
             if (kelasTerkait) {
               const updateKelasPayload = {};
-              if (role === "guru walikelas") {
+              if (role === "guru walikelas")
                 updateKelasPayload.walikelas_id = newGuru.id;
-              } else if (role === "guru_walikelas") {
-                updateKelasPayload.walikelas_id = newGuru.id;
-              } else if (role === "guru pendamping") {
+              else if (role === "guru pendamping")
                 updateKelasPayload.pendamping_id = newGuru.id;
-              } else if (role === "guru_pendamping") {
-                updateKelasPayload.pendamping_id = newGuru.id;
-              }
 
               if (Object.keys(updateKelasPayload).length > 0) {
                 await pb
@@ -379,13 +354,6 @@ export default function DataGuru() {
             e.data || e.message || e,
           );
         }
-      }
-
-      // 4. KEMBALIKAN SESI LOGIN OPERATOR SEMULA
-      if (currentUserAuth && currentUserRecord) {
-        pb.authStore.save(currentUserAuth, currentUserRecord);
-      } else {
-        pb.authStore.clear();
       }
 
       alert(
@@ -422,6 +390,8 @@ export default function DataGuru() {
           "Nama Lengkap": item.nama_lengkap || "",
           Role: item.role || "",
           "Kelas Diampu": statusKelas,
+          username: item.username,
+          password: "gTeach2026",
         };
       });
 
@@ -473,10 +443,17 @@ export default function DataGuru() {
     }
   };
 
+  // Daftar tingkat unik dari kelasList, untuk opsi filter
+  const daftarTingkat = [
+    ...new Set(kelasList.map((k) => String(k.tingkat || "")).filter(Boolean)),
+  ].sort();
+
   const filteredSiswa = dataGuru.filter((item) => {
+    const q = searchQuery.toLowerCase();
     const matchesSearch =
-      item.nama_lengkap?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.username?.toLowerCase().includes(searchQuery.toLowerCase());
+      item.nama_lengkap?.toLowerCase().includes(q) ||
+      item.username?.toLowerCase().includes(q) ||
+      item.email?.toLowerCase().includes(q);
 
     const kelasGuru = getKelasGuru(item.id);
     const tingkatKelas = String(kelasGuru?.tingkat || "");
@@ -495,6 +472,43 @@ export default function DataGuru() {
           onImport={openImport}
           onExport={handleExportDefault}
         />
+
+        <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+          <div className="relative">
+            <svg
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              viewBox="0 0 24 24"
+            >
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Cari nama, username, atau email guru..."
+              className="pl-8 pr-3 py-2 text-[13px] border border-gray-200 rounded-lg w-full sm:w-64 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400 transition"
+            />
+          </div>
+
+          <Select
+            value={selectedTingkat}
+            onChange={(e) => setSelectedTingkat(e.target.value)}
+            className="w-full sm:w-40"
+          >
+            <option value="semua">Semua Tingkat</option>
+            {daftarTingkat.map((t) => (
+              <option key={t} value={t}>
+                Tingkat {t}
+              </option>
+            ))}
+          </Select>
+        </div>
       </div>
 
       <div className="w-full bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
@@ -536,7 +550,7 @@ export default function DataGuru() {
                     </div>
                   </td>
                 </tr>
-              ) : dataGuru.length === 0 ? (
+              ) : filteredSiswa.length === 0 ? (
                 <tr>
                   <td
                     colSpan={7}
@@ -547,12 +561,12 @@ export default function DataGuru() {
                       Data tidak ditemukan
                     </p>
                     <p className="text-xs text-gray-400 mt-0.5">
-                      Coba ubah filter atau tambah siswa baru
+                      Coba ubah filter atau tambah guru baru
                     </p>
                   </td>
                 </tr>
               ) : (
-                dataGuru.map((item) => {
+                filteredSiswa.map((item) => {
                   const kelasGuru = getKelasGuru(item.id);
                   return (
                     <tr
@@ -666,12 +680,12 @@ export default function DataGuru() {
           isOpen={openModal}
           title={
             modalMode === "hapus"
-              ? "Hapus Siswa"
+              ? "Hapus Guru"
               : modalMode === "import"
-                ? "Import Data Siswa"
+                ? "Import Data Guru"
                 : modalMode === "edit"
-                  ? "Edit Data Siswa"
-                  : "Tambah Siswa"
+                  ? "Edit Data Guru"
+                  : "Tambah Guru"
           }
           onClose={handleCloseModal}
         >
@@ -724,9 +738,9 @@ export default function DataGuru() {
                   required
                 >
                   <option value="">Pilih Role</option>
-                  <option value="guru_walikelas">Guru Wali Kelas</option>
-                  <option value="guru_pendamping">Guru Pendamping</option>
-                  <option value="guru_mapel">Guru Mapel</option>
+                  <option value="guru walikelas">Guru Wali Kelas</option>
+                  <option value="guru pendamping">Guru Pendamping</option>
+                  <option value="guru mapel">Guru Mapel</option>
                   <option value="admin">Admin</option>
                   <option value="ict">ICT</option>
                 </Select>
@@ -806,7 +820,7 @@ export default function DataGuru() {
             Menampilkan <strong>{filteredSiswa.length}</strong> dari{" "}
             <strong>{dataGuru.length}</strong> Guru
           </span>
-          {selectedTingkat !== "semua" && (
+          {(selectedTingkat !== "semua" || searchQuery) && (
             <button
               onClick={() => {
                 setSelectedTingkat("semua");

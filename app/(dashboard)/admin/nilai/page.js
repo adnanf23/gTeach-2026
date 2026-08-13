@@ -85,6 +85,13 @@ export default function PantauNilaiPage() {
   const [savedFlash, setSavedFlash] = useState(null);
   const [showTpDetail, setShowTpDetail] = useState({});
 
+  // id mapel murni dari ploting terpilih (dipakai saat menyimpan nilai_harian
+  // agar field mapel_id konsisten diisi — lihat handleNilaiBlur)
+  const selectedMapelId = useMemo(
+    () => firstOf(selectedPloting?.mapel_id) || null,
+    [selectedPloting],
+  );
+
   // Ujian data
   const [ujianList, setUjianList] = useState([]);
   const [nilaiUjianMap, setNilaiUjianMap] = useState({});
@@ -445,10 +452,18 @@ export default function PantauNilaiPage() {
       if (cell?.id) {
         await pb.collection("nilai_harian").update(cell.id, { nilai: clamped });
       } else {
+        // FIX SINKRONISASI: sertakan guru_id, kelas_id, mapel_id saat admin
+        // membuat nilai baru dari halaman ini. Tanpa ini, halaman "Detail
+        // Penilaian" (wali kelas/pendamping) dan "Penilaian Guru Mapel"
+        // tidak akan menampilkan nilai yang diinput admin, karena keduanya
+        // memfilter nilai_harian berdasarkan kelas_id + mapel_id.
         const created = await pb.collection("nilai_harian").create({
           siswa_id: siswaId,
           lingkup_materi_id: lingkupId,
           nilai: clamped,
+          guru_id: selectedPloting?.guru_id,
+          kelas_id: selectedKelas?.id,
+          mapel_id: selectedMapelId,
         });
         setNilaiMap((prev) => ({
           ...prev,
@@ -495,8 +510,8 @@ export default function PantauNilaiPage() {
     setSavingCell(key);
     setError("");
     try {
-      // Cari ploting_guru untuk mapel ini di kelas ini
-      // Gunakan selectedPloting yang sudah ada
+      // Nilai ujian selalu terikat ke ploting_guru_id (guru yang diampu
+      // pada mapel+kelas ini), sesuai skema nilai_ujian.
       if (!selectedPloting) {
         setError("Tidak ada ploting guru untuk mata pelajaran ini.");
         return;

@@ -84,16 +84,18 @@ const NAV = [
     href: "/admin/manajemen-ujian",
     icon: "pembelajaran",
   },
-];
-
-// Menu tambahan khusus jika yang login adalah akun dengan role 'ict'
-const ICT_NAV = [
-  {
-    key: "system_logs",
-    label: "System Logs",
-    href: "/admin/system-logs",
-    icon: "log",
-  },
+  // {
+  //   key: "pengaturan ajaran",
+  //   label: "Pengaturan",
+  //   href: "/admin/pengaturan-ajaran",
+  //   icon: "pengaturan",
+  // },
+  // {
+  //   key: "cetak",
+  //   label: "Cetak Rapor",
+  //   href: "/admin/cetak-rapor",
+  //   icon: "absensi",
+  // },
 ];
 
 export default function AdminLayout({ children }) {

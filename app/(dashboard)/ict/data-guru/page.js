@@ -114,6 +114,8 @@ export default function DataGuru() {
       username: item.username || "",
       email: item.email || "",
       no_whatsapp: item.no_whatsapp || "",
+      // role di PocketBase disimpan pakai spasi ("guru walikelas", dst),
+      // jadi value ini HARUS persis sama dengan value <option> di Select role.
       role: item.role || "",
       kelas_id: kelasGuru?.id || "",
       jenis_kelamin: item.jenis_kelamin || "",
@@ -182,9 +184,10 @@ export default function DataGuru() {
 
         if (form.kelas_id) {
           const updateKelasPayload = {};
-          if (form.role === "guru_walikelas") {
+          // FIX: value role sekarang pakai spasi, samain dengan value <option>
+          if (form.role === "guru walikelas") {
             updateKelasPayload.walikelas_id = form.id;
-          } else if (form.role === "guru_pendamping") {
+          } else if (form.role === "guru pendamping") {
             updateKelasPayload.pendamping_id = form.id;
           } else {
             updateKelasPayload.walikelas_id = form.id;
@@ -200,9 +203,10 @@ export default function DataGuru() {
 
         if (form.kelas_id && guruRecord) {
           const updateKelasPayload = {};
-          if (form.role === "guru_walikelas") {
+          // FIX: value role sekarang pakai spasi, samain dengan value <option>
+          if (form.role === "guru walikelas") {
             updateKelasPayload.walikelas_id = guruRecord.id;
-          } else if (form.role === "guru_pendamping") {
+          } else if (form.role === "guru pendamping") {
             updateKelasPayload.pendamping_id = guruRecord.id;
           } else {
             updateKelasPayload.walikelas_id = guruRecord.id;
@@ -278,6 +282,8 @@ export default function DataGuru() {
 
           if (!nama_lengkap) continue;
 
+          // Normalisasi value dari Excel (boleh underscore atau spasi)
+          // menjadi value asli PocketBase (pakai spasi)
           if (role === "guru_walikelas") role = "guru walikelas";
           if (role === "guru_pendamping") role = "guru pendamping";
           if (role === "guru_mapel") role = "guru mapel";
@@ -437,10 +443,17 @@ export default function DataGuru() {
     }
   };
 
+  // Daftar tingkat unik dari kelasList, untuk opsi filter
+  const daftarTingkat = [
+    ...new Set(kelasList.map((k) => String(k.tingkat || "")).filter(Boolean)),
+  ].sort();
+
   const filteredSiswa = dataGuru.filter((item) => {
+    const q = searchQuery.toLowerCase();
     const matchesSearch =
-      item.nama_lengkap?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.username?.toLowerCase().includes(searchQuery.toLowerCase());
+      item.nama_lengkap?.toLowerCase().includes(q) ||
+      item.username?.toLowerCase().includes(q) ||
+      item.email?.toLowerCase().includes(q);
 
     const kelasGuru = getKelasGuru(item.id);
     const tingkatKelas = String(kelasGuru?.tingkat || "");
@@ -459,6 +472,43 @@ export default function DataGuru() {
           onImport={openImport}
           onExport={handleExportDefault}
         />
+
+        <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+          <div className="relative">
+            <svg
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
+              width="14"
+              height="14"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              viewBox="0 0 24 24"
+            >
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Cari nama, username, atau email guru..."
+              className="pl-8 pr-3 py-2 text-[13px] border border-gray-200 rounded-lg w-full sm:w-64 focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400 transition"
+            />
+          </div>
+
+          <Select
+            value={selectedTingkat}
+            onChange={(e) => setSelectedTingkat(e.target.value)}
+            className="w-full sm:w-40"
+          >
+            <option value="semua">Semua Tingkat</option>
+            {daftarTingkat.map((t) => (
+              <option key={t} value={t}>
+                Tingkat {t}
+              </option>
+            ))}
+          </Select>
+        </div>
       </div>
 
       <div className="w-full bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
@@ -500,7 +550,7 @@ export default function DataGuru() {
                     </div>
                   </td>
                 </tr>
-              ) : dataGuru.length === 0 ? (
+              ) : filteredSiswa.length === 0 ? (
                 <tr>
                   <td
                     colSpan={7}
@@ -511,12 +561,12 @@ export default function DataGuru() {
                       Data tidak ditemukan
                     </p>
                     <p className="text-xs text-gray-400 mt-0.5">
-                      Coba ubah filter atau tambah siswa baru
+                      Coba ubah filter atau tambah guru baru
                     </p>
                   </td>
                 </tr>
               ) : (
-                dataGuru.map((item) => {
+                filteredSiswa.map((item) => {
                   const kelasGuru = getKelasGuru(item.id);
                   return (
                     <tr
@@ -630,12 +680,12 @@ export default function DataGuru() {
           isOpen={openModal}
           title={
             modalMode === "hapus"
-              ? "Hapus Siswa"
+              ? "Hapus Guru"
               : modalMode === "import"
-                ? "Import Data Siswa"
+                ? "Import Data Guru"
                 : modalMode === "edit"
-                  ? "Edit Data Siswa"
-                  : "Tambah Siswa"
+                  ? "Edit Data Guru"
+                  : "Tambah Guru"
           }
           onClose={handleCloseModal}
         >
@@ -688,9 +738,9 @@ export default function DataGuru() {
                   required
                 >
                   <option value="">Pilih Role</option>
-                  <option value="guru_walikelas">Guru Wali Kelas</option>
-                  <option value="guru_pendamping">Guru Pendamping</option>
-                  <option value="guru_mapel">Guru Mapel</option>
+                  <option value="guru walikelas">Guru Wali Kelas</option>
+                  <option value="guru pendamping">Guru Pendamping</option>
+                  <option value="guru mapel">Guru Mapel</option>
                   <option value="admin">Admin</option>
                   <option value="ict">ICT</option>
                 </Select>
@@ -770,7 +820,7 @@ export default function DataGuru() {
             Menampilkan <strong>{filteredSiswa.length}</strong> dari{" "}
             <strong>{dataGuru.length}</strong> Guru
           </span>
-          {selectedTingkat !== "semua" && (
+          {(selectedTingkat !== "semua" || searchQuery) && (
             <button
               onClick={() => {
                 setSelectedTingkat("semua");

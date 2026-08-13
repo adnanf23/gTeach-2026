@@ -1,389 +1,446 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { pb } from "@/lib/pocketbase";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { pb, getCurrentUser, isAuthenticated } from "@/lib/pocketbase";
 
-// Helper: ambil nama & role dari record user yang di-expand.
-// Menyesuaikan beberapa kemungkinan nama field di koleksi "users"
-// (name/nama/username/email) supaya tetap tampil walau field belum pasti.
-function getUserInfo(userRecord) {
-  if (!userRecord) {
-    return { name: "System / Guest", role: "SYSTEM" };
-  }
-  const name =
-    userRecord.name ||
-    userRecord.nama ||
-    userRecord.username ||
-    userRecord.email ||
-    "Unknown User";
-  const role = userRecord.role || "USER";
-  return { name, role };
+const ALLOWED_ROLES = ["admin", "ict"];
+
+function todayRange() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  const fmt = (d) => d.toISOString().slice(0, 19).replace("T", " ");
+  return { start: fmt(start), end: fmt(end) };
 }
 
-// Helper: format payload_json biar rapi & tidak meledak kalau kosong/invalid
-function formatPayload(payload) {
-  if (payload === null || payload === undefined) return "-";
-  if (typeof payload === "string") return payload || "-";
-  try {
-    const str = JSON.stringify(payload);
-    return str === "{}" || str === "[]" ? "-" : str;
-  } catch {
-    return "-";
+function getGreetingByTime() {
+  const now = new Date();
+  const hours = now.getHours();
+
+  if (hours >= 4 && hours < 11) {
+    return "Selamat Pagi";
+  } else if (hours >= 11 && hours < 15) {
+    return "Selamat Siang";
+  } else if (hours >= 15 && hours < 18) {
+    return "Selamat Sore";
+  } else {
+    return "Selamat Malam";
   }
 }
 
-// Helper: tentukan warna badge status berdasarkan status_code (prioritas)
-// dengan fallback ke field "type" kalau status_code tidak ada
-function getStatusStyle(statusCode, type) {
-  const code = Number(statusCode);
-
-  if (!Number.isNaN(code) && code > 0) {
-    if (code >= 500) {
-      return {
-        badge: "bg-red-50 text-red-600 border-red-200/60",
-        dot: "bg-red-500",
-        text: "text-red-600",
-      };
-    }
-    if (code >= 400) {
-      return {
-        badge: "bg-amber-50 text-amber-600 border-amber-200/60 font-bold",
-        dot: "bg-amber-500",
-        text: "text-amber-600",
-      };
-    }
-    return {
-      badge: "bg-emerald-50 text-emerald-600 border-emerald-200/60",
-      dot: "bg-emerald-500",
-      text: "text-emerald-600",
-    };
-  }
-
-  // Fallback ke "type" kalau status_code kosong
-  if (type === "succes") {
-    return {
-      badge: "bg-emerald-50 text-emerald-600 border-emerald-200/60",
-      dot: "bg-emerald-500",
-      text: "text-emerald-600",
-    };
-  }
-  if (type === "warning") {
-    return {
-      badge: "bg-amber-50 text-amber-600 border-amber-200/60 font-bold",
-      dot: "bg-amber-500",
-      text: "text-amber-600",
-    };
-  }
-  return {
-    badge: "bg-blue-50 text-blue-600 border-blue-200",
-    dot: "bg-blue-500",
-    text: "text-blue-600",
-  };
+function monthRange() {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  const end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const fmt = (d) => d.toISOString().slice(0, 19).replace("T", " ");
+  return { start: fmt(start), end: fmt(end) };
 }
 
-// Helper: susun satu objek log siap-pakai dari record PocketBase (baik dari
-// getList maupun dari event realtime), supaya logikanya tidak ditulis 2x
-function buildLogEntry(record) {
-  const { name, role } = getUserInfo(record.expand?.user_id);
-  const created = new Date(record.created);
-
-  return {
-    id: record.id,
-    userName: name,
-    userRole: role,
-    aktivitas: record.aktivitas || record.msg || "Tidak ada aktivitas tercatat",
-    endpoint: record.endpoint || "-",
-    payload: formatPayload(record.payload_json),
-    statusCode:
-      record.status_code ??
-      (record.type === "succes" ? 200 : record.type === "warning" ? 400 : 200),
-    type: record.type || "info",
-    time: created.toLocaleTimeString("id-ID"),
-    date: created.toLocaleDateString("id-ID", {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-    }),
-  };
+function hariIndo() {
+  const hari = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
+  const bulan = [
+    "Januari",
+    "Februari",
+    "Maret",
+    "April",
+    "Mei",
+    "Juni",
+    "Juli",
+    "Agustus",
+    "September",
+    "Oktober",
+    "November",
+    "Desember",
+  ];
+  const now = new Date();
+  return `${hari[now.getDay()]}, ${now.getDate()} ${
+    bulan[now.getMonth()]
+  } ${now.getFullYear()}`;
 }
 
-export default function IctDashboard() {
-  const [stats, setStats] = useState({
-    totalUsers: 0,
-    activeTeachers: 0,
-    activeAdmins: 0,
-    dbStatus: "CONNECTING",
-  });
-
-  const [logs, setLogs] = useState([]);
-
-  useEffect(() => {
-    if (!pb.authStore.isValid) return;
-
-    async function fetchInitialStats() {
-      try {
-        const [allUsers, activeTeachers, activeAdmins] = await Promise.all([
-          pb.collection("users").getList(1, 1, {
-            filter: "is_aktif = true",
-            requestKey: null,
-          }),
-          pb.collection("users").getList(1, 1, {
-            filter: "is_aktif = true && role ~ 'guru_'",
-            requestKey: null,
-          }),
-          pb.collection("users").getList(1, 1, {
-            filter: "is_aktif = true && role = 'admin'",
-            requestKey: null,
-          }),
-        ]);
-
-        setStats({
-          totalUsers: allUsers.totalItems,
-          activeTeachers: activeTeachers.totalItems,
-          activeAdmins: activeAdmins.totalItems,
-          dbStatus: "ONLINE",
-        });
-      } catch (error) {
-        if (!error.isAbort) {
-          console.error("Gagal mengambil statistik database:", error);
-          setStats((prev) => ({ ...prev, dbStatus: "ERROR" }));
-        }
-      }
-    }
-
-    async function fetchInitialLogs() {
-      try {
-        const records = await pb.collection("system_logs").getList(1, 15, {
-          sort: "-created",
-          expand: "user_id",
-          requestKey: null,
-        });
-
-        setLogs(records.items.map(buildLogEntry));
-      } catch (error) {
-        if (!error.isAbort) {
-          console.error("Gagal mengambil data log awal:", error);
-        }
-      }
-    }
-
-    fetchInitialStats();
-    fetchInitialLogs();
-
-    // Subscribe realtime — expand juga disertakan agar nama user langsung
-    // tersedia tanpa perlu fetch ulang tiap ada log baru masuk
-    pb.collection("system_logs").subscribe(
-      "*",
-      function (e) {
-        if (e.action === "create") {
-          const newLog = buildLogEntry(e.record);
-          setLogs((prevLogs) => [newLog, ...prevLogs.slice(0, 14)]);
-        }
-      },
-      { expand: "user_id" },
-    );
-
-    return () => {
-      pb.collection("system_logs").unsubscribe("*");
-    };
-  }, []);
-
+function Card({ title, subtitle, children, className = "" }) {
   return (
-    <div className="space-y-6 text-slate-900">
-      {/* ── ROW 1: KARTU MONITORING STATISTIK REAL ── */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
-          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-            Status Database
-          </p>
-          <div className="flex items-center gap-2 mt-1">
-            <span
-              className={`h-2.5 w-2.5 rounded-full ${
-                stats.dbStatus === "ONLINE"
-                  ? "bg-emerald-500 animate-pulse"
-                  : stats.dbStatus === "CONNECTING"
-                    ? "bg-amber-500 animate-pulse"
-                    : "bg-red-500"
-              }`}
-            ></span>
-            <span className="text-lg font-bold text-slate-800">
-              {stats.dbStatus}
-            </span>
-          </div>
-          <p className="text-[11px] text-slate-400 mt-2">
-            PocketBase Live Connection
+    <div
+      className={`rounded-2xl border border-slate-200 bg-white p-5 shadow-sm ${className}`}
+    >
+      {title && (
+        <div className="mb-4">
+          <h2 className="text-sm font-semibold text-slate-800">{title}</h2>
+          {subtitle && (
+            <p className="mt-0.5 text-xs text-slate-400">{subtitle}</p>
+          )}
+        </div>
+      )}
+      {children}
+    </div>
+  );
+}
+
+function StatusBadge({ ok }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
+        ok
+          ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200"
+          : "bg-rose-50 text-rose-700 ring-1 ring-rose-200"
+      }`}
+    >
+      <span
+        className={`h-1.5 w-1.5 rounded-full ${
+          ok ? "bg-emerald-500" : "bg-rose-500"
+        }`}
+      />
+      {ok ? "Sudah" : "Belum"}
+    </span>
+  );
+}
+
+export default function OverviewAdminPage() {
+  const router = useRouter();
+
+  const [authChecked, setAuthChecked] = useState(false);
+  const [unauthorized, setUnauthorized] = useState(false);
+
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState("");
+
+  const [admin, setAdmin] = useState(null);
+  const [totalSiswa, setTotalSiswa] = useState(0);
+  const [totalKelas, setTotalKelas] = useState(0);
+
+  const [statusAbsensiPerKelas, setStatusAbsensiPerKelas] = useState([]); // [{kelas, sudah}]
+  const [statusAgendaPerKelas, setStatusAgendaPerKelas] = useState([]); // [{kelas, sudah}]
+  const [rankingKehadiran, setRankingKehadiran] = useState([]); // [{kelas, persen}]
+
+  // Cek autentikasi & role
+  useEffect(() => {
+    const currentUser = getCurrentUser();
+
+    if (!isAuthenticated() || !currentUser) {
+      router.push("/login");
+      return;
+    }
+
+    if (!ALLOWED_ROLES.includes(currentUser.role)) {
+      setUnauthorized(true);
+      setAuthChecked(true);
+      setLoading(false);
+      return;
+    }
+
+    setAdmin(currentUser);
+    setAuthChecked(true);
+  }, [router]);
+
+  // Ambil data dashboard setelah auth lolos
+  useEffect(() => {
+    if (!authChecked || unauthorized || !admin) return;
+
+    let isMounted = true;
+
+    async function loadDashboard() {
+      try {
+        setLoading(true);
+        setErrorMsg("");
+
+        // Data dasar: semua kelas & semua siswa
+        const semuaKelas = await pb.collection("kelas").getFullList();
+        const semuaSiswa = await pb.collection("siswa").getFullList();
+
+        if (isMounted) {
+          setTotalKelas(semuaKelas.length);
+          setTotalSiswa(semuaSiswa.length);
+        }
+
+        const { start: todayStart, end: todayEnd } = todayRange();
+        const { start: monthStart, end: monthEnd } = monthRange();
+
+        // Absensi hari ini -> kelas mana yang sudah/belum diisi
+        const absensiHariIni = await pb.collection("absensi").getFullList({
+          filter: `tanggal>="${todayStart}" && tanggal<"${todayEnd}"`,
+        });
+        const kelasSudahAbsenSet = new Set(
+          absensiHariIni.map((a) =>
+            Array.isArray(a.kelas_id) ? a.kelas_id[0] : a.kelas_id,
+          ),
+        );
+        const statusAbsensi = semuaKelas
+          .map((k) => ({ kelas: k, sudah: kelasSudahAbsenSet.has(k.id) }))
+          .sort((a, b) => Number(a.sudah) - Number(b.sudah));
+        if (isMounted) setStatusAbsensiPerKelas(statusAbsensi);
+
+        // Agenda mengajar hari ini -> kelas mana yang sudah/belum diisi
+        const agendaHariIni = await pb
+          .collection("agenda_mengajar")
+          .getFullList({
+            filter: `date>="${todayStart}" && date<"${todayEnd}"`,
+          });
+        const kelasSudahAgendaSet = new Set(
+          agendaHariIni.map((a) =>
+            Array.isArray(a.kelas_id) ? a.kelas_id[0] : a.kelas_id,
+          ),
+        );
+        const statusAgenda = semuaKelas
+          .map((k) => ({ kelas: k, sudah: kelasSudahAgendaSet.has(k.id) }))
+          .sort((a, b) => Number(a.sudah) - Number(b.sudah));
+        if (isMounted) setStatusAgendaPerKelas(statusAgenda);
+
+        // Rekap kehadiran bulan ini per kelas -> ranking terbaik & terendah
+        const absensiBulanIni = await pb.collection("absensi").getFullList({
+          filter: `tanggal>="${monthStart}" && tanggal<"${monthEnd}"`,
+        });
+        const rekapPerKelas = {};
+        semuaKelas.forEach((k) => {
+          rekapPerKelas[k.id] = { kelas: k, hadir: 0, total: 0 };
+        });
+        absensiBulanIni.forEach((a) => {
+          const kid = Array.isArray(a.kelas_id) ? a.kelas_id[0] : a.kelas_id;
+          if (!rekapPerKelas[kid]) return;
+          rekapPerKelas[kid].total += 1;
+          if (a.status === "hadir") rekapPerKelas[kid].hadir += 1;
+        });
+        const rankingHitung = Object.values(rekapPerKelas)
+          .map((r) => ({
+            ...r,
+            persen: r.total > 0 ? Math.round((r.hadir / r.total) * 100) : 0,
+          }))
+          .sort((a, b) => b.persen - a.persen);
+        if (isMounted) setRankingKehadiran(rankingHitung);
+
+        if (isMounted) setLoading(false);
+      } catch (err) {
+        console.error(err);
+        if (isMounted) {
+          setErrorMsg(
+            "Terjadi kesalahan saat memuat data dashboard. Coba muat ulang halaman.",
+          );
+          setLoading(false);
+        }
+      }
+    }
+
+    loadDashboard();
+    return () => {
+      isMounted = false;
+    };
+  }, [authChecked, unauthorized, admin]);
+
+  const kelasBelumAbsensi = statusAbsensiPerKelas.filter((s) => !s.sudah);
+  const kelasBelumAgenda = statusAgendaPerKelas.filter((s) => !s.sudah);
+  const jumlahSudahAbsensi =
+    statusAbsensiPerKelas.length - kelasBelumAbsensi.length;
+  const jumlahSudahAgenda =
+    statusAgendaPerKelas.length - kelasBelumAgenda.length;
+
+  const rankingValid = rankingKehadiran.filter((r) => r.total > 0);
+  const kelasTerbaik = rankingValid[0] || null;
+  const kelasTerendah = rankingValid[rankingValid.length - 1] || null;
+
+  // ---------------------------------------------------------------------
+  if (!authChecked) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center bg-slate-50">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" />
+      </div>
+    );
+  }
+
+  if (unauthorized) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center bg-slate-50 px-4">
+        <div className="max-w-md rounded-2xl border border-amber-200 bg-amber-50 p-6 text-center">
+          <p className="text-sm font-medium text-amber-700">
+            Anda tidak memiliki akses ke halaman ini.
           </p>
         </div>
+      </div>
+    );
+  }
 
-        <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
-          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-            Total Akun Aktif
-          </p>
-          <p className="text-lg font-bold text-slate-800 mt-1">
-            {stats.totalUsers}{" "}
-            <span className="text-xs text-slate-400 font-normal">User</span>
-          </p>
-          <p className="text-[11px] text-slate-400 mt-2">
-            Seluruh ekosistem gTeach Space
-          </p>
+  if (loading) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center bg-slate-50">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" />
+          <p className="text-sm text-slate-500">Memuat data sekolah...</p>
         </div>
+      </div>
+    );
+  }
 
-        <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
-          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-            Guru Terintegrasi
-          </p>
-          <p className="text-lg font-bold text-blue-600 mt-1">
-            {stats.activeTeachers}{" "}
-            <span className="text-xs text-slate-400 font-normal">Akun</span>
-          </p>
-          <p className="text-[11px] text-slate-400 mt-2">
-            Mapel, Wali Kelas, & Pendamping
-          </p>
+  if (errorMsg) {
+    return (
+      <div className="flex min-h-[60vh] items-center justify-center bg-slate-50 px-4">
+        <div className="max-w-md rounded-2xl border border-rose-200 bg-rose-50 p-6 text-center">
+          <p className="text-sm font-medium text-rose-700">{errorMsg}</p>
         </div>
+      </div>
+    );
+  }
 
-        <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm">
-          <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-            Administrator
+  // ---------------------------------------------------------------------
+  return (
+    <div className="min-h-screen bg-slate-50 pb-16">
+      {/* Header */}
+      <div className="border-b border-slate-200">
+        <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
+          <p className="text-xs font-medium uppercase tracking-wide text-indigo-500">
+            {hariIndo()}
           </p>
-          <p className="text-lg font-bold text-slate-800 mt-1">
-            {stats.activeAdmins}{" "}
-            <span className="text-xs text-slate-400 font-normal">Staff</span>
-          </p>
-          <p className="text-[11px] text-slate-400 mt-2">
-            Pemegang hak akses manajemen
+          <h1 className="mt-1 text-2xl font-bold text-slate-900">
+            {getGreetingByTime()} {admin?.nama_lengkap || "Guru"} 👋
+          </h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Ringkasan aktivitas sekolah hari ini
           </p>
         </div>
       </div>
 
-      {/* ── ROW 2: LIVE LOGS TRACKER CONSOLE STYLE ── */}
-      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-        <div className="px-5 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-          <div>
-            <h3 className="text-sm font-bold text-slate-800">
-              Aktivitas Sistem Terkini (Real-time Logs)
-            </h3>
-            <p className="text-[11px] text-slate-400">
-              Log sinkron otomatis dari server tanpa perlu reload halaman
+      <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-6">
+        {/* Ringkasan angka */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <Card>
+            <p className="text-xs font-medium text-slate-400">Total Siswa</p>
+            <p className="mt-2 text-3xl font-bold text-slate-900">
+              {totalSiswa}
             </p>
-          </div>
-          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-600 text-white animate-pulse">
-            ● Live Stream Active
-          </span>
+          </Card>
+
+          <Card>
+            <p className="text-xs font-medium text-slate-400">Total Kelas</p>
+            <p className="mt-2 text-3xl font-bold text-slate-900">
+              {totalKelas}
+            </p>
+          </Card>
+
+          <Card>
+            <p className="text-xs font-medium text-slate-400">
+              Kelas Sudah Absensi
+            </p>
+            <p className="mt-2 text-3xl font-bold text-slate-900">
+              {jumlahSudahAbsensi}
+              <span className="ml-1 text-sm font-normal text-slate-400">
+                / {totalKelas}
+              </span>
+            </p>
+          </Card>
+
+          <Card>
+            <p className="text-xs font-medium text-slate-400">
+              Kelas Sudah Isi Agenda
+            </p>
+            <p className="mt-2 text-3xl font-bold text-slate-900">
+              {jumlahSudahAgenda}
+              <span className="ml-1 text-sm font-normal text-slate-400">
+                / {totalKelas}
+              </span>
+            </p>
+          </Card>
         </div>
 
-        <div className="p-6 bg-white text-[12px] text-slate-600 min-h-[400px] overflow-y-auto rounded-2xl border border-slate-200/80 font-sans shadow-sm">
-          {logs.length === 0 ? (
-            <div className="text-slate-400 text-center py-20 font-mono">
-              [Belum ada aktivitas log tercatat di database...]
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse min-w-[1000px]">
-                <thead>
-                  <tr className="border-b border-slate-100 text-slate-400 uppercase tracking-wider text-[10.5px] font-bold">
-                    <th className="pb-4 px-4 font-semibold w-[220px]">User</th>
-                    <th className="pb-4 px-4 font-semibold">Aktivitas</th>
-                    <th className="pb-4 px-4 font-semibold w-[120px]">
-                      Endpoint
-                    </th>
-                    <th className="pb-4 px-4 font-semibold w-[220px]">
-                      Payload
-                    </th>
-                    <th className="pb-4 px-4 font-semibold w-[90px]">Status</th>
-                    <th className="pb-4 px-4 font-semibold w-[100px]">Tipe</th>
-                    <th className="pb-4 px-4 font-semibold w-[110px] text-right">
-                      Waktu
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {logs.map((log) => {
-                    const style = getStatusStyle(log.statusCode, log.type);
-                    const initials = log.userName
-                      .split(" ")
-                      .filter(Boolean)
-                      .map((n) => n[0])
-                      .join("")
-                      .slice(0, 2)
-                      .toUpperCase();
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          {/* Status absensi per kelas */}
+          <Card
+            title="Status Absensi Hari Ini"
+            subtitle="Kelas yang belum mengisi absensi ditampilkan lebih dulu"
+          >
+            {statusAbsensiPerKelas.length === 0 ? (
+              <p className="text-sm text-slate-400">Belum ada data kelas.</p>
+            ) : (
+              <ul className="max-h-80 space-y-2 overflow-y-auto pr-1">
+                {statusAbsensiPerKelas.map((s) => (
+                  <li
+                    key={s.kelas.id}
+                    className="flex items-center justify-between rounded-xl px-3 py-2 hover:bg-slate-50"
+                  >
+                    <span className="truncate text-sm text-slate-700">
+                      {s.kelas.nama_kelas}
+                    </span>
+                    <StatusBadge ok={s.sudah} />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
 
-                    return (
-                      <tr
-                        key={log.id}
-                        className="hover:bg-slate-50/80 transition-colors group"
-                      >
-                        {/* 1. USER */}
-                        <td className="py-4 px-4 flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center text-[11px] font-bold text-emerald-600 font-mono shrink-0">
-                            {initials || "?"}
-                          </div>
-                          <div className="flex flex-col min-w-0">
-                            <span className="font-semibold text-slate-700 truncate">
-                              {log.userName}
-                            </span>
-                            <span className="text-[10px] text-slate-400 uppercase tracking-wider mt-0.5">
-                              {log.userRole}
-                            </span>
-                          </div>
-                        </td>
+          {/* Status agenda per kelas */}
+          <Card
+            title="Status Agenda Mengajar Hari Ini"
+            subtitle="Kelas yang belum mengisi agenda ditampilkan lebih dulu"
+          >
+            {statusAgendaPerKelas.length === 0 ? (
+              <p className="text-sm text-slate-400">Belum ada data kelas.</p>
+            ) : (
+              <ul className="max-h-80 space-y-2 overflow-y-auto pr-1">
+                {statusAgendaPerKelas.map((s) => (
+                  <li
+                    key={s.kelas.id}
+                    className="flex items-center justify-between rounded-xl px-3 py-2 hover:bg-slate-50"
+                  >
+                    <span className="truncate text-sm text-slate-700">
+                      {s.kelas.nama_kelas}
+                    </span>
+                    <StatusBadge ok={s.sudah} />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        </div>
 
-                        {/* 2. AKTIVITAS */}
-                        <td className="py-4 px-4 text-slate-600 leading-relaxed max-w-[280px]">
-                          {log.aktivitas}
-                        </td>
+        {/* Kelas terbaik & terendah */}
+        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+          <Card
+            title="Kelas dengan Kehadiran Terbaik"
+            subtitle="Persentase hadir bulan ini"
+          >
+            {kelasTerbaik ? (
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-lg font-bold text-slate-900">
+                    {kelasTerbaik.kelas.nama_kelas}
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    {kelasTerbaik.hadir}/{kelasTerbaik.total} kehadiran tercatat
+                  </p>
+                </div>
+                <span className="rounded-full bg-emerald-50 px-3 py-1.5 text-lg font-bold text-emerald-700 ring-1 ring-emerald-200">
+                  {kelasTerbaik.persen}%
+                </span>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-400">
+                Belum ada data absensi bulan ini.
+              </p>
+            )}
+          </Card>
 
-                        {/* 3. ENDPOINT */}
-                        <td className="py-4 px-4">
-                          <span className="px-2 py-0.5 rounded bg-slate-50 border border-slate-200/60 text-slate-500 font-mono text-[11px]">
-                            {log.endpoint}
-                          </span>
-                        </td>
-
-                        {/* 4. PAYLOAD */}
-                        <td
-                          className="py-4 px-4 font-mono text-[11px] text-slate-500 max-w-[220px] truncate"
-                          title={log.payload}
-                        >
-                          {log.payload}
-                        </td>
-
-                        {/* 5. STATUS */}
-                        <td className="py-4 px-4 font-bold">
-                          <div className="flex items-center gap-1.5">
-                            <span
-                              className={`w-1.5 h-1.5 rounded-full ${style.dot}`}
-                            />
-                            <span className={style.text}>{log.statusCode}</span>
-                          </div>
-                        </td>
-
-                        {/* 6. TIPE */}
-                        <td className="py-4 px-4">
-                          <span
-                            className={`px-2.5 py-0.5 rounded-md border text-[10px] font-bold tracking-wider uppercase ${style.badge}`}
-                          >
-                            {log.type}
-                          </span>
-                        </td>
-
-                        {/* 7. WAKTU */}
-                        <td className="py-4 px-4 text-right">
-                          <div className="flex flex-col font-mono text-[11px]">
-                            <span className="text-slate-700 font-semibold">
-                              {log.time}
-                            </span>
-                            <span className="text-[10px] text-slate-400 mt-0.5">
-                              {log.date}
-                            </span>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <Card
+            title="Kelas dengan Kehadiran Terendah"
+            subtitle="Persentase hadir bulan ini"
+          >
+            {kelasTerendah ? (
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-lg font-bold text-slate-900">
+                    {kelasTerendah.kelas.nama_kelas}
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    {kelasTerendah.hadir}/{kelasTerendah.total} kehadiran
+                    tercatat
+                  </p>
+                </div>
+                <span className="rounded-full bg-rose-50 px-3 py-1.5 text-lg font-bold text-rose-700 ring-1 ring-rose-200">
+                  {kelasTerendah.persen}%
+                </span>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-400">
+                Belum ada data absensi bulan ini.
+              </p>
+            )}
+          </Card>
         </div>
       </div>
     </div>
