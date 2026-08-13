@@ -4,6 +4,38 @@ import { getCurrentUser, pb } from "@/lib/pocketbase";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
+// ================================================================
+// FORMAT GRADE UTILITY - 00.00 (2 digit sebelum dan sesudah koma)
+// ================================================================
+function formatGrade(value) {
+  const num = Number(value);
+  if (isNaN(num) || num < 0) return null;
+
+  // Batasi maksimal 99.99
+  const clamped = Math.min(num, 99.99);
+
+  // Format dengan 2 digit desimal
+  const formatted = clamped.toFixed(2);
+
+  // Pastikan 2 digit sebelum koma
+  const parts = formatted.split(".");
+  const whole = parts[0].padStart(2, "0");
+  const decimal = parts[1] || "00";
+
+  return `${whole}.${decimal}`;
+}
+
+// ================================================================
+// GET GRADE COLOR - Merah jika < 70
+// ================================================================
+function getGradeColor(value) {
+  const n = Number(value);
+  if (value === null || value === undefined || Number.isNaN(n))
+    return "text-slate-400";
+  if (n < 70) return "text-red-600";
+  return "text-emerald-600";
+}
+
 export default function DetailPenilaianPage() {
   const { id: mapelId } = useParams(); // id mata_pelajaran
   const router = useRouter();
@@ -166,19 +198,30 @@ export default function DetailPenilaianPage() {
     loadNilaiUjian();
   }, [selectedUjianId, ploting, siswaList]);
 
-  // ================= NILAI AKHIR REALTIME =================
+  // ================= NILAI AKHIR REALTIME dengan format 00.00 =================
   const nilaiAkhirMap = useMemo(() => {
     const result = {};
     siswaList.forEach((s) => {
       const nilaiSiswa = nilaiHarian[s.id] || {};
       const nilaiTerisi = lingkupList
         .map((lm) => nilaiSiswa[lm.id]?.nilai)
-        .filter((v) => typeof v === "number");
+        .filter((v) => typeof v === "number" && !isNaN(v));
 
-      result[s.id] =
-        nilaiTerisi.length > 0
-          ? nilaiTerisi.reduce((a, b) => a + b, 0) / nilaiTerisi.length
-          : null;
+      if (nilaiTerisi.length > 0) {
+        const average =
+          nilaiTerisi.reduce((a, b) => a + b, 0) / nilaiTerisi.length;
+        result[s.id] = {
+          value: average,
+          formatted: formatGrade(average),
+          color: getGradeColor(average),
+        };
+      } else {
+        result[s.id] = {
+          value: null,
+          formatted: null,
+          color: "text-gray-400",
+        };
+      }
     });
     return result;
   }, [nilaiHarian, lingkupList, siswaList]);
@@ -545,6 +588,7 @@ export default function DetailPenilaianPage() {
               <tbody>
                 {siswaList.map((siswa, idx) => {
                   const rowBg = idx % 2 === 0 ? "bg-white" : "bg-gray-50";
+                  const nilaiAkhir = nilaiAkhirMap[siswa.id];
                   return (
                     <tr key={siswa.id} className={rowBg}>
                       <td
@@ -585,10 +629,10 @@ export default function DetailPenilaianPage() {
                           </td>
                         );
                       })}
-                      <td className="px-4 py-2.5 text-center font-extrabold text-blue-700 bg-blue-50/50">
-                        {nilaiAkhirMap[siswa.id] !== null
-                          ? nilaiAkhirMap[siswa.id].toFixed(1)
-                          : "-"}
+                      <td
+                        className={`px-4 py-2.5 text-center font-extrabold font-mono ${nilaiAkhir?.color || "text-gray-400"} bg-blue-50/50`}
+                      >
+                        {nilaiAkhir?.formatted || "-"}
                       </td>
                     </tr>
                   );
@@ -655,6 +699,14 @@ export default function DetailPenilaianPage() {
                         const cellKey = `ujian-${siswa.id}`;
                         const status = cellStatus[cellKey];
                         const currentValue = nilaiUjian[siswa.id]?.nilai;
+                        const nilaiDisplay =
+                          currentValue !== undefined && currentValue !== null
+                            ? formatGrade(currentValue)
+                            : null;
+                        const colorClass =
+                          currentValue !== undefined && currentValue !== null
+                            ? getGradeColor(currentValue)
+                            : "text-gray-400";
                         return (
                           <tr
                             key={siswa.id}

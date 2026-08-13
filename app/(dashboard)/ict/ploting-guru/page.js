@@ -308,33 +308,29 @@ export default function PlotingGuruPage() {
           }
         }
 
-        await pb
-          .collection("ploting_guru")
-          .update(
-            editingRecord.id,
-            {
-              guru_id: form.guruId,
-              mapel_id: form.mapelId,
-              kelas_id: eligibleIds,
-            },
-            { requestKey: null },
-          );
+        await pb.collection("ploting_guru").update(
+          editingRecord.id,
+          {
+            guru_id: form.guruId,
+            mapel_id: form.mapelId,
+            kelas_id: eligibleIds,
+          },
+          { requestKey: null },
+        );
 
         setMessage({
           type: "success",
           text: `Ploting diperbarui — tertaut ke ${eligibleIds.length} kelas.`,
         });
       } else {
-        await pb
-          .collection("ploting_guru")
-          .create(
-            {
-              guru_id: form.guruId,
-              mapel_id: form.mapelId,
-              kelas_id: eligibleIds,
-            },
-            { requestKey: null },
-          );
+        await pb.collection("ploting_guru").create(
+          {
+            guru_id: form.guruId,
+            mapel_id: form.mapelId,
+            kelas_id: eligibleIds,
+          },
+          { requestKey: null },
+        );
 
         setMessage({
           type: "success",

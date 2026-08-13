@@ -134,6 +134,7 @@ export default function AdminLayout({ children }) {
       Cookies.remove("pb_auth", { path: "/" });
       setUser(null);
       router.replace("/login");
+      location.reload();
     } catch (logError) {
       console.error("Gagal proses logout:", logError);
       router.replace("/login");

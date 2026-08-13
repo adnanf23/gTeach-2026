@@ -11,11 +11,34 @@ function firstOf(val) {
   return Array.isArray(val) ? val[0] : val;
 }
 
+// ================================================================
+// FORMAT GRADE UTILITY - 00.00 (2 digit sebelum dan sesudah koma)
+// ================================================================
+function formatGrade(value) {
+  const num = Number(value);
+  if (isNaN(num) || num < 0) return null;
+
+  // Batasi maksimal 99.99
+  const clamped = Math.min(num, 99.99);
+
+  // Format dengan 2 digit desimal
+  const formatted = clamped.toFixed(2);
+
+  // Pastikan 2 digit sebelum koma
+  const parts = formatted.split(".");
+  const whole = parts[0].padStart(2, "0");
+  const decimal = parts[1] || "00";
+
+  return `${whole}.${decimal}`;
+}
+
+// ================================================================
+// GET GRADE COLOR - Merah jika < 70
+// ================================================================
 function nilaiColor(n) {
   if (n === null || n === undefined || Number.isNaN(n)) return "text-slate-400";
-  if (n >= 80) return "text-emerald-600";
-  if (n >= 60) return "text-amber-600";
-  return "text-red-600";
+  if (n < 70) return "text-red-600";
+  return "text-emerald-600";
 }
 
 function getKelasBadge(kelas) {
@@ -655,6 +678,7 @@ export default function PenilaianGuruMapelPage() {
   }
 
   // Nilai akhir realtime = rata-rata seluruh lingkup materi yang sudah terisi
+  // dengan format 00.00 dan warna merah jika < 70
   const nilaiAkhirBySiswa = useMemo(() => {
     const result = {};
     for (const s of siswaList) {
@@ -669,16 +693,33 @@ export default function PenilaianGuruMapelPage() {
             !Number.isNaN(Number(v)),
         )
         .map(Number);
-      result[s.id] = nums.length
-        ? nums.reduce((a, b) => a + b, 0) / nums.length
-        : null;
+
+      if (nums.length > 0) {
+        const average = nums.reduce((a, b) => a + b, 0) / nums.length;
+        result[s.id] = {
+          value: average,
+          formatted: formatGrade(average),
+          color: nilaiColor(average),
+        };
+      } else {
+        result[s.id] = {
+          value: null,
+          formatted: null,
+          color: "text-slate-400",
+        };
+      }
     }
     return result;
   }, [siswaList, lingkupList, nilaiMap]);
 
+  // Rata-rata kelas dengan format 00.00
   const rataRataKelas = useMemo(() => {
-    const vals = Object.values(nilaiAkhirBySiswa).filter((v) => v !== null);
-    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+    const vals = Object.values(nilaiAkhirBySiswa)
+      .filter((v) => v.value !== null)
+      .map((v) => v.value);
+    if (vals.length === 0) return null;
+    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+    return formatGrade(avg);
   }, [nilaiAkhirBySiswa]);
 
   function handleTabChange(tab) {
@@ -935,8 +976,8 @@ export default function PenilaianGuruMapelPage() {
                   <p className="text-[10px] uppercase text-blue-100">
                     Rata-rata Kelas
                   </p>
-                  <p className="text-lg font-bold">
-                    {rataRataKelas !== null ? rataRataKelas.toFixed(1) : "—"}
+                  <p className="text-lg font-bold font-mono">
+                    {rataRataKelas || "—"}
                   </p>
                 </div>
               </div>
@@ -1401,9 +1442,9 @@ export default function PenilaianGuruMapelPage() {
                                 })}
                                 <td className="px-4 py-2 text-center bg-blue-50/30">
                                   <span
-                                    className={`font-bold ${nilaiColor(akhir)}`}
+                                    className={`font-bold font-mono ${akhir?.color || "text-slate-400"}`}
                                   >
-                                    {akhir !== null ? akhir.toFixed(1) : "—"}
+                                    {akhir?.formatted || "—"}
                                   </span>
                                 </td>
                               </tr>
@@ -1490,6 +1531,18 @@ export default function PenilaianGuruMapelPage() {
                                 const cell = nilaiUjian[s.id];
                                 const isSaving = savingUjianCell === s.id;
                                 const isSaved = savedUjianFlash === s.id;
+                                const nilaiDisplay =
+                                  cell?.nilai !== undefined &&
+                                  cell?.nilai !== null &&
+                                  cell?.nilai !== ""
+                                    ? formatGrade(cell.nilai)
+                                    : null;
+                                const colorClass =
+                                  cell?.nilai !== undefined &&
+                                  cell?.nilai !== null &&
+                                  cell?.nilai !== ""
+                                    ? nilaiColor(cell.nilai)
+                                    : "text-slate-400";
                                 return (
                                   <tr
                                     key={s.id}

@@ -440,6 +440,101 @@ export default function MataPelajaranPage() {
     }
   };
 
+  // ------------------------------------------------------------------
+  // Render helper untuk item list (card view)
+  // ------------------------------------------------------------------
+  const renderMapelCard = (m) => {
+    const relatedKelas = m.expand?.spesifik_kelas_id
+      ? Array.isArray(m.expand.spesifik_kelas_id)
+        ? m.expand.spesifik_kelas_id
+        : [m.expand.spesifik_kelas_id]
+      : [];
+
+    return (
+      <div
+        key={m.id}
+        className="bg-white rounded-2xl p-4 shadow-sm border border-neutral-100"
+      >
+        <div className="flex items-start justify-between mb-2">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-semibold text-neutral-600">
+                {m.kode_mapel}
+              </span>
+              <span className="text-xs text-neutral-400">•</span>
+              <span className="text-xs font-medium text-neutral-500">
+                {m.nama_mapel}
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-1 mt-1">
+              {(m.target_tingkat || []).map((t) => (
+                <span
+                  key={t}
+                  className="rounded-full bg-orange-50 px-2 py-0.5 text-xs font-medium text-orange-700 ring-1 ring-orange-200"
+                >
+                  Tingkat {t}
+                </span>
+              ))}
+            </div>
+          </div>
+          <div className="flex gap-1 flex-shrink-0">
+            <button
+              onClick={() => openEdit(m)}
+              className="rounded-lg p-2 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700"
+              title="Edit"
+            >
+              <svg
+                className="h-4 w-4"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                />
+              </svg>
+            </button>
+            <button
+              onClick={() => setDeleteTarget(m)}
+              className="rounded-lg p-2 text-neutral-400 transition hover:bg-rose-50 hover:text-rose-600"
+              title="Hapus"
+            >
+              <svg
+                className="h-4 w-4"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3M4 7h16"
+                />
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div className="text-xs text-neutral-500 mt-2 pt-2 border-t border-neutral-50">
+          {relatedKelas.length === 0 ? (
+            <span className="text-xs italic text-neutral-400">
+              Berlaku untuk semua kelas tingkat{" "}
+              {(m.target_tingkat || []).join(", ")}
+            </span>
+          ) : (
+            <span>
+              <span className="font-medium text-neutral-600">Khusus: </span>
+              {relatedKelas.map((k) => k.nama_kelas).join(", ")}
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-[#F7F7F5] text-neutral-900">
       <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
@@ -525,7 +620,7 @@ export default function MataPelajaranPage() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Cari nama / kode mapel"
-                className="rounded-full border border-neutral-200 bg-neutral-50 py-2 pl-9 pr-3 text-sm focus:border-orange-400 focus:outline-none focus:ring-2 focus:ring-orange-100"
+                className="w-full sm:w-auto rounded-full border border-neutral-200 bg-neutral-50 py-2 pl-9 pr-3 text-sm focus:border-orange-400 focus:outline-none focus:ring-2 focus:ring-orange-100"
               />
             </div>
             <select
@@ -553,112 +648,134 @@ export default function MataPelajaranPage() {
             </p>
           </div>
         ) : (
-          <div className="overflow-hidden rounded-2xl bg-white shadow-sm">
-            <table className="w-full text-left text-sm">
-              <thead>
-                <tr className="border-b border-neutral-100 bg-neutral-50 text-xs uppercase tracking-wide text-neutral-400">
-                  <th className="px-5 py-3 font-medium">Kode</th>
-                  <th className="px-5 py-3 font-medium">Nama mapel</th>
-                  <th className="px-5 py-3 font-medium">Target tingkat</th>
-                  <th className="px-5 py-3 font-medium">Berlaku untuk</th>
-                  <th className="px-5 py-3 font-medium text-right">Aksi</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-neutral-50">
-                {filteredMapel.map((m) => {
-                  const relatedKelas = m.expand?.spesifik_kelas_id
-                    ? Array.isArray(m.expand.spesifik_kelas_id)
-                      ? m.expand.spesifik_kelas_id
-                      : [m.expand.spesifik_kelas_id]
-                    : [];
-                  return (
-                    <tr
-                      key={m.id}
-                      className="transition hover:bg-neutral-50/60"
-                    >
-                      <td className="px-5 py-3">
-                        <span className="rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-semibold text-neutral-600">
-                          {m.kode_mapel}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3 font-medium text-neutral-800">
-                        {m.nama_mapel}
-                      </td>
-                      <td className="px-5 py-3">
-                        <div className="flex flex-wrap gap-1">
-                          {(m.target_tingkat || []).map((t) => (
-                            <span
-                              key={t}
-                              className="rounded-full bg-orange-50 px-2 py-0.5 text-xs font-medium text-orange-700 ring-1 ring-orange-200"
-                            >
-                              {t}
-                            </span>
-                          ))}
-                        </div>
-                      </td>
-                      <td className="px-5 py-3 text-neutral-500">
-                        {relatedKelas.length === 0 ? (
-                          <span className="text-xs italic text-neutral-400">
-                            Semua kelas tingkat{" "}
-                            {(m.target_tingkat || []).join(", ")}
-                          </span>
-                        ) : (
-                          <span className="text-xs">
-                            <span className="font-medium text-neutral-600">
-                              Khusus:{" "}
-                            </span>
-                            {relatedKelas.map((k) => k.nama_kelas).join(", ")}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-5 py-3">
-                        <div className="flex justify-end gap-1.5">
-                          <button
-                            onClick={() => openEdit(m)}
-                            className="rounded-lg p-2 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700"
-                            title="Edit"
-                          >
-                            <svg
-                              className="h-4 w-4"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                              />
-                            </svg>
-                          </button>
-                          <button
-                            onClick={() => setDeleteTarget(m)}
-                            className="rounded-lg p-2 text-neutral-400 transition hover:bg-rose-50 hover:text-rose-600"
-                            title="Hapus"
-                          >
-                            <svg
-                              className="h-4 w-4"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3M4 7h16"
-                              />
-                            </svg>
-                          </button>
-                        </div>
-                      </td>
+          <>
+            {/* Mobile: Card View (hidden on sm and up) */}
+            <div className="block sm:hidden space-y-3">
+              {filteredMapel.map((m) => renderMapelCard(m))}
+            </div>
+
+            {/* Tablet & Desktop: Table View with horizontal scroll */}
+            <div className="hidden sm:block overflow-hidden rounded-2xl bg-white shadow-sm">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm min-w-[640px]">
+                  <thead>
+                    <tr className="border-b border-neutral-100 bg-neutral-50 text-xs uppercase tracking-wide text-neutral-400">
+                      <th className="px-5 py-3 font-medium whitespace-nowrap">
+                        Kode
+                      </th>
+                      <th className="px-5 py-3 font-medium whitespace-nowrap">
+                        Nama mapel
+                      </th>
+                      <th className="px-5 py-3 font-medium whitespace-nowrap">
+                        Target tingkat
+                      </th>
+                      <th className="px-5 py-3 font-medium whitespace-nowrap">
+                        Berlaku untuk
+                      </th>
+                      <th className="px-5 py-3 font-medium text-right whitespace-nowrap">
+                        Aksi
+                      </th>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                  </thead>
+                  <tbody className="divide-y divide-neutral-50">
+                    {filteredMapel.map((m) => {
+                      const relatedKelas = m.expand?.spesifik_kelas_id
+                        ? Array.isArray(m.expand.spesifik_kelas_id)
+                          ? m.expand.spesifik_kelas_id
+                          : [m.expand.spesifik_kelas_id]
+                        : [];
+                      return (
+                        <tr
+                          key={m.id}
+                          className="transition hover:bg-neutral-50/60"
+                        >
+                          <td className="px-5 py-3 whitespace-nowrap">
+                            <span className="rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-semibold text-neutral-600">
+                              {m.kode_mapel}
+                            </span>
+                          </td>
+                          <td className="px-5 py-3 font-medium text-neutral-800 whitespace-nowrap">
+                            {m.nama_mapel}
+                          </td>
+                          <td className="px-5 py-3">
+                            <div className="flex flex-wrap gap-1">
+                              {(m.target_tingkat || []).map((t) => (
+                                <span
+                                  key={t}
+                                  className="rounded-full bg-orange-50 px-2 py-0.5 text-xs font-medium text-orange-700 ring-1 ring-orange-200"
+                                >
+                                  {t}
+                                </span>
+                              ))}
+                            </div>
+                          </td>
+                          <td className="px-5 py-3 text-neutral-500">
+                            {relatedKelas.length === 0 ? (
+                              <span className="text-xs italic text-neutral-400 whitespace-nowrap">
+                                Semua kelas tingkat{" "}
+                                {(m.target_tingkat || []).join(", ")}
+                              </span>
+                            ) : (
+                              <span className="text-xs">
+                                <span className="font-medium text-neutral-600">
+                                  Khusus:{" "}
+                                </span>
+                                {relatedKelas
+                                  .map((k) => k.nama_kelas)
+                                  .join(", ")}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-5 py-3">
+                            <div className="flex justify-end gap-1.5">
+                              <button
+                                onClick={() => openEdit(m)}
+                                className="rounded-lg p-2 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700"
+                                title="Edit"
+                              >
+                                <svg
+                                  className="h-4 w-4"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                                  />
+                                </svg>
+                              </button>
+                              <button
+                                onClick={() => setDeleteTarget(m)}
+                                className="rounded-lg p-2 text-neutral-400 transition hover:bg-rose-50 hover:text-rose-600"
+                                title="Hapus"
+                              >
+                                <svg
+                                  className="h-4 w-4"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3M4 7h16"
+                                  />
+                                </svg>
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
         )}
       </div>
 
