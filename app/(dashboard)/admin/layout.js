@@ -67,8 +67,8 @@ const NAV = [
   },
   {
     key: "absensi",
-    label: "Absensi Kelas",
-    href: "/admin/absensi",
+    label: "Track Harian",
+    href: "/admin/tracker",
     icon: "absensi",
   },
   {
@@ -84,18 +84,6 @@ const NAV = [
     href: "/admin/manajemen-ujian",
     icon: "pembelajaran",
   },
-  // {
-  //   key: "pengaturan ajaran",
-  //   label: "Pengaturan",
-  //   href: "/admin/pengaturan-ajaran",
-  //   icon: "pengaturan",
-  // },
-  // {
-  //   key: "cetak",
-  //   label: "Cetak Rapor",
-  //   href: "/admin/cetak-rapor",
-  //   icon: "absensi",
-  // },
 ];
 
 export default function AdminLayout({ children }) {
@@ -112,18 +100,15 @@ export default function AdminLayout({ children }) {
     }
   }, [router]);
 
-  // 1. Tambahkan keyword 'async' di sini
   const handleLogout = async () => {
     try {
       const currentEndpoint =
         typeof window !== "undefined" ? window.location.pathname : "-";
 
-      // 1. Ambil snapshot data user saat ini sebelum dihapus dari state
       const targetUser = user || pb.authStore.model;
 
-      // 2. Tembak log ke backend TANPA await agar user tidak menunggu loading
       createSystemLog({
-        type: "succes", // Menyiasati typo 'succes' di database
+        type: "succes",
         msg: `User '${targetUser?.nama_lengkap || "User"}( ${targetUser?.role} )' berhasil logout dari sistem.`,
         endpoint: currentEndpoint,
         statusCode: 200,
@@ -132,24 +117,19 @@ export default function AdminLayout({ children }) {
           role: targetUser?.role,
         },
       }).catch((err) => console.error("Gagal mencatat log logout:", err));
-      // .catch di atas menjaga jika server log error, aplikasi tidak crash
 
-      // 3. Langsung eksekusi proses bersih-bersih auth (Instan bagi user)
       pb.authStore.clear();
       Cookies.remove("pb_auth", { path: "/" });
       setUser(null);
       router.replace("/login");
     } catch (logError) {
-      // Fallback jika ada error fatal di block try
       console.error("Gagal proses logout:", logError);
-      // Tetap paksa pindah halaman jika terjadi error terduga
       router.replace("/login");
     } finally {
       location.reload();
     }
   };
 
-  // Menggabungkan menu utama dengan menu ICT secara dinamis jika role sesuai
   const currentNavList = user?.role === "ict" ? [...NAV, ...ICT_NAV] : NAV;
 
   const activeKey =
@@ -190,7 +170,6 @@ export default function AdminLayout({ children }) {
             <h1 className="text-lg font-semibold text-gray-800 leading-tight truncate">
               gTeach Space
             </h1>
-            {/* Teks sub-header berubah dinamis mengikuti role */}
             <p className="text-[10.5px] text-gray-400">
               {user?.role === "ict" ? "ICT Technical Server" : "Administrator"}
             </p>
@@ -205,7 +184,6 @@ export default function AdminLayout({ children }) {
 
         {/* List Menu Navigasi */}
         <div className="pt-2 pb-2 flex-1">
-          {/* Menggunakan list menu dinamis hasil filter role */}
           {currentNavList.map(({ key, label, icon, href }) => {
             const isActive = activeKey === key;
             return (
