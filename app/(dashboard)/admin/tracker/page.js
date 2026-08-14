@@ -186,7 +186,7 @@ export default function AgendaAbsensiDashboardPage() {
   const totalSiswa = siswaList.length;
 
   return (
-    <div className="min-h-screen bg-[#F7F7F5] text-neutral-900">
+    <div className="min-h-screen text-neutral-900">
       <div className="mx-auto max-w-7xl px-3 sm:px-4 md:px-6 lg:px-8 py-4 sm:py-6">
         {/* Top bar: brand + tab pills + profile */}
         <div className="mb-6 md:mb-8 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white px-3 sm:px-5 py-3 shadow-sm">
@@ -547,7 +547,7 @@ function RankingCard({ title, subtitle, data, variant, valueLabel }) {
 }
 
 // ------------------------------------------------------------------
-// TOOLBAR - Updated with better layout
+// TOOLBAR
 // ------------------------------------------------------------------
 function Toolbar({
   title,
@@ -607,9 +607,8 @@ function Toolbar({
         </div>
       </div>
 
-      {/* Baris 2: Filter Status + Filter Kelas (di bawah tanggal) */}
+      {/* Baris 2: Filter Status + Filter Kelas */}
       <div className="flex flex-wrap items-center gap-2 rounded-xl bg-white p-3 sm:p-4 shadow-sm">
-        {/* Filter Status */}
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] sm:text-xs font-medium text-neutral-500 mr-1 hidden sm:inline">
             Status:
@@ -636,16 +635,12 @@ function Toolbar({
           </div>
         </div>
 
-        {/* Divider */}
         <div className="hidden sm:block w-px h-6 bg-neutral-200 mx-1" />
 
-        {/* Filter Kelas */}
         <div className="flex items-center gap-1.5 flex-1">
           <span className="text-[10px] sm:text-xs font-medium text-neutral-500 mr-1 hidden sm:inline">
             Kelas:
           </span>
-
-          {/* Desktop: Select */}
           <select
             value={filterKelas}
             onChange={(e) => setFilterKelas(e.target.value)}
@@ -659,7 +654,6 @@ function Toolbar({
             ))}
           </select>
 
-          {/* Mobile: Button dropdown */}
           <button
             onClick={() => setIsKelasOpen(!isKelasOpen)}
             className="sm:hidden flex-1 rounded-full border border-neutral-200 bg-white px-3 py-1.5 text-xs font-medium text-neutral-600 flex items-center justify-between"
@@ -685,7 +679,6 @@ function Toolbar({
             </svg>
           </button>
 
-          {/* Mobile dropdown */}
           {isKelasOpen && (
             <div className="absolute left-0 right-0 top-full mt-1 bg-white rounded-xl shadow-lg border border-neutral-200 p-2 z-50 sm:hidden max-h-[200px] overflow-y-auto">
               <button
@@ -738,11 +731,49 @@ function AgendaTab({
   const [agendaTanggal, setAgendaTanggal] = useState([]);
   const [loadingRange, setLoadingRange] = useState(true);
   const [loadingTanggal, setLoadingTanggal] = useState(false);
+  const [plotingGuruList, setPlotingGuruList] = useState([]);
+  const [usersList, setUsersList] = useState([]);
+  const [mapelList, setMapelList] = useState([]);
 
   const [expandedKelas, setExpandedKelas] = useState(() => new Set());
   const [filterKelas, setFilterKelas] = useState("semua");
   const [filterStatus, setFilterStatus] = useState("semua");
   const [searchKelas, setSearchKelas] = useState("");
+
+  // Load data ploting_guru untuk mengetahui guru pengajar mapel
+  const loadPlotingGuru = useCallback(async () => {
+    try {
+      // Load ploting_guru with expand
+      const records = await pb.collection("ploting_guru").getFullList({
+        expand: "guru_id,mapel_id,kelas_id",
+        requestKey: null,
+      });
+      setPlotingGuruList(records);
+
+      // Also load users for teacher names and mapel for subject names
+      const [users, mapels] = await Promise.all([
+        pb.collection("users").getFullList({
+          filter:
+            'role ?= "guru mapel" || role ?= "guru walikelas" || role ?= "guru pendamping"',
+          requestKey: null,
+        }),
+        pb.collection("mata_pelajaran").getFullList({
+          requestKey: null,
+        }),
+      ]);
+      setUsersList(users);
+      setMapelList(mapels);
+    } catch (err) {
+      console.error("Gagal load ploting_guru:", err);
+      setPlotingGuruList([]);
+      setUsersList([]);
+      setMapelList([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadPlotingGuru();
+  }, [loadPlotingGuru]);
 
   const loadRange = useCallback(async () => {
     setLoadingRange(true);
@@ -786,6 +817,57 @@ function AgendaTab({
     loadTanggal(selectedDate);
   }, [selectedDate, loadTanggal]);
 
+  // Build maps for quick lookups
+  const userMap = useMemo(() => {
+    const map = new Map();
+    for (const u of usersList) {
+      map.set(u.id, u);
+    }
+    return map;
+  }, [usersList]);
+
+  const mapelMap = useMemo(() => {
+    const map = new Map();
+    for (const m of mapelList) {
+      map.set(m.id, m);
+    }
+    return map;
+  }, [mapelList]);
+
+  // Map untuk mendapatkan guru per mapel dari ploting_guru
+  const guruPerMapel = useMemo(() => {
+    const map = new Map();
+    for (const pg of plotingGuruList) {
+      const mapelId = firstOf(pg.mapel_id);
+      const guruId = firstOf(pg.guru_id);
+      if (mapelId && guruId) {
+        const guru = userMap.get(guruId);
+        if (guru) {
+          if (!map.has(mapelId)) {
+            map.set(mapelId, []);
+          }
+          map.get(mapelId).push(guru.nama_lengkap || "Guru");
+        }
+      }
+    }
+    return map;
+  }, [plotingGuruList, userMap]);
+
+  // Get all unique guru names from ploting_guru
+  const semuaGuru = useMemo(() => {
+    const names = new Set();
+    for (const pg of plotingGuruList) {
+      const guruId = firstOf(pg.guru_id);
+      if (guruId) {
+        const guru = userMap.get(guruId);
+        if (guru) {
+          names.add(guru.nama_lengkap || "Guru");
+        }
+      }
+    }
+    return Array.from(names);
+  }, [plotingGuruList, userMap]);
+
   const agendaPerKelas = useMemo(() => {
     const map = new Map();
     for (const a of agendaTanggal) {
@@ -803,6 +885,46 @@ function AgendaTab({
     return map;
   }, [agendaTanggal]);
 
+  // Get all mapel IDs that have agenda entries today
+  const mapelWithAgendaToday = useMemo(() => {
+    const set = new Set();
+    for (const a of agendaTanggal) {
+      const mapelId = firstOf(a.mapel_id);
+      if (mapelId) set.add(mapelId);
+    }
+    return set;
+  }, [agendaTanggal]);
+
+  // Get all mapel IDs from ploting_guru
+  const allMapelIds = useMemo(() => {
+    const set = new Set();
+    for (const pg of plotingGuruList) {
+      const mapelId = firstOf(pg.mapel_id);
+      if (mapelId) set.add(mapelId);
+    }
+    return set;
+  }, [plotingGuruList]);
+
+  // Teachers who have filled agenda today
+  const guruSudahMengisi = useMemo(() => {
+    const names = new Set();
+    for (const a of agendaTanggal) {
+      const mapelId = firstOf(a.mapel_id);
+      if (mapelId && guruPerMapel.has(mapelId)) {
+        for (const guru of guruPerMapel.get(mapelId)) {
+          names.add(guru);
+        }
+      }
+    }
+    return Array.from(names);
+  }, [agendaTanggal, guruPerMapel]);
+
+  // Teachers who haven't filled agenda today
+  const guruBelumMengisi = useMemo(() => {
+    const sudah = new Set(guruSudahMengisi);
+    return semuaGuru.filter((g) => !sudah.has(g));
+  }, [semuaGuru, guruSudahMengisi]);
+
   const kelasSudahIds = useMemo(
     () => new Set(agendaPerKelas.keys()),
     [agendaPerKelas],
@@ -815,6 +937,37 @@ function AgendaTab({
     () => kelasList.filter((k) => !kelasSudahIds.has(k.id)),
     [kelasList, kelasSudahIds],
   );
+
+  // Get unique mapel names with agenda today
+  const mapelSudah = useMemo(() => {
+    const names = new Set();
+    for (const a of agendaTanggal) {
+      const mapelId = firstOf(a.mapel_id);
+      if (mapelId) {
+        const mapel = mapelMap.get(mapelId);
+        if (mapel) {
+          names.add(mapel.nama_mapel);
+        }
+      }
+    }
+    return Array.from(names);
+  }, [agendaTanggal, mapelMap]);
+
+  // Get mapel names without agenda today
+  const mapelBelum = useMemo(() => {
+    const semuaMapel = new Set();
+    for (const pg of plotingGuruList) {
+      const mapelId = firstOf(pg.mapel_id);
+      if (mapelId) {
+        const mapel = mapelMap.get(mapelId);
+        if (mapel) {
+          semuaMapel.add(mapel.nama_mapel);
+        }
+      }
+    }
+    const sudah = new Set(mapelSudah);
+    return Array.from(semuaMapel).filter((m) => !sudah.has(m));
+  }, [plotingGuruList, mapelMap, mapelSudah]);
 
   const rankingAktivitas = useMemo(() => {
     const map = new Map();
@@ -943,6 +1096,124 @@ function AgendaTab({
         />
       </div>
 
+      {/* Guru Status Cards */}
+      <div className="grid gap-3 sm:gap-4 lg:grid-cols-2">
+        <div className="rounded-xl sm:rounded-2xl bg-white p-4 sm:p-5 shadow-sm">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="h-2 w-2 rounded-full bg-emerald-500" />
+            <h3 className="text-xs sm:text-sm font-semibold text-neutral-800">
+              Guru Sudah Mengisi Agenda ({guruSudahMengisi.length})
+            </h3>
+          </div>
+          {guruSudahMengisi.length === 0 ? (
+            <div className="rounded-xl bg-emerald-50 py-4 sm:py-6 text-center">
+              <p className="text-xs sm:text-sm text-neutral-500">
+                Belum ada guru yang mengisi agenda hari ini
+              </p>
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {guruSudahMengisi.map((guru, idx) => (
+                <span
+                  key={idx}
+                  className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 ring-1 ring-emerald-200"
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                  {guru}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-xl sm:rounded-2xl bg-white p-4 sm:p-5 shadow-sm">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="h-2 w-2 rounded-full bg-rose-500" />
+            <h3 className="text-xs sm:text-sm font-semibold text-neutral-800">
+              Guru Belum Mengisi Agenda ({guruBelumMengisi.length})
+            </h3>
+          </div>
+          {guruBelumMengisi.length === 0 ? (
+            <div className="rounded-xl bg-rose-50 py-4 sm:py-6 text-center">
+              <p className="text-xs sm:text-sm text-neutral-500">
+                Semua guru sudah mengisi agenda hari ini! 🎉
+              </p>
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {guruBelumMengisi.map((guru, idx) => (
+                <span
+                  key={idx}
+                  className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700 ring-1 ring-rose-200"
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
+                  {guru}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Mapel Status Cards */}
+      <div className="grid gap-3 sm:gap-4 lg:grid-cols-2">
+        <div className="rounded-xl sm:rounded-2xl bg-white p-4 sm:p-5 shadow-sm">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="h-2 w-2 rounded-full bg-blue-500" />
+            <h3 className="text-xs sm:text-sm font-semibold text-neutral-800">
+              Mapel Sudah Diisi ({mapelSudah.length})
+            </h3>
+          </div>
+          {mapelSudah.length === 0 ? (
+            <div className="rounded-xl bg-blue-50 py-4 sm:py-6 text-center">
+              <p className="text-xs sm:text-sm text-neutral-500">
+                Belum ada mapel yang diisi
+              </p>
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {mapelSudah.map((mapel, idx) => (
+                <span
+                  key={idx}
+                  className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 ring-1 ring-blue-200"
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
+                  {mapel}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="rounded-xl sm:rounded-2xl bg-white p-4 sm:p-5 shadow-sm">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="h-2 w-2 rounded-full bg-amber-500" />
+            <h3 className="text-xs sm:text-sm font-semibold text-neutral-800">
+              Mapel Belum Diisi ({mapelBelum.length})
+            </h3>
+          </div>
+          {mapelBelum.length === 0 ? (
+            <div className="rounded-xl bg-amber-50 py-4 sm:py-6 text-center">
+              <p className="text-xs sm:text-sm text-neutral-500">
+                Semua mapel sudah diisi! 🎉
+              </p>
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {mapelBelum.map((mapel, idx) => (
+                <span
+                  key={idx}
+                  className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 ring-1 ring-amber-200"
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                  {mapel}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Status lists */}
       <div className="grid gap-3 sm:gap-4 lg:grid-cols-2">
         <StatusListCard
@@ -1019,6 +1290,8 @@ function AgendaTab({
                 sudahIsi={kelasSudahIds.has(k.id)}
                 expanded={expandedKelas.has(k.id)}
                 onToggle={() => toggleExpand(k.id)}
+                guruPerMapel={guruPerMapel}
+                mapelMap={mapelMap}
               />
             ))}
           </div>
@@ -1028,12 +1301,34 @@ function AgendaTab({
   );
 }
 
-function KelasAgendaCard({ kelas, entries, sudahIsi, expanded, onToggle }) {
+function KelasAgendaCard({
+  kelas,
+  entries,
+  sudahIsi,
+  expanded,
+  onToggle,
+  guruPerMapel,
+  mapelMap,
+}) {
   const entryBySlot = new Map();
   for (const e of entries) {
     if (e.jam_mapel) entryBySlot.set(e.jam_mapel, e);
   }
   const jumlahTerisi = JAM_SLOTS.filter((slot) => entryBySlot.has(slot)).length;
+
+  // Get unique guru for this class based on mapel entries
+  const guruKelas = useMemo(() => {
+    const names = new Set();
+    for (const e of entries) {
+      const mapelId = firstOf(e.mapel_id);
+      if (mapelId && guruPerMapel.has(mapelId)) {
+        for (const guru of guruPerMapel.get(mapelId)) {
+          names.add(guru);
+        }
+      }
+    }
+    return Array.from(names);
+  }, [entries, guruPerMapel]);
 
   return (
     <div className="overflow-hidden rounded-xl sm:rounded-2xl bg-white shadow-sm transition-all hover:shadow-md">
@@ -1055,6 +1350,11 @@ function KelasAgendaCard({ kelas, entries, sudahIsi, expanded, onToggle }) {
             </p>
             <p className="text-[10px] sm:text-xs text-neutral-400">
               {jumlahTerisi}/{JAM_SLOTS.length} jam pelajaran terisi
+              {guruKelas.length > 0 && (
+                <span className="ml-2 text-emerald-600">
+                  • {guruKelas.join(", ")}
+                </span>
+              )}
             </p>
           </div>
         </div>
@@ -1122,6 +1422,7 @@ function KelasAgendaCard({ kelas, entries, sudahIsi, expanded, onToggle }) {
                     <>
                       <p className="text-xs sm:text-sm font-medium text-neutral-800 truncate">
                         {entry.expand?.mapel_id?.nama_mapel ||
+                          mapelMap.get(firstOf(entry.mapel_id))?.nama_mapel ||
                           "Mapel tidak diketahui"}
                       </p>
                       {entry.topik && (
@@ -1156,7 +1457,7 @@ function KelasAgendaCard({ kelas, entries, sudahIsi, expanded, onToggle }) {
 }
 
 // ------------------------------------------------------------------
-// TAB: ABSENSI
+// TAB: ABSENSI (unchanged, same as before)
 // ------------------------------------------------------------------
 function AbsensiTabWrapper({
   selectedDate,
