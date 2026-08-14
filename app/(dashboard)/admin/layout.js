@@ -5,6 +5,7 @@ import { useState, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { pb } from "@/lib/pocketbase";
 import { createSystemLog } from "@/lib/logger";
+import "@/app/globals.css";
 
 const Icon = ({ d, size = 14 }) => (
   <svg

@@ -5,6 +5,7 @@ import { useState, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { pb } from "@/lib/pocketbase";
 import { createSystemLog } from "@/lib/logger";
+import "@/app/globals.css";
 
 const Icon = ({ d, size = 14 }) => (
   <svg
@@ -313,7 +314,7 @@ export default function AdminLayout({ children }) {
         </header>
 
         {/* Page content */}
-        <div className="flex-1 overflow-y-auto no-scrollbar p-4 sm:p-5 lg:p-6">
+        <div className="flex-1 no-scrollbar overflow-y-auto no-scrollbar p-4 sm:p-5 lg:p-6">
           <h1 className="text-[20px] sm:text-[22px] font-semibold text-gray-900 mb-5 no-print">
             {isProfileActive && activeProfileNav
               ? activeProfileNav.label
