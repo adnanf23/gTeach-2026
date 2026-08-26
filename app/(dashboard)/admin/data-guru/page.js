@@ -19,6 +19,19 @@ import {
 import { pb } from "@/lib/pocketbase";
 import { useEffect, useState } from "react";
 
+const DEFAULT_PASSWORD = "gTeach2026";
+
+// Generate username random 5-6 karakter (huruf kecil + angka)
+function generateRandomUsername() {
+  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  const length = Math.random() < 0.5 ? 5 : 6;
+  let result = "";
+  for (let i = 0; i < length; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
 export default function DataGuru() {
   const [loadData, setLoadData] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -42,7 +55,6 @@ export default function DataGuru() {
     role: "",
     kelas_id: "",
     jenis_kelamin: "",
-    password: "",
   });
 
   const getKelasGuru = (guruId) => {
@@ -96,7 +108,6 @@ export default function DataGuru() {
       role: "",
       kelas_id: "",
       jenis_kelamin: "",
-      password: "",
     });
   };
 
@@ -119,7 +130,6 @@ export default function DataGuru() {
       role: item.role || "",
       kelas_id: kelasGuru?.id || "",
       jenis_kelamin: item.jenis_kelamin || "",
-      password: "",
     });
     setModalMode("edit");
     setOpenModal(true);
@@ -159,17 +169,18 @@ export default function DataGuru() {
     try {
       const payload = {
         nama_lengkap: form.nama_siswa,
-        username: form.username,
         email: form.email,
         no_whatsapp: form.no_whatsapp,
         role: form.role,
         jenis_kelamin: form.jenis_kelamin,
+        is_aktif: true,
+        verified: true,
       };
 
       let guruRecord;
 
       if (modalMode === "edit") {
-        if (form.password) payload.password = form.password;
+        // Edit: username & password tidak diubah dari sini
         guruRecord = await pb.collection("users").update(form.id, payload);
 
         const kelasLama = kelasList.filter(
@@ -197,8 +208,11 @@ export default function DataGuru() {
             .update(form.kelas_id, updateKelasPayload);
         }
       } else {
-        payload.password = form.password || "PasswordGuru123";
-        payload.passwordConfirm = payload.password;
+        // Tambah: username digenerate random, password pakai default tetap
+        payload.username = generateRandomUsername();
+        payload.password = DEFAULT_PASSWORD;
+        payload.passwordConfirm = DEFAULT_PASSWORD;
+
         guruRecord = await pb.collection("users").create(payload);
 
         if (form.kelas_id && guruRecord) {
@@ -305,9 +319,10 @@ export default function DataGuru() {
 
           const payload = {
             nama_lengkap,
+            username: generateRandomUsername(),
             role,
-            password: "gTeach2026",
-            passwordConfirm: "gTeach2026",
+            password: DEFAULT_PASSWORD,
+            passwordConfirm: DEFAULT_PASSWORD,
             is_aktif: true,
             verified: true,
           };
@@ -391,7 +406,7 @@ export default function DataGuru() {
           Role: item.role || "",
           "Kelas Diampu": statusKelas,
           username: item.username,
-          password: "gTeach2026",
+          password: DEFAULT_PASSWORD,
         };
       });
 
@@ -416,7 +431,6 @@ export default function DataGuru() {
       const templateData = [
         {
           nama_lengkap: "Ahmad Subarjo, S.Pd",
-          username: "ahmadsubarjo",
           email: "ahmad@sekolah.sch.id",
           no_whatsapp: "081234567890",
           role: "guru_walikelas",
@@ -427,7 +441,6 @@ export default function DataGuru() {
       const ws = XLSX.utils.json_to_sheet(templateData);
       ws["!cols"] = [
         { wch: 25 },
-        { wch: 15 },
         { wch: 25 },
         { wch: 15 },
         { wch: 18 },
@@ -707,14 +720,19 @@ export default function DataGuru() {
                   required
                 />
               </Field>
-              <Field label="Username">
-                <Input
-                  name="username"
-                  value={form.username}
-                  onChange={handleChange}
-                  placeholder="Opsional (Otomatis jika kosong)"
-                />
-              </Field>
+
+              {/* Username hanya ditampilkan saat edit. Saat tambah, digenerate otomatis di belakang layar. */}
+              {modalMode === "edit" && (
+                <Field label="Username">
+                  <Input
+                    name="username"
+                    value={form.username}
+                    onChange={handleChange}
+                    disabled
+                  />
+                </Field>
+              )}
+
               <Field label="Email">
                 <Input
                   type="email"
@@ -772,18 +790,14 @@ export default function DataGuru() {
                   <option value="P">Perempuan</option>
                 </Select>
               </Field>
+
               {modalMode === "tambah" && (
-                <Field label="Password">
-                  <Input
-                    type="password"
-                    name="password"
-                    value={form.password}
-                    onChange={handleChange}
-                    placeholder="Minimal 8 karakter"
-                    required
-                  />
-                </Field>
+                <p className="text-xs text-gray-400 -mt-2">
+                  Username akan dibuat otomatis dan password default adalah{" "}
+                  <strong>{DEFAULT_PASSWORD}</strong>.
+                </p>
               )}
+
               <div className="flex justify-end gap-2 pt-4 border-t border-gray-100 mt-4">
                 <button
                   type="button"
