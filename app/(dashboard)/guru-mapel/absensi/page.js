@@ -684,30 +684,28 @@ export default function MapelAbsensiPage() {
         {/* ============ STEP 3: LIHAT ABSENSI ============ */}
         {selectedPloting && selectedKelas && (
           <>
-            {/* Hero header */}
-            <div className="mb-6 rounded-2xl bg-gradient-to-br from-emerald-600 to-teal-700 p-5 text-white shadow-sm">
+            {/* Hero header - ubah dari emerald/teal ke blue/indigo */}
+            <div className="mb-6 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 p-5 text-white shadow-sm">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <p className="text-[11px] uppercase tracking-wider text-emerald-100 font-semibold">
+                  <p className="text-[11px] uppercase tracking-wider text-blue-100 font-semibold">
                     {selectedPloting.expand?.mapel_id?.nama_mapel ||
                       "Mata Pelajaran"}
                   </p>
                   <h1 className="text-lg font-bold mt-0.5">
                     {selectedKelas.nama_kelas}
                   </h1>
-                  <p className="text-xs text-emerald-100 mt-1">
+                  <p className="text-xs text-blue-100 mt-1">
                     Data absensi yang telah diinput oleh wali kelas / pendamping
                   </p>
                 </div>
                 <div className="flex gap-4 text-center">
                   <div className="rounded-xl bg-white/10 px-4 py-2">
-                    <p className="text-[10px] uppercase text-emerald-100">
-                      Siswa
-                    </p>
+                    <p className="text-[10px] uppercase text-blue-100">Siswa</p>
                     <p className="text-lg font-bold">{siswaList.length}</p>
                   </div>
                   <div className="rounded-xl bg-white/10 px-4 py-2">
-                    <p className="text-[10px] uppercase text-emerald-100">
+                    <p className="text-[10px] uppercase text-blue-100">
                       Hari Efektif
                     </p>
                     <p className="text-lg font-bold">
@@ -715,9 +713,7 @@ export default function MapelAbsensiPage() {
                     </p>
                   </div>
                   <div className="rounded-xl bg-white/10 px-4 py-2">
-                    <p className="text-[10px] uppercase text-emerald-100">
-                      Bulan
-                    </p>
+                    <p className="text-[10px] uppercase text-blue-100">Bulan</p>
                     <p className="text-lg font-bold">
                       {BULAN[viewDate.getMonth()]}
                     </p>
@@ -726,7 +722,7 @@ export default function MapelAbsensiPage() {
               </div>
             </div>
 
-            {/* Ganti kelas cepat */}
+            {/* Ganti kelas cepat - ubah warna tombol aktif dan hover */}
             {kelasOptions.length > 1 && (
               <div className="mb-4 flex items-center gap-2 overflow-x-auto no-scrollbar">
                 <span className="text-[11px] font-medium text-slate-400 shrink-0">
@@ -743,8 +739,8 @@ export default function MapelAbsensiPage() {
                     }}
                     className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold border transition ${
                       kelas.id === selectedKelasId
-                        ? "bg-emerald-600 text-white border-emerald-600"
-                        : "bg-white text-slate-500 border-slate-200 hover:border-emerald-300"
+                        ? "bg-blue-600 text-white border-blue-600"
+                        : "bg-white text-slate-500 border-slate-200 hover:border-blue-300"
                     }`}
                   >
                     {kelas.nama_kelas}
@@ -759,7 +755,7 @@ export default function MapelAbsensiPage() {
               <div className="space-y-4">
                 {/* Kartu kalender */}
                 <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
-                  {/* Navigasi bulan */}
+                  {/* Navigasi bulan - tombol "Hari ini" diubah ke biru */}
                   <div className="mb-4 flex flex-wrap items-center justify-center gap-2 sm:justify-between">
                     <div className="order-1 flex w-full items-center justify-center gap-2 sm:order-none sm:w-auto">
                       <span className="text-base font-semibold text-slate-900 sm:text-sm md:text-base">
@@ -767,7 +763,7 @@ export default function MapelAbsensiPage() {
                       </span>
                       <button
                         onClick={goToToday}
-                        className="flex-shrink-0 rounded-lg bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-100"
+                        className="flex-shrink-0 rounded-lg bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100"
                       >
                         Hari ini
                       </button>
@@ -797,7 +793,7 @@ export default function MapelAbsensiPage() {
                     ))}
                   </div>
 
-                  {/* Grid tanggal */}
+                  {/* Grid tanggal - ubah warna hover, border, ring, teks */}
                   <div className="mt-1 grid grid-cols-7 gap-1 sm:gap-1.5">
                     {loadingAbsensi &&
                       Array.from({ length: 35 }).map((_, i) => (
@@ -827,17 +823,17 @@ export default function MapelAbsensiPage() {
                             className={`relative flex aspect-square min-w-0 flex-col items-center justify-start overflow-hidden rounded-md border p-0.5 text-left transition sm:rounded-lg sm:p-1 ${
                               isFuture
                                 ? "cursor-not-allowed border-transparent bg-slate-50/50 text-slate-300"
-                                : "cursor-pointer border-slate-200 hover:border-emerald-300 hover:bg-emerald-50/40"
+                                : "cursor-pointer border-slate-200 hover:border-blue-300 hover:bg-blue-50/40"
                             } ${
                               selectedDate && isSameDate(date, selectedDate)
-                                ? "border-emerald-500 bg-emerald-50 ring-1 ring-emerald-500"
+                                ? "border-blue-500 bg-blue-50 ring-1 ring-blue-500"
                                 : ""
                             }`}
                           >
                             <span
                               className={`mt-0.5 text-[10px] font-medium sm:text-xs ${
                                 isToday
-                                  ? "flex h-4 w-4 items-center justify-center rounded-full bg-emerald-600 text-white sm:h-5 sm:w-5"
+                                  ? "flex h-4 w-4 items-center justify-center rounded-full bg-blue-600 text-white sm:h-5 sm:w-5"
                                   : "text-slate-700"
                               }`}
                             >
@@ -865,7 +861,7 @@ export default function MapelAbsensiPage() {
                             )}
 
                             {!isFuture && siswaIds.length > 0 && (
-                              <span className="mt-0.5 text-[8px] font-medium text-emerald-600 sm:text-[9px]">
+                              <span className="mt-0.5 text-[8px] font-medium text-blue-600 sm:text-[9px]">
                                 {siswaIds.length}/{totalSiswa}
                               </span>
                             )}
@@ -874,7 +870,7 @@ export default function MapelAbsensiPage() {
                       })}
                   </div>
 
-                  {/* Legenda */}
+                  {/* Legenda - tidak berubah karena warna status tetap */}
                   <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3 text-[11px] text-slate-500 sm:gap-3 sm:text-xs">
                     {STATUS_ORDER.map((s) => (
                       <span key={s} className="flex items-center gap-1">
@@ -891,7 +887,7 @@ export default function MapelAbsensiPage() {
                   </div>
                 </div>
 
-                {/* Panel detail tanggal */}
+                {/* Panel detail tanggal - tidak ada perubahan warna di sini karena hanya border dan teks netral */}
                 {selectedDate && (
                   <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
                     <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
