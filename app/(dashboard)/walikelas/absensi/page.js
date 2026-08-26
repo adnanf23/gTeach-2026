@@ -135,7 +135,7 @@ function Toast({ toast, onClose }) {
   );
 }
 
-export default function AbsensiPage() {
+export default function AbsensiPageWalas() {
   const router = useRouter();
   const today = useMemo(() => startOfDay(new Date()), []);
 

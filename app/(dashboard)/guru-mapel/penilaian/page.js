@@ -792,6 +792,7 @@ export default function PenilaianGuruMapelPage() {
           {error}
         </div>
       )}
+
       {/* ============ STEP 1: PILIH MATA PELAJARAN ============ */}
       {!selectedPloting && (
         <>
@@ -799,7 +800,8 @@ export default function PenilaianGuruMapelPage() {
             Pilih Mata Pelajaran
           </h1>
           <p className="mb-6 text-xs text-slate-500">
-            Pilih mata pelajaran yang ingin Anda kelola penilaiannya.
+            Pilih mata pelajaran untuk melihat rekap absensi kelas yang Anda
+            ampu.
           </p>
 
           {loadingPloting ? (
@@ -822,18 +824,42 @@ export default function PenilaianGuruMapelPage() {
                     key={p.id}
                     type="button"
                     onClick={() => setSelectedPlotingId(p.id)}
-                    className="text-left rounded-2xl border border-slate-100 bg-white p-4 shadow-sm hover:border-blue-200 hover:shadow-md transition"
+                    className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition-all duration-300 hover:border-blue-600 hover:shadow-lg hover:shadow-blue-200 hover:bg-blue-600 active:scale-[0.98]"
                   >
-                    <span className="text-[9px] font-mono bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold uppercase">
+                    {/* Badge kode mapel - berubah putih saat hover */}
+                    <span className="inline-block text-[9px] font-mono bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold uppercase group-hover:bg-white/20 group-hover:text-white transition-colors duration-300">
                       {mapel?.kode_mapel || "MPL"}
                     </span>
-                    <h3 className="text-sm font-bold text-slate-800 mt-2">
+
+                    {/* Nama mapel - putih saat hover */}
+                    <h3 className="text-sm font-bold text-slate-800 mt-2 group-hover:text-white transition-colors duration-300">
                       {mapel?.nama_mapel || "—"}
                     </h3>
-                    <p className="text-[11px] text-slate-400 mt-1">
-                      Diampu di {kelasArr.length} kelas:{" "}
-                      {kelasArr.map((k) => k.nama_kelas).join(", ") || "—"}
+
+                    {/* Jumlah kelas - putih/transparan saat hover */}
+                    <p className="text-[11px] text-slate-400 mt-1 group-hover:text-blue-100 transition-colors duration-300">
+                      Diampu di {kelasArr.length} kelas
                     </p>
+
+                    {/* Arrow indicator - putih saat hover */}
+                    <div className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 group-hover:text-white group-hover:translate-x-1.5 transition-all duration-300">
+                      <svg
+                        className="w-5 h-5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth={2.5}
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M9 5l7 7-7 7"
+                        />
+                      </svg>
+                    </div>
+
+                    {/* Efek shimmer/kilau saat hover */}
+                    <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/15 to-white/0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 pointer-events-none" />
                   </button>
                 );
               })}
@@ -841,6 +867,7 @@ export default function PenilaianGuruMapelPage() {
           )}
         </>
       )}
+
       {/* // ============ STEP 2: PILIH KELAS ============ */}
       {selectedPloting && !selectedKelas && (
         <>

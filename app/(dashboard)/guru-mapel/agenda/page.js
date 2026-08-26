@@ -184,7 +184,7 @@ function AgendaModal({
       const data = {
         deskripsi: deskripsi.trim(),
         topik: topik.trim(),
-        jam_mapel: jamMapel, // Langsung string, tidak perlu parseInt
+        jam_mapel: jamMapel,
         metode: metode || null,
         siswa_tidak_hadir: siswaTidakHadir.trim(),
         date: date,
@@ -382,34 +382,81 @@ function AgendaModal({
 // =========================================================
 function PilihMapelStep({ mapelOptions, onPilih }) {
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8">
-      <h1 className="text-xl font-bold text-slate-900">Agenda Mengajar</h1>
+    <div className="mx-auto max-w-5xl px-4 py-6">
+      <h1 className="text-2xl font-bold text-slate-900">
+        Pilih Mata Pelajaran
+      </h1>
       <p className="mt-1 text-sm text-slate-500">
-        Pilih mata pelajaran yang ingin Anda kelola agendanya.
+        Pilih mata pelajaran untuk mengelola agenda mengajar Anda.
       </p>
 
       {mapelOptions.length === 0 ? (
-        <div className="mt-6 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
+        <div className="mt-6 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-12 text-center">
           <p className="text-sm text-slate-400">
             Anda belum diploting mengajar mata pelajaran apa pun. Hubungi
             admin/ICT.
           </p>
         </div>
       ) : (
-        <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {mapelOptions
             .sort((a, b) => a.nama_mapel.localeCompare(b.nama_mapel))
             .map((m) => (
               <button
                 key={m.id}
                 onClick={() => onPilih(m)}
-                className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-indigo-300 hover:bg-indigo-50/40"
+                className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-all duration-300 hover:border-blue-600 hover:shadow-lg hover:shadow-blue-200 hover:bg-blue-600 active:scale-[0.98]"
               >
-                <div>
-                  <p className="font-semibold text-slate-800">{m.nama_mapel}</p>
-                  <p className="text-xs text-slate-400">{m.kode_mapel}</p>
+                {/* Kode mapel sebagai badge */}
+                <div className="absolute top-3 right-12 text-[10px] font-medium text-slate-400 group-hover:text-blue-200 transition-colors duration-300">
+                  {m.kode_mapel || "MPL"}
                 </div>
-                <span className="text-slate-300">→</span>
+
+                {/* Nama mapel - putih saat hover */}
+                <h3 className="text-base font-semibold text-slate-900 group-hover:text-white transition-colors duration-300">
+                  {m.nama_mapel}
+                </h3>
+
+                {/* Jumlah kelas yang diampu */}
+                <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500 group-hover:text-blue-100 transition-colors duration-300">
+                  <span className="flex items-center gap-1">
+                    <svg
+                      className="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-200 transition-colors duration-300"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M19 21v-2a4 4 0 00-4-4H9a4 4 0 00-4 4v2"
+                      />
+                      <circle cx="12" cy="7" r="4" />
+                    </svg>
+                    {m.jumlahKelas || 0} kelas
+                  </span>
+                </div>
+
+                {/* Arrow indicator */}
+                <div className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 group-hover:text-white group-hover:translate-x-1.5 transition-all duration-300">
+                  <svg
+                    className="w-5 h-5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2.5}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M9 5l7 7-7 7"
+                    />
+                  </svg>
+                </div>
+
+                {/* Efek shimmer/kilau saat hover */}
+                <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/15 to-white/0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 pointer-events-none" />
               </button>
             ))}
         </div>
@@ -421,10 +468,7 @@ function PilihMapelStep({ mapelOptions, onPilih }) {
 // =========================================================
 // Step 2: Pilih Kelas
 // =========================================================
-// =========================================================
-// Step 2: Pilih Kelas (dengan desain card seperti gambar + hover biru)
-// =========================================================
-function PilihKelasStep({ mapel, kelasOptions, onPilih, onBack }) {
+function PilihKelasStep({ mapel, kelasOptions, loading, onPilih, onBack }) {
   return (
     <div className="mx-auto max-w-5xl px-4 py-6">
       {/* Header dengan breadcrumb */}
@@ -452,7 +496,7 @@ function PilihKelasStep({ mapel, kelasOptions, onPilih, onBack }) {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Pilih Kelas</h1>
           <p className="mt-1 text-sm text-slate-500">
-            Pilih kelas untuk mengelola penilaian mata pelajaran{" "}
+            Pilih kelas untuk mengelola agenda mengajar mata pelajaran{" "}
             <span className="font-medium text-slate-700">
               {mapel.nama_mapel}
             </span>
@@ -462,7 +506,16 @@ function PilihKelasStep({ mapel, kelasOptions, onPilih, onBack }) {
       </div>
 
       {/* Grid card kelas */}
-      {kelasOptions.length === 0 ? (
+      {loading ? (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {[1, 2, 3].map((i) => (
+            <div
+              key={i}
+              className="h-28 animate-pulse rounded-2xl bg-slate-100"
+            />
+          ))}
+        </div>
+      ) : kelasOptions.length === 0 ? (
         <div className="mt-6 rounded-xl border border-dashed border-slate-300 bg-slate-50 p-12 text-center">
           <p className="text-sm text-slate-400">
             Belum ada kelas yang diploting untuk mapel ini.
@@ -478,12 +531,15 @@ function PilihKelasStep({ mapel, kelasOptions, onPilih, onBack }) {
                 onClick={() => onPilih(k)}
                 className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-all duration-300 hover:border-blue-600 hover:shadow-lg hover:shadow-blue-200 hover:bg-blue-600 active:scale-[0.98]"
               >
-                {/* Nama Kelas - putih saat hover */}
+                {/* Badge tingkat di pojok kanan atas */}
+                <div className="absolute top-3 right-12 text-[10px] font-medium text-slate-400 group-hover:text-blue-200 transition-colors duration-300">
+                  {k.tingkat || "—"}
+                </div>
+
                 <h3 className="text-base font-semibold text-slate-900 group-hover:text-white transition-colors duration-300">
                   {k.nama_kelas}
                 </h3>
 
-                {/* Detail kelas - putih/transparan saat hover */}
                 <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500 group-hover:text-blue-100 transition-colors duration-300">
                   <span className="flex items-center gap-1">
                     <svg
@@ -500,11 +556,27 @@ function PilihKelasStep({ mapel, kelasOptions, onPilih, onBack }) {
                       />
                       <circle cx="12" cy="7" r="4" />
                     </svg>
-                    Tingkat {k.tingkat}
+                    Tingkat {k.tingkat || "—"}
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <svg
+                      className="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-200 transition-colors duration-300"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"
+                      />
+                    </svg>
+                    {k.siswaCount || 0} siswa
                   </span>
                 </div>
 
-                {/* Arrow indicator - putih saat hover */}
+                {/* Arrow indicator */}
                 <div className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 group-hover:text-white group-hover:translate-x-1.5 transition-all duration-300">
                   <svg
                     className="w-5 h-5"
@@ -521,13 +593,8 @@ function PilihKelasStep({ mapel, kelasOptions, onPilih, onBack }) {
                   </svg>
                 </div>
 
-                {/* Efek shimmer/kilau saat hover */}
+                {/* Efek shimmer */}
                 <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/15 to-white/0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 pointer-events-none" />
-
-                {/* Badge kecil di pojok kanan atas */}
-                <div className="absolute top-3 right-12 text-[10px] font-medium text-slate-400 group-hover:text-blue-200 transition-colors duration-300">
-                  {k.tingkat}
-                </div>
               </button>
             ))}
         </div>
@@ -619,31 +686,91 @@ export default function AgendaMengajarGuruMapelPage() {
     };
   }, [user?.id]);
 
-  // Daftar mapel unik yang diampu guru ini
+  // =========================================================
+  // Daftar mapel unik yang diampu guru ini, dengan jumlah kelas
+  // =========================================================
   const mapelOptions = useMemo(() => {
     const map = new Map();
     for (const r of plotingList) {
       const m = r.expand?.mapel_id;
-      if (m && !map.has(m.id)) map.set(m.id, m);
-    }
-    return Array.from(map.values());
-  }, [plotingList]);
-
-  // Daftar kelas untuk mapel yang sedang dipilih (gabungan dari semua record ploting)
-  const kelasOptions = useMemo(() => {
-    if (!selectedMapel) return [];
-    const map = new Map();
-    for (const r of plotingList) {
-      if (r.mapel_id !== selectedMapel.id) continue;
-      const kelasArr = r.expand?.kelas_id || [];
-      for (const k of kelasArr) {
-        if (!map.has(k.id)) map.set(k.id, k);
+      if (m && !map.has(m.id)) {
+        map.set(m.id, { ...m, kelasIds: [] });
+      }
+      if (m) {
+        const entry = map.get(m.id);
+        const kelasArr = r.expand?.kelas_id || [];
+        for (const k of kelasArr) {
+          if (!entry.kelasIds.includes(k.id)) entry.kelasIds.push(k.id);
+        }
       }
     }
-    return Array.from(map.values()).sort((a, b) =>
-      a.nama_kelas.localeCompare(b.nama_kelas),
-    );
-  }, [plotingList, selectedMapel]);
+    return Array.from(map.values()).map((m) => ({
+      ...m,
+      jumlahKelas: m.kelasIds.length,
+      kelasIds: undefined,
+    }));
+  }, [plotingList]);
+
+  // =========================================================
+  // Ambil kelas + hitung jumlah siswa per kelas
+  // =========================================================
+  const [kelasOptionsWithCount, setKelasOptionsWithCount] = useState([]);
+  const [loadingKelasOptions, setLoadingKelasOptions] = useState(false);
+
+  useEffect(() => {
+    if (!selectedMapel) {
+      setKelasOptionsWithCount([]);
+      return;
+    }
+    let cancelled = false;
+
+    async function fetchKelasWithCount() {
+      setLoadingKelasOptions(true);
+      try {
+        // Kumpulkan kelas unik dari ploting yang mapel_id-nya sesuai
+        const kelasSet = new Map();
+        for (const r of plotingList) {
+          if (r.mapel_id !== selectedMapel.id) continue;
+          const kelasArr = r.expand?.kelas_id || [];
+          for (const k of kelasArr) {
+            if (!kelasSet.has(k.id)) kelasSet.set(k.id, k);
+          }
+        }
+        const kelasList = Array.from(kelasSet.values()).sort((a, b) =>
+          a.nama_kelas.localeCompare(b.nama_kelas),
+        );
+
+        // Hitung jumlah siswa per kelas
+        const withCount = await Promise.all(
+          kelasList.map(async (k) => {
+            try {
+              const result = await pb.collection("siswa").getList(1, 1, {
+                filter: `kelas_id="${k.id}"`,
+                requestKey: null,
+                fields: "id",
+              });
+              return { ...k, siswaCount: result.totalItems };
+            } catch {
+              return { ...k, siswaCount: 0 };
+            }
+          }),
+        );
+        if (!cancelled) setKelasOptionsWithCount(withCount);
+      } catch (e) {
+        console.error("Error fetching kelas with count:", e);
+        if (!cancelled) {
+          setMessage({ type: "error", text: "Gagal memuat data kelas." });
+        }
+      } finally {
+        if (!cancelled) setLoadingKelasOptions(false);
+      }
+    }
+
+    fetchKelasWithCount();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedMapel, plotingList]);
 
   // =========================================================
   // Load Month Agenda (difilter mapel + kelas)
@@ -986,7 +1113,8 @@ export default function AgendaMengajarGuruMapelPage() {
       {step === "kelas" && selectedMapel && (
         <PilihKelasStep
           mapel={selectedMapel}
-          kelasOptions={kelasOptions}
+          kelasOptions={kelasOptionsWithCount}
+          loading={loadingKelasOptions}
           onPilih={pilihKelas}
           onBack={backKeMapel}
         />

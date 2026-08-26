@@ -37,12 +37,12 @@ const icons = {
 // Array NAV utama untuk Walikelas
 const NAV = [
   { key: "overview", label: "Overview", href: "/guru-mapel", icon: "overview" },
-  // {
-  //   key: "absensi",
-  //   label: "Absensi Kelas",
-  //   href: "/guru-mapel/absensi",
-  //   icon: "absensi",
-  // },
+  {
+    key: "absensi",
+    label: "Absensi Kelas",
+    href: "/guru-mapel/absensi",
+    icon: "absensi",
+  },
   {
     key: "kelas",
     label: "Daftar Kelas",

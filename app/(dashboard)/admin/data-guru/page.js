@@ -392,29 +392,87 @@ export default function DataGuru() {
     try {
       const XLSX = await import("xlsx");
 
-      const dataToExport = dataGuru.map((item) => {
-        const kelasGuru = getKelasGuru(item.id);
-        let statusKelas = "-";
-        if (kelasGuru) {
-          const tipe =
-            kelasGuru.walikelas_id === item.id ? "Wali" : "Pendamping";
-          statusKelas = `${kelasGuru.nama_kelas} (${tipe})`;
-        }
-
-        return {
-          "Nama Lengkap": item.nama_lengkap || "",
-          Role: item.role || "",
-          "Kelas Diampu": statusKelas,
-          username: item.username,
-          password: DEFAULT_PASSWORD,
-        };
+      // Urutkan kelas berdasarkan tingkat (numerik) lalu nama_kelas
+      const sortedKelas = [...kelasList].sort((a, b) => {
+        const tingkatA = parseInt(a.tingkat) || 0;
+        const tingkatB = parseInt(b.tingkat) || 0;
+        if (tingkatA !== tingkatB) return tingkatA - tingkatB;
+        return (a.nama_kelas || "").localeCompare(b.nama_kelas || "");
       });
 
-      const ws = XLSX.utils.json_to_sheet(dataToExport);
-      ws["!cols"] = [{ wch: 30 }, { wch: 20 }, { wch: 25 }];
+      // --- Sheet 1: Walikelas & Pendamping ---
+      const sheet1Data = [];
+      for (const kelas of sortedKelas) {
+        // Walikelas
+        if (kelas.walikelas_id) {
+          const guru = dataGuru.find((g) => g.id === kelas.walikelas_id);
+          if (guru) {
+            sheet1Data.push({
+              "Nama Guru": guru.nama_lengkap || "",
+              Peran: "Walikelas",
+              Kelas: kelas.nama_kelas || "",
+              Tingkat: kelas.tingkat || "",
+              Username: guru.username || "",
+              Password: DEFAULT_PASSWORD,
+            });
+          }
+        }
+        // Pendamping
+        if (kelas.pendamping_id) {
+          const guru = dataGuru.find((g) => g.id === kelas.pendamping_id);
+          if (guru) {
+            sheet1Data.push({
+              "Nama Guru": guru.nama_lengkap || "",
+              Peran: "Pendamping",
+              Kelas: kelas.nama_kelas || "",
+              Tingkat: kelas.tingkat || "",
+              Username: guru.username || "",
+              Password: DEFAULT_PASSWORD,
+            });
+          }
+        }
+      }
 
+      // --- Sheet 2: Guru Mapel ---
+      const guruMapel = dataGuru.filter((g) => g.role === "guru mapel");
+      const sheet2Data = guruMapel.map((g) => ({
+        "Nama Lengkap": g.nama_lengkap || "",
+        Username: g.username || "",
+        Email: g.email || "",
+        "No WhatsApp": g.no_whatsapp || "",
+        "Jenis Kelamin": g.jenis_kelamin || "",
+        Role: g.role || "",
+        Password: DEFAULT_PASSWORD,
+      }));
+
+      // Buat workbook dan sheets
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Data Guru");
+
+      const ws1 = XLSX.utils.json_to_sheet(sheet1Data);
+      XLSX.utils.book_append_sheet(wb, ws1, "Walikelas & Pendamping");
+
+      const ws2 = XLSX.utils.json_to_sheet(sheet2Data);
+      XLSX.utils.book_append_sheet(wb, ws2, "Guru Mapel");
+
+      // Atur lebar kolom (opsional)
+      ws1["!cols"] = [
+        { wch: 25 },
+        { wch: 15 },
+        { wch: 20 },
+        { wch: 10 },
+        { wch: 15 },
+        { wch: 15 },
+      ];
+      ws2["!cols"] = [
+        { wch: 25 },
+        { wch: 15 },
+        { wch: 25 },
+        { wch: 15 },
+        { wch: 15 },
+        { wch: 15 },
+        { wch: 15 },
+      ];
+
       XLSX.writeFile(
         wb,
         `Data_Guru_${new Date().toISOString().split("T")[0]}.xlsx`,

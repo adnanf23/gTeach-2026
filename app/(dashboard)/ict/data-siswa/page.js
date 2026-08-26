@@ -335,13 +335,37 @@ export default function DataSiswaPage() {
     }, 1300);
   }
 
+  // Urutkan data: Tingkat (1,2,3,...) -> Nama Kelas (1A, 1B, ... 2A, 2B, ...) -> Nama Siswa (A-Z)
+  function sortSiswaForExport(list) {
+    return [...list].sort((a, b) => {
+      const tingkatA = Number(a.expand?.kelas_id?.tingkat) || 0;
+      const tingkatB = Number(b.expand?.kelas_id?.tingkat) || 0;
+      if (tingkatA !== tingkatB) return tingkatA - tingkatB;
+
+      const kelasA = a.expand?.kelas_id?.nama_kelas || "";
+      const kelasB = b.expand?.kelas_id?.nama_kelas || "";
+      const kelasCompare = kelasA.localeCompare(kelasB, "id", {
+        numeric: true,
+        sensitivity: "base",
+      });
+      if (kelasCompare !== 0) return kelasCompare;
+
+      const namaA = a.nama_siswa || "";
+      const namaB = b.nama_siswa || "";
+      return namaA.localeCompare(namaB, "id", { sensitivity: "base" });
+    });
+  }
+
   async function handleExportDefault() {
     if (dataSiswa.length === 0) {
       showToast("Tidak ada data untuk diexport.", "error");
       return;
     }
     const XLSX = await import("xlsx");
-    const data = dataSiswa.map((item) => ({
+
+    const sortedSiswa = sortSiswaForExport(dataSiswa);
+
+    const data = sortedSiswa.map((item) => ({
       NAMA_SISWA: item.nama_siswa || "",
       JENIS_KELAMIN: item.jenis_kelamin || "",
       NIS: item.nis || "",
@@ -350,6 +374,7 @@ export default function DataSiswaPage() {
       CREATED: formatID(item.created) || "",
       UPDATED: formatID(item.updated) || "",
     }));
+
     const ws = XLSX.utils.json_to_sheet(data);
     ws["!cols"] = [
       { wch: 27 },
@@ -361,7 +386,7 @@ export default function DataSiswaPage() {
       { wch: 27 },
     ];
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Data Siswa");
+    XLSX.utils.book_append_sheet(wb, ws, "All");
     XLSX.writeFile(
       wb,
       `Data Siswa_export_at ${new Date().toISOString().split("T")[0]}.xlsx`,
