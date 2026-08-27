@@ -20,6 +20,16 @@ import {
 import { pb } from "@/lib/pocketbase";
 import { createSystemLog } from "@/lib/logger";
 
+// Label tingkat romawi untuk sheet export
+const TINGKAT_ROMAWI = {
+  1: "Tingkat I",
+  2: "Tingkat II",
+  3: "Tingkat III",
+  4: "Tingkat IV",
+  5: "Tingkat V",
+  6: "Tingkat VI",
+};
+
 export default function DataSiswaPage() {
   const [loading, setLoading] = useState(false);
   const [loadData, setLoadData] = useState(false);
@@ -33,6 +43,10 @@ export default function DataSiswaPage() {
   // Filter & search
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTingkat, setSelectedTingkat] = useState("semua");
+  const [selectedKelas, setSelectedKelas] = useState("semua");
+
+  // Sorting (nama siswa)
+  const [sortOrder, setSortOrder] = useState("asc"); // "asc" (A-Z) | "desc" (Z-A)
 
   // Modal
   const [openModal, setOpenModal] = useState(false);
@@ -44,6 +58,9 @@ export default function DataSiswaPage() {
     current: 0,
     total: 0,
   });
+
+  // Export progress
+  const [exporting, setExporting] = useState(false);
 
   const [form, setForm] = useState({
     nama_siswa: "",
@@ -106,27 +123,56 @@ export default function DataSiswaPage() {
     fetchSiswa();
   }, []);
 
-  // ─── Filter ──────────────────────────────────────────────────────────────────
+  // ─── Kelas list terurut (Tingkat -> Nama Kelas) ─────────────────────────────
 
-  const filteredSiswa = dataSiswa.filter((item) => {
-    const matchTingkat =
-      selectedTingkat === "semua" ||
-      String(item.expand?.kelas_id?.tingkat) === selectedTingkat;
-
-    const search = searchQuery.toLowerCase();
-    const namaSiswa = item.nama_siswa?.toLowerCase() || "";
-    const nis = item.nis?.toLowerCase() || "";
-    const nisn = item.nisn?.toLowerCase() || "";
-    const namaKelas = item.expand?.kelas_id?.nama_kelas?.toLowerCase() || "";
-
-    const matchSearch =
-      namaSiswa.includes(search) ||
-      nis.includes(search) ||
-      nisn.includes(search) ||
-      namaKelas.includes(search);
-
-    return matchTingkat && matchSearch;
+  const sortedKelasList = [...kelasList].sort((a, b) => {
+    const tingkatA = Number(a.tingkat) || 0;
+    const tingkatB = Number(b.tingkat) || 0;
+    if (tingkatA !== tingkatB) return tingkatA - tingkatB;
+    return (a.nama_kelas || "").localeCompare(b.nama_kelas || "", "id", {
+      numeric: true,
+      sensitivity: "base",
+    });
   });
+
+  // Kalau tingkat dipilih, opsi kelas ikut mengecil ke tingkat itu saja
+  const kelasOptionsForFilter = sortedKelasList.filter(
+    (k) => selectedTingkat === "semua" || String(k.tingkat) === selectedTingkat,
+  );
+
+  // ─── Filter + Sort ───────────────────────────────────────────────────────────
+
+  const filteredSiswa = dataSiswa
+    .filter((item) => {
+      const matchTingkat =
+        selectedTingkat === "semua" ||
+        String(item.expand?.kelas_id?.tingkat) === selectedTingkat;
+
+      const matchKelas =
+        selectedKelas === "semua" || item.kelas_id === selectedKelas;
+
+      const search = searchQuery.toLowerCase();
+      const namaSiswa = item.nama_siswa?.toLowerCase() || "";
+      const nis = item.nis?.toLowerCase() || "";
+      const nisn = item.nisn?.toLowerCase() || "";
+      const namaKelas = item.expand?.kelas_id?.nama_kelas?.toLowerCase() || "";
+
+      const matchSearch =
+        namaSiswa.includes(search) ||
+        nis.includes(search) ||
+        nisn.includes(search) ||
+        namaKelas.includes(search);
+
+      return matchTingkat && matchKelas && matchSearch;
+    })
+    .sort((a, b) => {
+      const namaA = a.nama_siswa || "";
+      const namaB = b.nama_siswa || "";
+      const compare = namaA.localeCompare(namaB, "id", {
+        sensitivity: "base",
+      });
+      return sortOrder === "asc" ? compare : -compare;
+    });
 
   // ─── Handlers ────────────────────────────────────────────────────────────────
 
@@ -356,41 +402,157 @@ export default function DataSiswaPage() {
     });
   }
 
+  // ─── Export multi-sheet (All Data + per Tingkat) dengan header kuning ──────
+  //
+  // NOTE: Butuh package "exceljs" karena "xlsx" (SheetJS community) tidak
+  // mendukung styling warna cell. Install dulu:
+  //   npm install exceljs
+  //
   async function handleExportDefault() {
     if (dataSiswa.length === 0) {
       showToast("Tidak ada data untuk diexport.", "error");
       return;
     }
-    const XLSX = await import("xlsx");
 
-    const sortedSiswa = sortSiswaForExport(dataSiswa);
+    try {
+      setExporting(true);
+      const ExcelJS = (await import("exceljs")).default;
+      const wb = new ExcelJS.Workbook();
+      wb.creator = "gTeach";
+      wb.created = new Date();
 
-    const data = sortedSiswa.map((item) => ({
-      NAMA_SISWA: item.nama_siswa || "",
-      JENIS_KELAMIN: item.jenis_kelamin || "",
-      NIS: item.nis || "",
-      NISN: item.nisn || "",
-      KELAS: item.expand?.kelas_id?.nama_kelas || "",
-      CREATED: formatID(item.created) || "",
-      UPDATED: formatID(item.updated) || "",
-    }));
+      const headers = [
+        "NAMA_SISWA",
+        "JENIS_KELAMIN",
+        "NIS",
+        "NISN",
+        "KELAS",
+        "CREATED",
+        "UPDATED",
+      ];
+      // Lebar minimum per kolom (fallback), akan membesar otomatis
+      // mengikuti isi terpanjang di seluruh data (bukan fix).
+      const minColWidths = [22, 16, 14, 14, 12, 28, 28];
 
-    const ws = XLSX.utils.json_to_sheet(data);
-    ws["!cols"] = [
-      { wch: 27 },
-      { wch: 27 },
-      { wch: 27 },
-      { wch: 27 },
-      { wch: 27 },
-      { wch: 27 },
-      { wch: 27 },
-    ];
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "All");
-    XLSX.writeFile(
-      wb,
-      `Data Siswa_export_at ${new Date().toISOString().split("T")[0]}.xlsx`,
-    );
+      function buildRows(list) {
+        return sortSiswaForExport(list).map((item) => [
+          item.nama_siswa || "",
+          item.jenis_kelamin || "",
+          item.nis || "",
+          item.nisn || "",
+          item.expand?.kelas_id?.nama_kelas || "",
+          formatID(item.created) || "",
+          formatID(item.updated) || "",
+        ]);
+      }
+
+      // Hitung lebar kolom otomatis dari isi TERPANJANG di seluruh data,
+      // supaya konsisten di semua sheet (All Data & tiap Tingkat) dan
+      // kolom seperti KELAS tidak lagi kepotong sempit.
+      const allRowsForWidth = buildRows(dataSiswa);
+      const colWidths = headers.map((h, colIdx) => {
+        const headerLen = h.length;
+        const maxContentLen = allRowsForWidth.reduce((max, r) => {
+          const len = String(r[colIdx] ?? "").length;
+          return len > max ? len : max;
+        }, 0);
+        const fit = Math.max(headerLen, maxContentLen) + 4; // padding
+        return Math.max(minColWidths[colIdx], fit);
+      });
+
+      function addSheet(sheetName, list) {
+        const sheet = wb.addWorksheet(sheetName, {
+          views: [{ state: "frozen", ySplit: 1 }],
+        });
+
+        sheet.columns = colWidths.map((w) => ({ width: w }));
+
+        // Header
+        const headerRow = sheet.addRow(headers);
+        headerRow.height = 22;
+        headerRow.eachCell((cell) => {
+          cell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FFFFD500" }, // kuning
+          };
+          cell.font = { bold: true, color: { argb: "FF1F2937" }, size: 11 };
+          cell.alignment = { vertical: "middle", horizontal: "center" };
+          cell.border = {
+            top: { style: "thin", color: { argb: "FFB8860B" } },
+            bottom: { style: "thin", color: { argb: "FFB8860B" } },
+            left: { style: "thin", color: { argb: "FFB8860B" } },
+            right: { style: "thin", color: { argb: "FFB8860B" } },
+          };
+        });
+
+        // Data rows
+        const rows = buildRows(list);
+        rows.forEach((r, idx) => {
+          const row = sheet.addRow(r);
+          const isEven = idx % 2 === 1;
+          row.eachCell((cell, colNumber) => {
+            cell.border = {
+              top: { style: "thin", color: { argb: "FFE5E7EB" } },
+              bottom: { style: "thin", color: { argb: "FFE5E7EB" } },
+              left: { style: "thin", color: { argb: "FFE5E7EB" } },
+              right: { style: "thin", color: { argb: "FFE5E7EB" } },
+            };
+            cell.alignment = {
+              vertical: "middle",
+              horizontal: colNumber === 1 ? "left" : "center",
+            };
+            if (isEven) {
+              cell.fill = {
+                type: "pattern",
+                pattern: "solid",
+                fgColor: { argb: "FFFAFAFA" },
+              };
+            }
+          });
+        });
+
+        // Footer info jumlah data
+        sheet.addRow([]);
+        const infoRow = sheet.addRow([`Total: ${rows.length} siswa`]);
+        infoRow.getCell(1).font = {
+          italic: true,
+          color: { argb: "FF9CA3AF" },
+          size: 10,
+        };
+      }
+
+      // Sheet 1: All Data (semua kelas 1A - 6 dst)
+      addSheet("All Data", dataSiswa);
+
+      // Sheet per tingkat (I - VI)
+      for (let t = 1; t <= 6; t++) {
+        const listTingkat = dataSiswa.filter(
+          (item) => Number(item.expand?.kelas_id?.tingkat) === t,
+        );
+        addSheet(TINGKAT_ROMAWI[t] || `Tingkat ${t}`, listTingkat);
+      }
+
+      const buffer = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Data Siswa_export_at ${new Date().toISOString().split("T")[0]}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      showToast("Berhasil export data siswa");
+    } catch (error) {
+      console.log("Gagal export:", error);
+      showToast("Gagal export data", "error");
+    } finally {
+      setExporting(false);
+    }
   }
 
   // ─── Render ──────────────────────────────────────────────────────────────────
@@ -406,6 +568,7 @@ export default function DataSiswaPage() {
           onTemplate={handleDownloadTemplate}
           onImport={openImport}
           onExport={handleExportDefault}
+          exportDisabled={exporting}
         />
       </div>
 
@@ -430,9 +593,15 @@ export default function DataSiswaPage() {
             className="w-full pl-10 pr-4 py-2 bg-white border border-gray-200 rounded-lg text-[13px] text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 placeholder-gray-400 transition-all"
           />
         </div>
+
         <Select
           value={selectedTingkat}
-          onChange={(e) => setSelectedTingkat(e.target.value)}
+          onChange={(e) => {
+            setSelectedTingkat(e.target.value);
+            // reset pilihan kelas kalau tingkat berubah dan kelas lama tidak
+            // termasuk dalam tingkat baru
+            setSelectedKelas("semua");
+          }}
           className="w-full sm:w-44"
         >
           <option value="semua">Semua Tingkat</option>
@@ -442,6 +611,45 @@ export default function DataSiswaPage() {
             </option>
           ))}
         </Select>
+
+        <Select
+          value={selectedKelas}
+          onChange={(e) => setSelectedKelas(e.target.value)}
+          className="w-full sm:w-44"
+        >
+          <option value="semua">Semua Kelas</option>
+          {kelasOptionsForFilter.map((k) => (
+            <option key={k.id} value={k.id}>
+              {k.nama_kelas}
+            </option>
+          ))}
+        </Select>
+
+        <button
+          type="button"
+          onClick={() =>
+            setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"))
+          }
+          className="flex items-center justify-center gap-1.5 px-3.5 py-2 bg-white border border-gray-200 rounded-lg text-[13px] font-medium text-gray-600 hover:bg-gray-50 hover:border-gray-300 transition-all whitespace-nowrap"
+          title={sortOrder === "asc" ? "Urutkan Z-A" : "Urutkan A-Z"}
+        >
+          <svg
+            width="14"
+            height="14"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            viewBox="0 0 24 24"
+          >
+            <path d="M3 6h6M3 12h4M3 18h2" />
+            {sortOrder === "asc" ? (
+              <path d="m17 4 4 4-4 4M21 8H9" />
+            ) : (
+              <path d="m17 20 4-4-4-4M21 16H9" />
+            )}
+          </svg>
+          {sortOrder === "asc" ? "A-Z" : "Z-A"}
+        </button>
       </div>
 
       {/* Table */}
@@ -738,10 +946,13 @@ export default function DataSiswaPage() {
             Menampilkan <strong>{filteredSiswa.length}</strong> dari{" "}
             <strong>{dataSiswa.length}</strong> Siswa
           </span>
-          {selectedTingkat !== "semua" && (
+          {(selectedTingkat !== "semua" ||
+            selectedKelas !== "semua" ||
+            searchQuery) && (
             <button
               onClick={() => {
                 setSelectedTingkat("semua");
+                setSelectedKelas("semua");
                 setSearchQuery("");
               }}
               className="text-[12px] text-blue-500 hover:text-blue-700 transition"
