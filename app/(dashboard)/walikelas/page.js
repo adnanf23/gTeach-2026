@@ -166,7 +166,9 @@ export default function OverviewWaliKelasPage() {
         // Ambil kelas yang diwalikan oleh guru ini
         const kelasSaya = await pb
           .collection("kelas")
-          .getFirstListItem(`walikelas_id="${user.id}"`)
+          .getFirstListItem(
+            `walikelas_id="${user.id}" || pendamping_id="${user.id}"`,
+          )
           .catch(() => null);
 
         if (!kelasSaya) {
