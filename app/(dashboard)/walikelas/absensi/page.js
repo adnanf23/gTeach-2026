@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import * as XLSX from "xlsx";
 // Sesuaikan path import berikut dengan lokasi file pocketbase client di project-mu
 import { pb, isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
+import { createSystemLog } from "@/lib/logger";
 
 // =========================================================
 // Konfigurasi status absensi (warna & label)
@@ -401,6 +402,18 @@ export default function AbsensiPageWalas() {
                 { status: row.status },
                 { requestKey: null },
               );
+            await createSystemLog({
+              type: "succes",
+              msg: `User '${user.nama_lengkap} (${user.role})' berhasil update absensi.`,
+              endpoint: `/walikelas/absensi`,
+              statusCode: 200,
+              payload: {
+                kelas_id: kelas.id,
+                siswa_id: row.siswaId,
+                tanggal: dateStr,
+                status: row.status,
+              },
+            });
           } else {
             await pb.collection("absensi").create(
               {
@@ -411,6 +424,18 @@ export default function AbsensiPageWalas() {
               },
               { requestKey: null },
             );
+            await createSystemLog({
+              type: "succes",
+              msg: `User '${user.nama_lengkap} (${user.role})' berhasil melakukan absensi.`,
+              endpoint: `/walikelas/absensi`,
+              statusCode: 200,
+              payload: {
+                kelas_id: kelas.id,
+                siswa_id: row.siswaId,
+                tanggal: dateStr,
+                status: row.status,
+              },
+            });
           }
         }),
       );
@@ -422,6 +447,18 @@ export default function AbsensiPageWalas() {
       setMessage({
         type: "error",
         text: "Gagal menyimpan absensi. Silakan coba lagi.",
+      });
+      await createSystemLog({
+        type: "warning",
+        msg: `User '${user.nama_lengkap} (${user.role})' gagal melakukan absensi.`,
+        endpoint: `/walikelas/absensi`,
+        statusCode: 200,
+        payload: {
+          kelas_id: kelas.id,
+          siswa_id: row.siswaId,
+          tanggal: dateStr,
+          status: row.status,
+        },
       });
     } finally {
       setSaving(false);

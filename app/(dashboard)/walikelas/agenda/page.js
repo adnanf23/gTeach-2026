@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { pb, isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
+import { createSystemLog } from "@/lib/logger";
 
 // =========================================================
 // Helper tanggal
@@ -737,6 +738,23 @@ export default function AgendaMengajarPage() {
         { requestKey: null },
       );
 
+      await createSystemLog({
+        type: "succes",
+        msg: `User '${user.nama_lengkap} (${user.role})' berhasil membuat agenda.`,
+        endpoint: `/walikelas/agenda`,
+        statusCode: 200,
+        payload: {
+          deskripsi: data.deskripsi,
+          mapel_id: data.mapel_id,
+          kelas_id: activeKelas,
+          date: data.date,
+          topik: data.topik,
+          jam_mapel: data.jam_mapel,
+          metode: data.metode,
+          siswa_tidak_hadir: data.siswa_tidak_hadir,
+        },
+      });
+
       setMessage({ type: "success", text: "Agenda berhasil ditambahkan!" });
       await loadMonth();
       if (selectedDate) {
@@ -746,6 +764,22 @@ export default function AgendaMengajarPage() {
     } catch (err) {
       console.error("Error creating agenda:", err);
       setMessage({ type: "error", text: "Gagal menambahkan agenda." });
+      await createSystemLog({
+        type: "warning",
+        msg: `User '${user.nama_lengkap} (${user.role})' gagal membuat agenda.`,
+        endpoint: `/walikelas/agenda`,
+        statusCode: 200,
+        payload: {
+          deskripsi: data.deskripsi,
+          mapel_id: data.mapel_id,
+          kelas_id: activeKelas,
+          date: data.date,
+          topik: data.topik,
+          jam_mapel: data.jam_mapel,
+          metode: data.metode,
+          siswa_tidak_hadir: data.siswa_tidak_hadir,
+        },
+      });
       throw err;
     }
   };
@@ -800,6 +834,23 @@ export default function AgendaMengajarPage() {
         { requestKey: null },
       );
 
+      await createSystemLog({
+        type: "succes",
+        msg: `User '${user?.nama_lengkap || "User"} ( ${user?.role} )' berhasil update agenda.`,
+        endpoint: "/walikelas/agenda",
+        statusCode: 400,
+        payload: {
+          deskripsi: data.deskripsi,
+          topik: data.topik,
+          jam_mapel: data.jam_mapel,
+          metode: data.metode,
+          siswa_tidak_hadir: data.siswa_tidak_hadir,
+          date: data.date,
+          kelas_id: selectedKelas.id,
+          mapel_id: selectedMapel.id,
+        },
+      });
+
       setMessage({ type: "success", text: "Agenda berhasil diperbarui!" });
       await loadMonth();
       if (selectedDate) {
@@ -809,6 +860,22 @@ export default function AgendaMengajarPage() {
     } catch (err) {
       console.error("Error updating agenda:", err);
       setMessage({ type: "error", text: "Gagal memperbarui agenda." });
+      await createSystemLog({
+        type: "warning",
+        msg: `User '${user?.nama_lengkap || "User"} ( ${user?.role} )' gagal update/membuat agenda.`,
+        endpoint: "/walikelas/agenda",
+        statusCode: err.status || 401,
+        payload: {
+          deskripsi: data.deskripsi,
+          mapel_id: data.mapel_id,
+          kelas_id: data.kelas_id || editingItem.kelas_id,
+          date: data.date || editingItem.date,
+          topik: data.topik,
+          jam_mapel: data.jam_mapel,
+          metode: data.metode,
+          siswa_tidak_hadir: data.siswa_tidak_hadir,
+        },
+      });
       throw err;
     }
   };
