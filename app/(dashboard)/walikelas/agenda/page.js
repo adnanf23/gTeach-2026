@@ -132,7 +132,6 @@ function AgendaModal({ isOpen, onClose, onSubmit, initialData, defaultDate }) {
   const [listMapel, setListMapel] = useState([]);
   const [kelas, setKelas] = useState(null);
   const [listKelas, setListKelas] = useState([]);
-  const user = getCurrentUser();
 
   // State terpisah untuk setiap field
   const [deskripsi, setDeskripsi] = useState("");
@@ -144,11 +143,13 @@ function AgendaModal({ isOpen, onClose, onSubmit, initialData, defaultDate }) {
   const [metode, setMetode] = useState("");
   const [siswaTidakHadir, setSiswaTidakHadir] = useState("");
 
+  const user = useMemo(() => getCurrentUser(), []);
   // Load data untuk dropdown
   useEffect(() => {
-    async function fetchData() {
-      if (!user || !isOpen) return;
+    if (!user || !isOpen) return;
+    let cancelled = false;
 
+    async function fetchData() {
       try {
         let kelasData = null;
         let allKelas = [];
@@ -161,7 +162,7 @@ function AgendaModal({ isOpen, onClose, onSubmit, initialData, defaultDate }) {
                 `walikelas_id = "${user.id}" || pendamping_id = "${user.id}"`,
                 { requestKey: null },
               );
-            setKelas(kelasData);
+            if (!cancelled) setKelas(kelasData);
           } catch (e) {
             console.log("Tidak ada kelas yang ditugaskan");
           }
@@ -170,7 +171,7 @@ function AgendaModal({ isOpen, onClose, onSubmit, initialData, defaultDate }) {
             sort: "nama_kelas",
             requestKey: null,
           });
-          setListKelas(allKelas);
+          if (!cancelled) setListKelas(allKelas);
         }
 
         let mapelData = [];
@@ -193,13 +194,16 @@ function AgendaModal({ isOpen, onClose, onSubmit, initialData, defaultDate }) {
           mapelData.sort((a, b) => a.nama_mapel.localeCompare(b.nama_mapel));
         }
 
-        setListMapel(mapelData);
+        if (!cancelled) setListMapel(mapelData);
       } catch (error) {
         console.error("Gagal mengambil data:", error);
       }
     }
 
     fetchData();
+    return () => {
+      cancelled = true;
+    };
   }, [user, isOpen]);
 
   // Reset form ketika modal dibuka atau initialData berubah
