@@ -42,6 +42,8 @@ const icons = {
   pengaturan: "M8 5a3 3 0 100 6 3 3 0 000-6zM8 1v2M8 13v2M1 8h2M13 8h2",
   log: "M2 2h12v12H2V2zM5 6h6M5 9h6M5 12h3",
   profile: "M8 2a3 3 0 100 6 3 3 0 000-6zM2 14c0-3 2.7-5 6-5s6 2 6 5",
+  // ✨ Tambahan ikon untuk Leger
+  leger: "M2 4h12v10H2V4z M4 8h8 M4 12h6", // path sederhana (bisa disesuaikan)
 };
 
 // Array NAV utama untuk Administrator Sekolah
@@ -70,6 +72,13 @@ const NAV = [
     label: "Rekap Nilai",
     href: "/walikelas/penilaian",
     icon: "nilai",
+  },
+  // ✨ Tambahan menu Leger di bawah Rekap Nilai
+  {
+    key: "leger",
+    label: "Leger",
+    href: "/walikelas/leger",
+    icon: "leger", // menggunakan ikon yang baru ditambahkan
   },
   {
     key: "agenda",

@@ -7,50 +7,107 @@ import { pb, isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
 // Role yang boleh mengakses halaman ini
 const ALLOWED_ROLES = ["guru mapel"];
 
+// jenis_ujian di pengaturan_ujian yang dipetakan ke UTS / UAS (label saja)
+const JENIS_LABEL = {
+  ahb: "UTS",
+  asas: "UAS",
+  asat: "Akhir Tahun",
+  lainnya: "Lainnya",
+};
+
+const DAFTAR_NO_TP = [
+  "TP 1",
+  "TP 2",
+  "TP 3",
+  "TP 4",
+  "TP 5",
+  "TP 6",
+  "TP 7",
+  "TP 8",
+  "TP 9",
+  "TP 10",
+];
+
 function firstOf(val) {
   return Array.isArray(val) ? val[0] : val;
 }
 
 // ================================================================
-// FORMAT GRADE UTILITY - 00.00 (2 digit sebelum dan sesudah koma)
+// UTIL – abaikan -1 sebagai kosong
 // ================================================================
-function formatGrade(value) {
-  const num = Number(value);
-  if (isNaN(num) || num < 0) return null;
-
-  // Batasi maksimal 99.99
-  const clamped = Math.min(num, 99.99);
-
-  // Format dengan 2 digit desimal
-  const formatted = clamped.toFixed(2);
-
-  // Pastikan 2 digit sebelum koma
-  const parts = formatted.split(".");
-  const whole = parts[0].padStart(2, "0");
-  const decimal = parts[1] || "00";
-
-  return `${whole}.${decimal}`;
+function average(arr) {
+  const nums = arr.filter(
+    (v) => typeof v === "number" && !isNaN(v) && v !== -1,
+  );
+  if (nums.length === 0) return null;
+  return nums.reduce((a, b) => a + b, 0) / nums.length;
 }
 
-// ================================================================
-// GET GRADE COLOR - Merah jika < 70
-// ================================================================
+function formatGrade(value) {
+  if (value === null || value === undefined || value === -1) return "—";
+  const num = Number(value);
+  if (isNaN(num) || num < 0) return "—";
+  const clamped = Math.min(num, 99.99);
+  const formatted = clamped.toFixed(2);
+  const [whole, decimal] = formatted.split(".");
+  return `${whole.padStart(2, "0")}.${decimal}`;
+}
+
 function nilaiColor(n) {
-  if (n === null || n === undefined || Number.isNaN(n)) return "text-slate-400";
-  if (n < 70) return "text-red-600";
-  return "text-emerald-600";
+  if (n === null || n === undefined || n === -1 || Number.isNaN(Number(n)))
+    return "text-slate-400";
+  return Number(n) < 70 ? "text-red-600" : "text-emerald-600";
+}
+
+function tpNumber(tp) {
+  const m = String(tp.no_tp || "").match(/\d+/);
+  return m ? parseInt(m[0], 10) : 0;
 }
 
 function getKelasBadge(kelas) {
   if (!kelas) return "-";
   const nama = kelas.nama_kelas || "";
   const match = nama.match(/(\d+[A-Za-z]+)$/);
-  if (match) {
-    return match[1].toUpperCase();
-  }
+  if (match) return match[1].toUpperCase();
   const tingkat = kelas.tingkat || "";
   const firstChar = nama.replace(/\d+/g, "").trim().charAt(0) || "A";
   return `${tingkat}${firstChar}`;
+}
+
+// ================================================================
+// KOMPONEN INPUT NILAI – tampilkan "" jika nilai -1
+// ================================================================
+function NilaiInput({
+  value,
+  onChange,
+  onBlur,
+  saving,
+  saved,
+  width = "w-16",
+}) {
+  const displayValue = value === -1 ? "" : (value ?? "");
+  return (
+    <div className="relative inline-block">
+      <input
+        type="number"
+        min={0}
+        max={100}
+        step="0.1"
+        value={displayValue}
+        onChange={onChange}
+        onBlur={onBlur}
+        placeholder="—"
+        className={`${width} rounded-lg border px-2 py-1 text-center text-xs font-semibold outline-none transition ${
+          saved
+            ? "border-emerald-300 bg-emerald-50"
+            : "border-slate-200 focus:border-blue-500"
+        }`}
+      />
+      {saving && (
+        <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
+      )}
+    </div>
+  );
 }
 
 export default function PenilaianGuruMapelPage() {
@@ -70,14 +127,12 @@ export default function PenilaianGuruMapelPage() {
     () => plotingList.find((p) => p.id === selectedPlotingId) || null,
     [plotingList, selectedPlotingId],
   );
-
-  // id mapel murni (bukan objek expand) dari ploting terpilih — dipakai utk filter
   const selectedMapelId = useMemo(
     () => firstOf(selectedPloting?.mapel_id) || null,
     [selectedPloting],
   );
 
-  // Kelas-kelas dalam ploting terpilih (kelas_id multi-select), plus jumlah siswa per kelas
+  // Step 2: pilih kelas (dari kelas_id multi-select ploting terpilih)
   const [kelasOptions, setKelasOptions] = useState([]); // [{ kelas, siswaCount }]
   const [loadingKelasOptions, setLoadingKelasOptions] = useState(false);
   const [selectedKelasId, setSelectedKelasId] = useState(null);
@@ -88,14 +143,30 @@ export default function PenilaianGuruMapelPage() {
     [kelasOptions, selectedKelasId],
   );
 
-  // Step 3: data inti (siswa, lingkup materi, TP, nilai) untuk kelas terpilih
   const [siswaList, setSiswaList] = useState([]);
-  const [lingkupList, setLingkupList] = useState([]);
-  const [tpByLingkup, setTpByLingkup] = useState({});
-  const [nilaiMap, setNilaiMap] = useState({}); // { siswaId: { lingkupId: { id, nilai } } }
   const [loadingDetail, setLoadingDetail] = useState(false);
 
-  const [innerTab, setInnerTab] = useState("materi"); // 'materi' | 'nilai' | 'ujian'
+  const [innerTab, setInnerTab] = useState("formatif"); // formatif | sumatif | ujian
+
+  // ---- Formatif ----
+  const [tpList, setTpList] = useState([]);
+  // nilaiFormatif[siswaId][tpId] = { recordId, k1, k2, k3, k4 } – nilai -1 untuk kosong
+  const [nilaiFormatif, setNilaiFormatif] = useState({});
+  const [addingTp, setAddingTp] = useState(false);
+  const [selectedNoTp, setSelectedNoTp] = useState("");
+  const [savingTp, setSavingTp] = useState(false);
+  const [savingFCell, setSavingFCell] = useState(null);
+  const [savedFFlash, setSavedFFlash] = useState(null);
+
+  // ---- Sumatif ----
+  const [lpList, setLpList] = useState([]);
+  // nilaiSumatif[siswaId][lpId] = { recordId, nilai }
+  const [nilaiSumatif, setNilaiSumatif] = useState({});
+  const [showAddLp, setShowAddLp] = useState(false);
+  const [namaLp, setNamaLp] = useState("");
+  const [savingLp, setSavingLp] = useState(false);
+  const [savingSCell, setSavingSCell] = useState(null);
+  const [savedSFlash, setSavedSFlash] = useState(null);
 
   // ---- Ujian ----
   const [ujianAktif, setUjianAktif] = useState([]);
@@ -104,46 +175,22 @@ export default function PenilaianGuruMapelPage() {
   // nilaiUjian[siswaId] = { recordId, nilai }
   const [nilaiUjian, setNilaiUjian] = useState({});
   const [loadingNilaiUjian, setLoadingNilaiUjian] = useState(false);
-  const [savingUjianCell, setSavingUjianCell] = useState(null);
-  const [savedUjianFlash, setSavedUjianFlash] = useState(null);
-
-  // ---- Form Lingkup Materi ----
-  const [showLingkupForm, setShowLingkupForm] = useState(false);
-  const [lingkupForm, setLingkupForm] = useState({
-    nama_lingkup: "",
-    capaian_kompetensi: "",
-  });
-  const [editingLingkupId, setEditingLingkupId] = useState(null);
-  const [savingLingkup, setSavingLingkup] = useState(false);
-
-  // ---- Form Tujuan Pembelajaran ----
-  const [addingTpFor, setAddingTpFor] = useState(null);
-  const [tpDraft, setTpDraft] = useState("");
-  const [editingTp, setEditingTp] = useState(null); // { id, lingkupId, deskripsi }
-  const [savingTp, setSavingTp] = useState(false);
-
-  // ---- Nilai ----
-  const [savingCell, setSavingCell] = useState(null);
-  const [savedFlash, setSavedFlash] = useState(null);
-
-  const canEdit = Boolean(selectedPloting && selectedKelas);
+  const [savingUCell, setSavingUCell] = useState(null);
+  const [savedUFlash, setSavedUFlash] = useState(null);
 
   // 1. Cek auth & role
   useEffect(() => {
     const currentUser = getCurrentUser();
-
     if (!isAuthenticated() || !currentUser) {
       router.push("/login");
       return;
     }
-
     if (!ALLOWED_ROLES.includes(currentUser.role)) {
       setUnauthorized(true);
       setAuthChecked(true);
       setLoadingPloting(false);
       return;
     }
-
     setUser(currentUser);
     setAuthChecked(true);
   }, [router]);
@@ -184,8 +231,7 @@ export default function PenilaianGuruMapelPage() {
     };
   }, [authChecked, unauthorized, user]);
 
-  // 3. Bangun daftar kelas dari kelas_id (multi-select) milik ploting terpilih,
-  //    lengkap dengan jumlah siswa per kelas.
+  // 3. Bangun daftar kelas dari kelas_id (multi-select) ploting terpilih
   useEffect(() => {
     if (!selectedPloting) {
       setKelasOptions([]);
@@ -248,13 +294,14 @@ export default function PenilaianGuruMapelPage() {
     };
   }, [selectedPloting]);
 
-  // 4. Ambil siswa (kelas terpilih), lingkup materi & TP, dan nilai harian
+  // 4. Ambil siswa + TP + LP (mapel-wide) + nilai_formatif + nilai_sumatif
   useEffect(() => {
-    if (!selectedPloting || !selectedKelas || !selectedMapelId) {
+    if (!selectedKelas || !selectedMapelId) {
       setSiswaList([]);
-      setLingkupList([]);
-      setTpByLingkup({});
-      setNilaiMap({});
+      setTpList([]);
+      setLpList([]);
+      setNilaiFormatif({});
+      setNilaiSumatif({});
       return;
     }
     let isMounted = true;
@@ -263,58 +310,70 @@ export default function PenilaianGuruMapelPage() {
       setLoadingDetail(true);
       setError("");
       try {
-        const [siswaRecords, lingkupRecords] = await Promise.all([
+        const [siswaRecords, tpRecords, lpRecords] = await Promise.all([
           pb.collection("siswa").getFullList({
             filter: `kelas_id = "${selectedKelas.id}"`,
             sort: "nama_siswa",
             requestKey: null,
           }),
-          pb.collection("lingkup_materi").getFullList({
-            filter: `mapel_id ~ "${selectedMapelId}" && kelas_id ~ "${selectedKelas.id}"`,
+          pb.collection("tujuan_pembelajaran").getFullList({
+            filter: `mapel_id ~ "${selectedMapelId}"`,
+            requestKey: null,
+          }),
+          pb.collection("lingkup_mater").getFullList({
+            filter: `mapel_id ~ "${selectedMapelId}"`,
             requestKey: null,
           }),
         ]);
 
-        let tpGrouped = {};
-        if (lingkupRecords.length > 0) {
-          const tpFilter = lingkupRecords
-            .map((l) => `lingkup_materi_id = "${l.id}"`)
+        const tpSorted = tpRecords.sort((a, b) => tpNumber(a) - tpNumber(b));
+
+        let nfMap = {};
+        if (tpSorted.length > 0) {
+          const tpFilter = tpSorted
+            .map((tp) => `tp_id ~ "${tp.id}"`)
             .join(" || ");
-          const tpRecords = await pb
-            .collection("tujuan_pembelajaran")
-            .getFullList({
-              filter: tpFilter,
-              sort: "urutan",
-              requestKey: null,
-            });
-          for (const tp of tpRecords) {
-            const lid = firstOf(tp.lingkup_materi_id);
-            if (!tpGrouped[lid]) tpGrouped[lid] = [];
-            tpGrouped[lid].push(tp);
-          }
-        }
-
-        let nilaiGrouped = {};
-        for (const s of siswaRecords) nilaiGrouped[s.id] = {};
-
-        if (siswaRecords.length > 0 && lingkupRecords.length > 0) {
-          const nilaiRecords = await pb.collection("nilai_harian").getFullList({
-            filter: `kelas_id ~ "${selectedKelas.id}" && mapel_id ~ "${selectedMapelId}"`,
+          const nfData = await pb.collection("nilai_formatif").getFullList({
+            filter: `kelas_id ~ "${selectedKelas.id}" && (${tpFilter})`,
             requestKey: null,
           });
-          for (const n of nilaiRecords) {
+          nfData.forEach((n) => {
             const sid = firstOf(n.siswa_id);
-            const lid = firstOf(n.lingkup_materi_id);
-            if (!nilaiGrouped[sid]) nilaiGrouped[sid] = {};
-            nilaiGrouped[sid][lid] = { id: n.id, nilai: n.nilai };
-          }
+            const tid = firstOf(n.tp_id);
+            if (!nfMap[sid]) nfMap[sid] = {};
+            nfMap[sid][tid] = {
+              recordId: n.id,
+              k1: n.k1 ?? -1,
+              k2: n.k2 ?? -1,
+              k3: n.k3 ?? -1,
+              k4: n.k4 ?? -1,
+            };
+          });
+        }
+
+        let nsMap = {};
+        if (lpRecords.length > 0) {
+          const lpFilter = lpRecords
+            .map((lp) => `lm_id ~ "${lp.id}"`)
+            .join(" || ");
+          const nsData = await pb.collection("nilai_sumatif").getFullList({
+            filter: `kelas_id ~ "${selectedKelas.id}" && (${lpFilter})`,
+            requestKey: null,
+          });
+          nsData.forEach((n) => {
+            const sid = firstOf(n.siswa_id);
+            const lid = firstOf(n.lm_id);
+            if (!nsMap[sid]) nsMap[sid] = {};
+            nsMap[sid][lid] = { recordId: n.id, nilai: n.nilai };
+          });
         }
 
         if (!isMounted) return;
         setSiswaList(siswaRecords);
-        setLingkupList(lingkupRecords);
-        setTpByLingkup(tpGrouped);
-        setNilaiMap(nilaiGrouped);
+        setTpList(tpSorted);
+        setLpList(lpRecords);
+        setNilaiFormatif(nfMap);
+        setNilaiSumatif(nsMap);
       } catch (err) {
         console.error("Error fetching detail:", err);
         if (isMounted) setError("Gagal memuat data materi/nilai kelas ini.");
@@ -327,9 +386,9 @@ export default function PenilaianGuruMapelPage() {
     return () => {
       isMounted = false;
     };
-  }, [selectedPloting, selectedKelas, selectedMapelId]);
+  }, [selectedKelas, selectedMapelId]);
 
-  // 5. Ambil ujian yang aktif (status_akses = "buka") untuk kelas/tingkat terpilih
+  // 5. Ambil ujian aktif (status_akses = "buka") untuk kelas/tingkat terpilih
   useEffect(() => {
     if (!selectedKelas) {
       setUjianAktif([]);
@@ -405,337 +464,292 @@ export default function PenilaianGuruMapelPage() {
     };
   }, [selectedUjianId, selectedPloting, siswaList]);
 
-  // ---------------- Handlers: Lingkup Materi ----------------
-  function openAddLingkup() {
-    setEditingLingkupId(null);
-    setLingkupForm({ nama_lingkup: "", capaian_kompetensi: "" });
-    setShowLingkupForm(true);
-  }
-
-  function openEditLingkup(l) {
-    setEditingLingkupId(l.id);
-    setLingkupForm({
-      nama_lingkup: l.nama_lingkup || "",
-      capaian_kompetensi: l.capaian_kompetensi || "",
+  // ================= NILAI AKHIR (untuk kolom "Nilai Akhir" per tabel) ====
+  // abaikan -1
+  const formatifAvgMap = useMemo(() => {
+    const result = {};
+    siswaList.forEach((s) => {
+      const perTp = nilaiFormatif[s.id] || {};
+      const semuaK = [];
+      Object.values(perTp).forEach((rec) => {
+        ["k1", "k2", "k3", "k4"].forEach((k) => {
+          const val = rec[k];
+          if (typeof val === "number" && !isNaN(val) && val !== -1) {
+            semuaK.push(val);
+          }
+        });
+      });
+      result[s.id] = average(semuaK);
     });
-    setShowLingkupForm(true);
-  }
+    return result;
+  }, [nilaiFormatif, siswaList]);
 
-  async function submitLingkup() {
-    if (!lingkupForm.nama_lingkup.trim() || !selectedPloting || !selectedKelas)
-      return;
-    setSavingLingkup(true);
-    setError("");
-    try {
-      if (editingLingkupId) {
-        const updated = await pb
-          .collection("lingkup_materi")
-          .update(editingLingkupId, {
-            kelas_id: [selectedKelas.id],
-            nama_lingkup: lingkupForm.nama_lingkup.trim(),
-            capaian_kompetensi: lingkupForm.capaian_kompetensi.trim(),
-          });
-        setLingkupList((prev) =>
-          prev.map((l) => (l.id === updated.id ? updated : l)),
-        );
-      } else {
-        const created = await pb.collection("lingkup_materi").create({
-          ploting_guru_id: selectedPloting.id,
-          guru_id: selectedPloting.guru_id || user.id,
-          mapel_id: selectedMapelId,
-          kelas_id: [selectedKelas.id],
-          nama_lingkup: lingkupForm.nama_lingkup.trim(),
-          capaian_kompetensi: lingkupForm.capaian_kompetensi.trim(),
-        });
-        setLingkupList((prev) => [...prev, created]);
-        setTpByLingkup((prev) => ({ ...prev, [created.id]: [] }));
-        setNilaiMap((prev) => {
-          const next = {};
-          for (const sid of Object.keys(prev)) next[sid] = { ...prev[sid] };
-          return next;
-        });
-      }
-      setShowLingkupForm(false);
-      setEditingLingkupId(null);
-      setLingkupForm({ nama_lingkup: "", capaian_kompetensi: "" });
-    } catch (err) {
-      console.error("Error saving lingkup materi:", err);
-      setError("Gagal menyimpan lingkup materi.");
-    } finally {
-      setSavingLingkup(false);
-    }
-  }
+  const sumatifAvgMap = useMemo(() => {
+    const result = {};
+    siswaList.forEach((s) => {
+      const perLp = nilaiSumatif[s.id] || {};
+      const vals = Object.values(perLp)
+        .map((r) => r.nilai)
+        .filter((v) => typeof v === "number" && !isNaN(v) && v !== -1);
+      result[s.id] = average(vals);
+    });
+    return result;
+  }, [nilaiSumatif, siswaList]);
 
-  async function deleteLingkup(id) {
-    if (
-      !confirm(
-        "Hapus lingkup materi ini? Tujuan pembelajaran dan seluruh nilai harian terkait juga akan terhapus.",
-      )
-    )
-      return;
-    try {
-      await pb.collection("lingkup_materi").delete(id);
-      setLingkupList((prev) => prev.filter((l) => l.id !== id));
-      setTpByLingkup((prev) => {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
-      setNilaiMap((prev) => {
-        const next = {};
-        for (const sid of Object.keys(prev)) {
-          const row = { ...prev[sid] };
-          delete row[id];
-          next[sid] = row;
-        }
-        return next;
-      });
-    } catch (err) {
-      console.error("Error deleting lingkup materi:", err);
-      setError("Gagal menghapus lingkup materi.");
-    }
-  }
-
-  // ---------------- Handlers: Tujuan Pembelajaran ----------------
-  async function submitTp(lingkupId) {
-    if (!tpDraft.trim()) return;
+  // ---------------- Handlers: Tambah TP ----------------
+  async function handleAddTp() {
+    if (!selectedNoTp || !selectedMapelId) return;
     setSavingTp(true);
     setError("");
     try {
-      const urutan = (tpByLingkup[lingkupId]?.length || 0) + 1;
-      const created = await pb.collection("tujuan_pembelajaran").create({
-        lingkup_materi_id: lingkupId,
-        deskripsi: tpDraft.trim(),
-        urutan,
-      });
-      setTpByLingkup((prev) => ({
-        ...prev,
-        [lingkupId]: [...(prev[lingkupId] || []), created],
-      }));
-      setTpDraft("");
-      setAddingTpFor(null);
-    } catch (err) {
-      console.error("Error saving tujuan pembelajaran:", err);
-      setError("Gagal menyimpan tujuan pembelajaran.");
-    } finally {
-      setSavingTp(false);
-    }
-  }
-
-  async function updateTp() {
-    if (!editingTp?.deskripsi?.trim()) return;
-    setSavingTp(true);
-    setError("");
-    try {
-      const updated = await pb
+      const created = await pb
         .collection("tujuan_pembelajaran")
-        .update(editingTp.id, {
-          deskripsi: editingTp.deskripsi.trim(),
-        });
-      setTpByLingkup((prev) => ({
-        ...prev,
-        [editingTp.lingkupId]: (prev[editingTp.lingkupId] || []).map((t) =>
-          t.id === updated.id ? updated : t,
-        ),
-      }));
-      setEditingTp(null);
+        .create(
+          { no_tp: selectedNoTp, mapel_id: selectedMapelId },
+          { requestKey: null },
+        );
+      setTpList((prev) =>
+        [...prev, created].sort((a, b) => tpNumber(a) - tpNumber(b)),
+      );
+      setSelectedNoTp("");
+      setAddingTp(false);
     } catch (err) {
-      console.error("Error updating tujuan pembelajaran:", err);
-      setError("Gagal memperbarui tujuan pembelajaran.");
+      console.error("Gagal menambah TP:", err?.response?.data || err);
+      setError("Gagal menambah TP.");
     } finally {
       setSavingTp(false);
     }
   }
 
-  async function deleteTp(lingkupId, tpId) {
-    if (!confirm("Hapus tujuan pembelajaran ini?")) return;
-    try {
-      await pb.collection("tujuan_pembelajaran").delete(tpId);
-      setTpByLingkup((prev) => ({
-        ...prev,
-        [lingkupId]: (prev[lingkupId] || []).filter((t) => t.id !== tpId),
-      }));
-    } catch (err) {
-      console.error("Error deleting tujuan pembelajaran:", err);
-      setError("Gagal menghapus tujuan pembelajaran.");
-    }
-  }
-
-  // ---------------- Handlers: Nilai Harian ----------------
-  function handleNilaiChange(siswaId, lingkupId, rawValue) {
-    setNilaiMap((prev) => ({
+  // ---------------- Handlers: Nilai Formatif (dengan -1) ----------------
+  function handleFormatifChange(siswaId, tpId, kField, rawValue) {
+    setNilaiFormatif((prev) => ({
       ...prev,
       [siswaId]: {
         ...prev[siswaId],
-        [lingkupId]: {
-          ...(prev[siswaId]?.[lingkupId] || {}),
-          nilai: rawValue,
+        [tpId]: {
+          ...(prev[siswaId]?.[tpId] || {}),
+          [kField]: rawValue, // simpan sebagai string, "" jika kosong
         },
       },
     }));
   }
 
-  async function handleNilaiBlur(siswaId, lingkupId) {
-    const cell = nilaiMap[siswaId]?.[lingkupId];
-    const rawValue = cell?.nilai;
-    if (rawValue === "" || rawValue === undefined || rawValue === null) return;
+  async function handleFormatifBlur(siswaId, tpId, kField) {
+    const rec = nilaiFormatif[siswaId]?.[tpId];
+    const rawValue = rec?.[kField];
+    // Jika kosong, set -1
+    let nilaiValue;
+    if (rawValue === "" || rawValue === undefined || rawValue === null) {
+      nilaiValue = -1;
+    } else {
+      const num = Number(rawValue);
+      if (Number.isNaN(num)) return; // invalid
+      nilaiValue = Math.min(100, Math.max(0, num));
+    }
 
-    const nilaiNum = Number(rawValue);
-    if (Number.isNaN(nilaiNum)) return;
+    // Jika nilai sama, skip
+    if (rec?.[kField] === nilaiValue) return;
 
-    const clamped = Math.min(100, Math.max(0, nilaiNum));
-    const key = `${siswaId}_${lingkupId}`;
-    setSavingCell(key);
+    const cellKey = `f-${siswaId}-${tpId}-${kField}`;
+    setSavingFCell(cellKey);
     setError("");
     try {
-      if (cell?.id) {
-        await pb.collection("nilai_harian").update(cell.id, { nilai: clamped });
+      let saved;
+      if (rec?.recordId) {
+        // Update: kirim semua field dengan nilai saat ini (termasuk -1)
+        const currentValues = {
+          k1: rec.k1 ?? -1,
+          k2: rec.k2 ?? -1,
+          k3: rec.k3 ?? -1,
+          k4: rec.k4 ?? -1,
+        };
+        currentValues[kField] = nilaiValue;
+        saved = await pb
+          .collection("nilai_formatif")
+          .update(rec.recordId, currentValues, { requestKey: null });
       } else {
-        const created = await pb.collection("nilai_harian").create({
+        // Create: semua -1, lalu timpa field yang diisi
+        const data = {
+          tp_id: tpId,
           siswa_id: siswaId,
-          lingkup_materi_id: lingkupId,
-          nilai: clamped,
-          guru_id: selectedPloting?.guru_id || user.id,
           kelas_id: selectedKelas.id,
-          mapel_id: selectedMapelId,
-        });
-        setNilaiMap((prev) => ({
-          ...prev,
-          [siswaId]: {
-            ...prev[siswaId],
-            [lingkupId]: { id: created.id, nilai: clamped },
-          },
-        }));
+          k1: -1,
+          k2: -1,
+          k3: -1,
+          k4: -1,
+        };
+        data[kField] = nilaiValue;
+        saved = await pb
+          .collection("nilai_formatif")
+          .create(data, { requestKey: null });
       }
-      if (clamped !== nilaiNum) {
-        setNilaiMap((prev) => ({
-          ...prev,
-          [siswaId]: {
-            ...prev[siswaId],
-            [lingkupId]: { ...prev[siswaId]?.[lingkupId], nilai: clamped },
+      // Update state
+      setNilaiFormatif((prev) => ({
+        ...prev,
+        [siswaId]: {
+          ...prev[siswaId],
+          [tpId]: {
+            ...(prev[siswaId]?.[tpId] || {}),
+            recordId: saved.id,
+            [kField]: nilaiValue,
           },
-        }));
-      }
-      setSavedFlash(key);
-      setTimeout(() => setSavedFlash((k) => (k === key ? null : k)), 1200);
+        },
+      }));
+      setSavedFFlash(cellKey);
+      setTimeout(() => setSavedFFlash((k) => (k === cellKey ? null : k)), 1200);
     } catch (err) {
-      console.error("Error saving nilai:", err);
-      setError("Gagal menyimpan nilai. Periksa koneksi lalu coba lagi.");
+      console.error(
+        "Gagal menyimpan nilai formatif:",
+        err?.response?.data || err,
+      );
+      setError("Gagal menyimpan nilai formatif.");
     } finally {
-      setSavingCell((k) => (k === key ? null : k));
+      setSavingFCell((k) => (k === cellKey ? null : k));
     }
   }
 
-  // ---------------- Handlers: Nilai Ujian ----------------
-  function handleNilaiUjianChange(siswaId, rawValue) {
+  // ---------------- Handlers: Tambah LP ----------------
+  async function handleAddLp(e) {
+    e.preventDefault();
+    if (!namaLp.trim() || !selectedMapelId) return;
+    setSavingLp(true);
+    setError("");
+    try {
+      const created = await pb
+        .collection("lingkup_mater")
+        .create(
+          { nama: namaLp.trim(), mapel_id: selectedMapelId },
+          { requestKey: null },
+        );
+      setLpList((prev) => [...prev, created]);
+      setNamaLp("");
+      setShowAddLp(false);
+    } catch (err) {
+      console.error("Gagal menambah LP:", err?.response?.data || err);
+      setError("Gagal menambah LP.");
+    } finally {
+      setSavingLp(false);
+    }
+  }
+
+  // ---------------- Handlers: Nilai Sumatif (tetap pakai null, tidak diubah) ----------------
+  function handleSumatifChange(siswaId, lpId, rawValue) {
+    setNilaiSumatif((prev) => ({
+      ...prev,
+      [siswaId]: {
+        ...prev[siswaId],
+        [lpId]: { ...(prev[siswaId]?.[lpId] || {}), nilai: rawValue },
+      },
+    }));
+  }
+
+  async function handleSumatifBlur(siswaId, lpId) {
+    const rec = nilaiSumatif[siswaId]?.[lpId];
+    const rawValue = rec?.nilai;
+    if (rawValue === "" || rawValue === undefined || rawValue === null) return;
+    const nilaiNum = Number(rawValue);
+    if (Number.isNaN(nilaiNum)) return;
+    const clamped = Math.min(100, Math.max(0, nilaiNum));
+
+    const cellKey = `s-${siswaId}-${lpId}`;
+    setSavingSCell(cellKey);
+    setError("");
+    try {
+      let saved;
+      if (rec?.recordId) {
+        saved = await pb
+          .collection("nilai_sumatif")
+          .update(rec.recordId, { nilai: clamped }, { requestKey: null });
+      } else {
+        saved = await pb.collection("nilai_sumatif").create(
+          {
+            lm_id: lpId,
+            siswa_id: siswaId,
+            kelas_id: selectedKelas.id,
+            nilai: clamped,
+          },
+          { requestKey: null },
+        );
+      }
+      setNilaiSumatif((prev) => ({
+        ...prev,
+        [siswaId]: {
+          ...prev[siswaId],
+          [lpId]: { recordId: saved.id, nilai: clamped },
+        },
+      }));
+      setSavedSFlash(cellKey);
+      setTimeout(() => setSavedSFlash((k) => (k === cellKey ? null : k)), 1200);
+    } catch (err) {
+      console.error(
+        "Gagal menyimpan nilai sumatif:",
+        err?.response?.data || err,
+      );
+      setError("Gagal menyimpan nilai sumatif.");
+    } finally {
+      setSavingSCell((k) => (k === cellKey ? null : k));
+    }
+  }
+
+  // ---------------- Handlers: Nilai Ujian (tetap pakai null) ----------------
+  function handleUjianChange(siswaId, rawValue) {
     setNilaiUjian((prev) => ({
       ...prev,
       [siswaId]: { ...(prev[siswaId] || {}), nilai: rawValue },
     }));
   }
 
-  async function handleNilaiUjianBlur(siswaId) {
+  async function handleUjianBlur(siswaId) {
     if (!selectedUjianId || !selectedPloting) return;
     const existing = nilaiUjian[siswaId];
     const rawValue = existing?.nilai;
     if (rawValue === "" || rawValue === undefined || rawValue === null) return;
-
     const nilaiNum = Number(rawValue);
     if (Number.isNaN(nilaiNum)) return;
-
     const clamped = Math.min(100, Math.max(0, nilaiNum));
-    setSavingUjianCell(siswaId);
+
+    setSavingUCell(siswaId);
     setError("");
     try {
       let saved;
       if (existing?.recordId) {
-        saved = await pb.collection("nilai_ujian").update(existing.recordId, {
-          nilai: clamped,
-        });
+        saved = await pb
+          .collection("nilai_ujian")
+          .update(existing.recordId, { nilai: clamped }, { requestKey: null });
       } else {
-        saved = await pb.collection("nilai_ujian").create({
-          siswa_id: siswaId,
-          ploting_guru_id: selectedPloting.id,
-          pengaturan_ujian_id: selectedUjianId,
-          nilai: clamped,
-        });
+        saved = await pb.collection("nilai_ujian").create(
+          {
+            siswa_id: siswaId,
+            ploting_guru_id: selectedPloting.id,
+            pengaturan_ujian_id: selectedUjianId,
+            nilai: clamped,
+          },
+          { requestKey: null },
+        );
       }
       setNilaiUjian((prev) => ({
         ...prev,
         [siswaId]: { recordId: saved.id, nilai: clamped },
       }));
-      setSavedUjianFlash(siswaId);
-      setTimeout(
-        () => setSavedUjianFlash((k) => (k === siswaId ? null : k)),
-        1200,
-      );
+      setSavedUFlash(siswaId);
+      setTimeout(() => setSavedUFlash((k) => (k === siswaId ? null : k)), 1200);
     } catch (err) {
-      console.error("Error saving nilai ujian:", err);
-      setError("Gagal menyimpan nilai ujian. Periksa koneksi lalu coba lagi.");
+      console.error("Gagal menyimpan nilai ujian:", err?.response?.data || err);
+      setError("Gagal menyimpan nilai ujian.");
     } finally {
-      setSavingUjianCell((k) => (k === siswaId ? null : k));
+      setSavingUCell((k) => (k === siswaId ? null : k));
     }
-  }
-
-  // Nilai akhir realtime = rata-rata seluruh lingkup materi yang sudah terisi
-  // dengan format 00.00 dan warna merah jika < 70
-  const nilaiAkhirBySiswa = useMemo(() => {
-    const result = {};
-    for (const s of siswaList) {
-      const row = nilaiMap[s.id] || {};
-      const nums = lingkupList
-        .map((l) => row[l.id]?.nilai)
-        .filter(
-          (v) =>
-            v !== "" &&
-            v !== undefined &&
-            v !== null &&
-            !Number.isNaN(Number(v)),
-        )
-        .map(Number);
-
-      if (nums.length > 0) {
-        const average = nums.reduce((a, b) => a + b, 0) / nums.length;
-        result[s.id] = {
-          value: average,
-          formatted: formatGrade(average),
-          color: nilaiColor(average),
-        };
-      } else {
-        result[s.id] = {
-          value: null,
-          formatted: null,
-          color: "text-slate-400",
-        };
-      }
-    }
-    return result;
-  }, [siswaList, lingkupList, nilaiMap]);
-
-  // Rata-rata kelas dengan format 00.00
-  const rataRataKelas = useMemo(() => {
-    const vals = Object.values(nilaiAkhirBySiswa)
-      .filter((v) => v.value !== null)
-      .map((v) => v.value);
-    if (vals.length === 0) return null;
-    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
-    return formatGrade(avg);
-  }, [nilaiAkhirBySiswa]);
-
-  function handleTabChange(tab) {
-    setInnerTab(tab);
   }
 
   function backToMapel() {
     setSelectedPlotingId(null);
   }
-
   function backToKelas() {
     setSelectedKelasId(null);
   }
 
-  // ---------------- Render ----------------
-
+  // ---------------- Render (tidak diubah, hanya komponen NilaiInput sudah menangani -1) ----------------
   if (!authChecked) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center text-slate-500">
@@ -762,7 +776,11 @@ export default function PenilaianGuruMapelPage() {
         <button
           type="button"
           onClick={backToMapel}
-          className={`${selectedPloting ? "hover:text-slate-600 cursor-pointer" : "text-slate-600 font-medium"}`}
+          className={
+            selectedPloting
+              ? "hover:text-slate-600 cursor-pointer"
+              : "text-slate-600 font-medium"
+          }
         >
           Penilaian
         </button>
@@ -772,7 +790,11 @@ export default function PenilaianGuruMapelPage() {
             <button
               type="button"
               onClick={backToKelas}
-              className={`${selectedKelas ? "hover:text-slate-600 cursor-pointer" : "text-slate-600 font-medium"}`}
+              className={
+                selectedKelas
+                  ? "hover:text-slate-600 cursor-pointer"
+                  : "text-slate-600 font-medium"
+              }
             >
               {selectedPloting.expand?.mapel_id?.nama_mapel || "Mata Pelajaran"}
             </button>
@@ -787,6 +809,7 @@ export default function PenilaianGuruMapelPage() {
           </>
         )}
       </div>
+
       {error && (
         <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
           {error}
@@ -800,8 +823,7 @@ export default function PenilaianGuruMapelPage() {
             Pilih Mata Pelajaran
           </h1>
           <p className="mb-6 text-xs text-slate-500">
-            Pilih mata pelajaran untuk melihat rekap absensi kelas yang Anda
-            ampu.
+            Pilih mata pelajaran untuk mengelola nilai kelas yang Anda ampu.
           </p>
 
           {loadingPloting ? (
@@ -826,22 +848,15 @@ export default function PenilaianGuruMapelPage() {
                     onClick={() => setSelectedPlotingId(p.id)}
                     className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition-all duration-300 hover:border-blue-600 hover:shadow-lg hover:shadow-blue-200 hover:bg-blue-600 active:scale-[0.98]"
                   >
-                    {/* Badge kode mapel - berubah putih saat hover */}
                     <span className="inline-block text-[9px] font-mono bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold uppercase group-hover:bg-white/20 group-hover:text-white transition-colors duration-300">
                       {mapel?.kode_mapel || "MPL"}
                     </span>
-
-                    {/* Nama mapel - putih saat hover */}
                     <h3 className="text-sm font-bold text-slate-800 mt-2 group-hover:text-white transition-colors duration-300">
                       {mapel?.nama_mapel || "—"}
                     </h3>
-
-                    {/* Jumlah kelas - putih/transparan saat hover */}
                     <p className="text-[11px] text-slate-400 mt-1 group-hover:text-blue-100 transition-colors duration-300">
                       Diampu di {kelasArr.length} kelas
                     </p>
-
-                    {/* Arrow indicator - putih saat hover */}
                     <div className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 group-hover:text-white group-hover:translate-x-1.5 transition-all duration-300">
                       <svg
                         className="w-5 h-5"
@@ -857,8 +872,6 @@ export default function PenilaianGuruMapelPage() {
                         />
                       </svg>
                     </div>
-
-                    {/* Efek shimmer/kilau saat hover */}
                     <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/15 to-white/0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 pointer-events-none" />
                   </button>
                 );
@@ -868,7 +881,7 @@ export default function PenilaianGuruMapelPage() {
         </>
       )}
 
-      {/* // ============ STEP 2: PILIH KELAS ============ */}
+      {/* ============ STEP 2: PILIH KELAS ============ */}
       {selectedPloting && !selectedKelas && (
         <>
           <div className="mb-6">
@@ -897,12 +910,9 @@ export default function PenilaianGuruMapelPage() {
                   onClick={() => setSelectedKelasId(kelas.id)}
                   className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-all duration-300 hover:border-blue-600 hover:shadow-lg hover:shadow-blue-200 hover:bg-blue-600 active:scale-[0.98]"
                 >
-                  {/* Nama Kelas - putih saat hover */}
                   <h3 className="text-base font-semibold text-slate-900 group-hover:text-white transition-colors duration-300">
                     {kelas.nama_kelas}
                   </h3>
-
-                  {/* Detail kelas - putih/transparan saat hover */}
                   <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500 group-hover:text-blue-100 transition-colors duration-300">
                     <span className="flex items-center gap-1">
                       <svg
@@ -938,8 +948,6 @@ export default function PenilaianGuruMapelPage() {
                       {siswaCount} siswa
                     </span>
                   </div>
-
-                  {/* Arrow indicator - putih saat hover */}
                   <div className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 group-hover:text-white group-hover:translate-x-1.5 transition-all duration-300">
                     <svg
                       className="w-5 h-5"
@@ -955,11 +963,7 @@ export default function PenilaianGuruMapelPage() {
                       />
                     </svg>
                   </div>
-
-                  {/* Efek shimmer/kilau saat hover */}
                   <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/15 to-white/0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 pointer-events-none" />
-
-                  {/* Badge kecil di pojok kanan atas */}
                   <div className="absolute top-3 right-12 text-[10px] font-medium text-slate-400 group-hover:text-blue-200 transition-colors duration-300">
                     {getKelasBadge(kelas)}
                   </div>
@@ -969,7 +973,8 @@ export default function PenilaianGuruMapelPage() {
           )}
         </>
       )}
-      {/* ============ STEP 3: KELOLA MATERI & NILAI ============ */}
+
+      {/* ============ STEP 3: INPUT NILAI ============ */}
       {selectedPloting && selectedKelas && (
         <>
           {/* Gradient hero */}
@@ -984,8 +989,8 @@ export default function PenilaianGuruMapelPage() {
                   {selectedKelas.nama_kelas}
                 </h1>
                 <p className="text-xs text-blue-100 mt-1">
-                  Lingkup Materi khusus untuk kelas ini (tidak dibagikan ke
-                  kelas lain)
+                  Input nilai untuk kelas ini. Halaman ini khusus input — export
+                  &amp; rekap rapor dikelola wali kelas.
                 </p>
               </div>
               <div className="flex gap-4 text-center">
@@ -994,18 +999,12 @@ export default function PenilaianGuruMapelPage() {
                   <p className="text-lg font-bold">{siswaList.length}</p>
                 </div>
                 <div className="rounded-xl bg-white/10 px-4 py-2">
-                  <p className="text-[10px] uppercase text-blue-100">
-                    Lingkup Materi
-                  </p>
-                  <p className="text-lg font-bold">{lingkupList.length}</p>
+                  <p className="text-[10px] uppercase text-blue-100">TP</p>
+                  <p className="text-lg font-bold">{tpList.length}</p>
                 </div>
                 <div className="rounded-xl bg-white/10 px-4 py-2">
-                  <p className="text-[10px] uppercase text-blue-100">
-                    Rata-rata Kelas
-                  </p>
-                  <p className="text-lg font-bold font-mono">
-                    {rataRataKelas || "—"}
-                  </p>
+                  <p className="text-[10px] uppercase text-blue-100">LP</p>
+                  <p className="text-lg font-bold">{lpList.length}</p>
                 </div>
               </div>
             </div>
@@ -1038,30 +1037,30 @@ export default function PenilaianGuruMapelPage() {
           <div className="mb-6 flex items-center gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1 no-scrollbar w-full sm:w-fit">
             <button
               type="button"
-              onClick={() => handleTabChange("materi")}
-              className={`whitespace-nowrap rounded-lg px-4 py-2 text-xs font-semibold transition-all cursor-pointer min-w-[160px] flex-1 sm:flex-initial ${
-                innerTab === "materi"
+              onClick={() => setInnerTab("formatif")}
+              className={`whitespace-nowrap rounded-lg px-4 py-2 text-xs font-semibold transition-all cursor-pointer min-w-[140px] flex-1 sm:flex-initial ${
+                innerTab === "formatif"
                   ? "bg-white text-blue-600 shadow-sm border border-slate-200/50"
                   : "text-slate-500 hover:text-slate-800 hover:bg-white/40"
               }`}
             >
-              Lingkup Materi & TP
+              Nilai Formatif
             </button>
             <button
               type="button"
-              onClick={() => handleTabChange("nilai")}
-              className={`whitespace-nowrap rounded-lg px-4 py-2 text-xs font-semibold transition-all cursor-pointer min-w-[160px] flex-1 sm:flex-initial ${
-                innerTab === "nilai"
+              onClick={() => setInnerTab("sumatif")}
+              className={`whitespace-nowrap rounded-lg px-4 py-2 text-xs font-semibold transition-all cursor-pointer min-w-[140px] flex-1 sm:flex-initial ${
+                innerTab === "sumatif"
                   ? "bg-white text-blue-600 shadow-sm border border-slate-200/50"
                   : "text-slate-500 hover:text-slate-800 hover:bg-white/40"
               }`}
             >
-              Tabel Penilaian
+              Nilai Sumatif
             </button>
             <button
               type="button"
-              onClick={() => handleTabChange("ujian")}
-              className={`whitespace-nowrap rounded-lg px-4 py-2 text-xs font-semibold transition-all cursor-pointer min-w-[160px] flex-1 sm:flex-initial ${
+              onClick={() => setInnerTab("ujian")}
+              className={`whitespace-nowrap rounded-lg px-4 py-2 text-xs font-semibold transition-all cursor-pointer min-w-[140px] flex-1 sm:flex-initial ${
                 innerTab === "ujian"
                   ? "bg-white text-blue-600 shadow-sm border border-slate-200/50"
                   : "text-slate-500 hover:text-slate-800 hover:bg-white/40"
@@ -1075,312 +1074,222 @@ export default function PenilaianGuruMapelPage() {
             <LoadingSkeleton />
           ) : (
             <>
-              {/* ---------------- TAB: LINGKUP MATERI & TP ---------------- */}
-              {innerTab === "materi" && (
-                <div className="space-y-4">
-                  <div className="rounded-xl border border-amber-100 bg-amber-50/60 px-4 py-2.5 text-[11px] text-amber-700">
-                    Lingkup Materi & Tujuan Pembelajaran di bawah ini{" "}
-                    <strong>
-                      khusus untuk kelas {selectedKelas.nama_kelas}
-                    </strong>
-                    . Perubahan di sini tidak memengaruhi kelas lain.
-                  </div>
-
-                  <div className="flex justify-end">
-                    {!showLingkupForm && (
+              {/* ---------------- TAB: FORMATIF ---------------- */}
+              {innerTab === "formatif" && (
+                <div className="space-y-3">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                    <p className="text-[11px] text-slate-400">
+                      Setiap TP punya 4 kriteria (K1-K4). Nilai akhir =
+                      rata-rata semua K yang terisi.
+                    </p>
+                    {!addingTp ? (
                       <button
                         type="button"
-                        onClick={openAddLingkup}
-                        className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 transition"
+                        onClick={() => setAddingTp(true)}
+                        disabled={tpList.length >= DAFTAR_NO_TP.length}
+                        className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 transition disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
                       >
-                        + Tambah Lingkup Materi
+                        + Tambah TP
                       </button>
-                    )}
-                  </div>
-
-                  {showLingkupForm && (
-                    <div className="rounded-2xl border border-blue-100 bg-blue-50/40 p-4 space-y-3">
-                      <h3 className="text-xs font-bold text-slate-700">
-                        {editingLingkupId
-                          ? "Edit Lingkup Materi"
-                          : "Lingkup Materi Baru"}
-                      </h3>
-                      <div>
-                        <label className="text-[11px] font-medium text-slate-500">
-                          Nama Lingkup Materi
-                        </label>
-                        <input
-                          type="text"
-                          value={lingkupForm.nama_lingkup}
-                          onChange={(e) =>
-                            setLingkupForm((f) => ({
-                              ...f,
-                              nama_lingkup: e.target.value,
-                            }))
-                          }
-                          placeholder="Contoh: Bilangan Cacah"
-                          className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-blue-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[11px] font-medium text-slate-500">
-                          Capaian Kompetensi
-                        </label>
-                        <textarea
-                          value={lingkupForm.capaian_kompetensi}
-                          onChange={(e) =>
-                            setLingkupForm((f) => ({
-                              ...f,
-                              capaian_kompetensi: e.target.value,
-                            }))
-                          }
-                          rows={2}
-                          placeholder="Deskripsi capaian kompetensi..."
-                          className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-blue-500 resize-none"
-                        />
-                      </div>
-                      <div className="flex gap-2 justify-end">
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={selectedNoTp}
+                          onChange={(e) => setSelectedNoTp(e.target.value)}
+                          className="rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-blue-500"
+                        >
+                          <option value="">Pilih TP</option>
+                          {DAFTAR_NO_TP.filter(
+                            (no) => !tpList.some((tp) => tp.no_tp === no),
+                          ).map((no) => (
+                            <option key={no} value={no}>
+                              {no}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={handleAddTp}
+                          disabled={!selectedNoTp || savingTp}
+                          className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
+                        >
+                          {savingTp ? "..." : "Simpan"}
+                        </button>
                         <button
                           type="button"
                           onClick={() => {
-                            setShowLingkupForm(false);
-                            setEditingLingkupId(null);
+                            setAddingTp(false);
+                            setSelectedNoTp("");
                           }}
-                          className="rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-500 hover:bg-slate-100"
+                          className="text-xs font-semibold text-slate-500 px-2"
                         >
                           Batal
                         </button>
-                        <button
-                          type="button"
-                          disabled={
-                            savingLingkup || !lingkupForm.nama_lingkup.trim()
-                          }
-                          onClick={submitLingkup}
-                          className="rounded-lg bg-blue-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
-                        >
-                          {savingLingkup ? "Menyimpan..." : "Simpan"}
-                        </button>
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
 
-                  {lingkupList.length === 0 ? (
+                  {tpList.length === 0 ? (
                     <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500 text-xs">
-                      Belum ada lingkup materi untuk kelas ini.
+                      Belum ada TP untuk mata pelajaran ini. Tambahkan TP untuk
+                      mulai input nilai.
+                    </div>
+                  ) : siswaList.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500 text-xs">
+                      Belum ada siswa terdaftar di kelas ini.
                     </div>
                   ) : (
-                    <div className="space-y-3">
-                      {lingkupList.map((l, idx) => (
-                        <div
-                          key={l.id}
-                          className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm"
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="flex items-start gap-3">
-                              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600 text-xs font-bold">
-                                {idx + 1}
-                              </div>
-                              <div>
-                                <h3 className="text-sm font-bold text-slate-800">
-                                  {l.nama_lingkup}
-                                </h3>
-                                {l.capaian_kompetensi && (
-                                  <p className="text-[11px] text-slate-500 mt-1 max-w-xl">
-                                    {l.capaian_kompetensi}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                            <div className="flex gap-1 shrink-0">
-                              <button
-                                type="button"
-                                onClick={() => openEditLingkup(l)}
-                                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-blue-600"
-                                title="Edit"
+                    <div className="overflow-x-auto rounded-xl border border-slate-100 shadow-sm">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="bg-slate-50 text-left uppercase tracking-wider text-slate-400 text-[10px] font-semibold border-b border-slate-100">
+                            <th
+                              rowSpan={2}
+                              className="px-4 py-2.5 sticky left-0 z-10 bg-slate-50 min-w-[150px] align-bottom"
+                            >
+                              Nama Siswa
+                            </th>
+                            {tpList.map((tp) => (
+                              <th
+                                key={tp.id}
+                                colSpan={4}
+                                className="text-center px-2 py-2 font-semibold border-l border-slate-200"
                               >
-                                <svg
-                                  className="h-4 w-4"
-                                  fill="none"
-                                  viewBox="0 0 24 24"
-                                  stroke="currentColor"
-                                  strokeWidth={2}
+                                {tp.no_tp}
+                              </th>
+                            ))}
+                            <th
+                              rowSpan={2}
+                              className="px-4 py-2.5 text-center min-w-[100px] bg-blue-50/60 text-blue-600 align-bottom"
+                            >
+                              Nilai Akhir
+                            </th>
+                          </tr>
+                          <tr className="bg-slate-50 text-slate-400 text-[9px] uppercase tracking-wider border-b border-slate-100">
+                            {tpList.map((tp) =>
+                              ["k1", "k2", "k3", "k4"].map((k, i) => (
+                                <th
+                                  key={`${tp.id}-${k}`}
+                                  className={`text-center px-1 py-1.5 font-semibold ${i === 0 ? "border-l border-slate-200" : ""}`}
                                 >
-                                  <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                                  />
-                                </svg>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => deleteLingkup(l.id)}
-                                className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
-                                title="Hapus"
-                              >
-                                <svg
-                                  className="h-4 w-4"
-                                  fill="none"
-                                  viewBox="0 0 24 24"
-                                  stroke="currentColor"
-                                  strokeWidth={2}
-                                >
-                                  <path
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                                  />
-                                </svg>
-                              </button>
-                            </div>
-                          </div>
-
-                          {/* Tujuan Pembelajaran */}
-                          <div className="mt-3 pl-10 space-y-1.5">
-                            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                              Tujuan Pembelajaran
-                            </p>
-                            {(tpByLingkup[l.id] || []).length === 0 &&
-                              addingTpFor !== l.id && (
-                                <p className="text-[11px] text-slate-400 italic">
-                                  Belum ada tujuan pembelajaran.
-                                </p>
-                              )}
-                            <ul className="space-y-1">
-                              {(tpByLingkup[l.id] || []).map((tp, tIdx) =>
-                                editingTp?.id === tp.id ? (
-                                  <li
-                                    key={tp.id}
-                                    className="flex gap-2 items-center"
-                                  >
-                                    <input
-                                      type="text"
-                                      value={editingTp.deskripsi}
-                                      onChange={(e) =>
-                                        setEditingTp((prev) => ({
-                                          ...prev,
-                                          deskripsi: e.target.value,
-                                        }))
-                                      }
-                                      className="flex-1 rounded-lg border border-slate-200 px-2 py-1 text-[11px] outline-none focus:border-blue-500"
-                                    />
-                                    <button
-                                      type="button"
-                                      disabled={savingTp}
-                                      onClick={updateTp}
-                                      className="text-[11px] font-semibold text-blue-600 hover:underline"
-                                    >
-                                      Simpan
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setEditingTp(null)}
-                                      className="text-[11px] text-slate-400 hover:underline"
-                                    >
-                                      Batal
-                                    </button>
-                                  </li>
-                                ) : (
-                                  <li
-                                    key={tp.id}
-                                    className="flex items-start justify-between gap-2 group"
-                                  >
-                                    <span className="text-[11px] text-slate-600">
-                                      <span className="text-slate-400 font-mono">
-                                        {tIdx + 1}.
-                                      </span>{" "}
-                                      {tp.deskripsi}
-                                    </span>
-                                    <span className="flex gap-2 shrink-0 opacity-0 group-hover:opacity-100 transition">
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          setEditingTp({
-                                            id: tp.id,
-                                            lingkupId: l.id,
-                                            deskripsi: tp.deskripsi,
-                                          })
-                                        }
-                                        className="text-[10px] font-semibold text-blue-600 hover:underline"
-                                      >
-                                        Edit
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => deleteTp(l.id, tp.id)}
-                                        className="text-[10px] font-semibold text-red-500 hover:underline"
-                                      >
-                                        Hapus
-                                      </button>
-                                    </span>
-                                  </li>
-                                ),
-                              )}
-                            </ul>
-
-                            {addingTpFor === l.id ? (
-                              <div className="flex gap-2 items-center pt-1">
-                                <input
-                                  type="text"
-                                  autoFocus
-                                  value={tpDraft}
-                                  onChange={(e) => setTpDraft(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") submitTp(l.id);
-                                    if (e.key === "Escape") {
-                                      setAddingTpFor(null);
-                                      setTpDraft("");
-                                    }
-                                  }}
-                                  placeholder="Tulis tujuan pembelajaran..."
-                                  className="flex-1 rounded-lg border border-slate-200 px-2 py-1 text-[11px] outline-none focus:border-blue-500"
-                                />
-                                <button
-                                  type="button"
-                                  disabled={savingTp || !tpDraft.trim()}
-                                  onClick={() => submitTp(l.id)}
-                                  className="text-[11px] font-semibold text-blue-600 hover:underline disabled:opacity-40"
-                                >
-                                  Simpan
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setAddingTpFor(null);
-                                    setTpDraft("");
-                                  }}
-                                  className="text-[11px] text-slate-400 hover:underline"
-                                >
-                                  Batal
-                                </button>
-                              </div>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setAddingTpFor(l.id);
-                                  setTpDraft("");
-                                }}
-                                className="text-[11px] font-semibold text-blue-600 hover:underline pt-1"
-                              >
-                                + Tambah Tujuan Pembelajaran
-                              </button>
+                                  {k.toUpperCase()}
+                                </th>
+                              )),
                             )}
-                          </div>
-                        </div>
-                      ))}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 bg-white">
+                          {siswaList.map((s) => {
+                            const avg = formatifAvgMap[s.id];
+                            return (
+                              <tr
+                                key={s.id}
+                                className="hover:bg-slate-50/40 transition"
+                              >
+                                <td className="px-4 py-2 font-semibold text-slate-700 sticky left-0 z-10 bg-white min-w-[150px]">
+                                  {s.nama_siswa}
+                                </td>
+                                {tpList.map((tp) => {
+                                  const rec = nilaiFormatif[s.id]?.[tp.id];
+                                  return ["k1", "k2", "k3", "k4"].map(
+                                    (kField, i) => {
+                                      const cellKey = `f-${s.id}-${tp.id}-${kField}`;
+                                      return (
+                                        <td
+                                          key={cellKey}
+                                          className={`px-1 py-1.5 text-center ${i === 0 ? "border-l border-slate-100" : ""}`}
+                                        >
+                                          <NilaiInput
+                                            value={rec?.[kField]}
+                                            onChange={(e) =>
+                                              handleFormatifChange(
+                                                s.id,
+                                                tp.id,
+                                                kField,
+                                                e.target.value,
+                                              )
+                                            }
+                                            onBlur={() =>
+                                              handleFormatifBlur(
+                                                s.id,
+                                                tp.id,
+                                                kField,
+                                              )
+                                            }
+                                            saving={savingFCell === cellKey}
+                                            saved={savedFFlash === cellKey}
+                                            width="w-12"
+                                          />
+                                        </td>
+                                      );
+                                    },
+                                  );
+                                })}
+                                <td className="px-4 py-2 text-center bg-blue-50/30">
+                                  <span
+                                    className={`font-bold font-mono ${nilaiColor(avg)}`}
+                                  >
+                                    {formatGrade(avg)}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     </div>
                   )}
                 </div>
               )}
 
-              {/* ---------------- TAB: TABEL PENILAIAN ---------------- */}
-              {innerTab === "nilai" && (
+              {/* ---------------- TAB: SUMATIF ---------------- */}
+              {innerTab === "sumatif" && (
                 <div className="space-y-3">
-                  {lingkupList.length === 0 ? (
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                    <p className="text-[11px] text-slate-400">
+                      Nilai akhir sumatif = rata-rata semua LP yang terisi.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddLp((v) => !v)}
+                      className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 transition whitespace-nowrap"
+                    >
+                      {showAddLp ? "Batal" : "+ Tambah LP"}
+                    </button>
+                  </div>
+
+                  {showAddLp && (
+                    <form
+                      onSubmit={handleAddLp}
+                      className="rounded-2xl border border-blue-100 bg-blue-50/40 p-4 flex flex-col sm:flex-row gap-3 items-end"
+                    >
+                      <div className="flex-1 w-full">
+                        <label className="text-[11px] font-medium text-slate-500">
+                          Nama Lingkup Materi
+                        </label>
+                        <input
+                          type="text"
+                          value={namaLp}
+                          onChange={(e) => setNamaLp(e.target.value)}
+                          placeholder="Contoh: Bilangan Cacah"
+                          className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-blue-500"
+                          required
+                        />
+                      </div>
+                      <button
+                        type="submit"
+                        disabled={savingLp}
+                        className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap"
+                      >
+                        {savingLp ? "Menyimpan..." : "Simpan LP"}
+                      </button>
+                    </form>
+                  )}
+
+                  {lpList.length === 0 ? (
                     <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500 text-xs">
-                      Tambahkan lingkup materi terlebih dahulu di tab "Lingkup
-                      Materi & TP" sebelum mengisi nilai.
+                      Belum ada LP untuk mata pelajaran ini. Tambahkan LP untuk
+                      mulai input nilai.
                     </div>
                   ) : siswaList.length === 0 ? (
                     <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500 text-xs">
@@ -1391,20 +1300,17 @@ export default function PenilaianGuruMapelPage() {
                       <table className="w-full min-w-[640px] text-xs">
                         <thead>
                           <tr className="bg-slate-50 text-left uppercase tracking-wider text-slate-400 text-[10px] font-semibold border-b border-slate-100">
-                            <th className="px-4 py-2.5 text-center w-10 sticky left-0 bg-slate-50">
-                              No
-                            </th>
-                            <th className="px-4 py-2.5 sticky left-10 bg-slate-50 min-w-[160px]">
+                            <th className="px-4 py-2.5 sticky left-0 bg-slate-50 min-w-[160px]">
                               Nama Siswa
                             </th>
-                            {lingkupList.map((l) => (
+                            {lpList.map((lp) => (
                               <th
-                                key={l.id}
+                                key={lp.id}
                                 className="px-3 py-2.5 text-center min-w-[110px]"
-                                title={l.nama_lingkup}
+                                title={lp.nama}
                               >
                                 <span className="line-clamp-2 normal-case font-semibold text-slate-500">
-                                  {l.nama_lingkup}
+                                  {lp.nama}
                                 </span>
                               </th>
                             ))}
@@ -1414,64 +1320,48 @@ export default function PenilaianGuruMapelPage() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 bg-white">
-                          {siswaList.map((s, idx) => {
-                            const akhir = nilaiAkhirBySiswa[s.id];
+                          {siswaList.map((s) => {
+                            const avg = sumatifAvgMap[s.id];
                             return (
                               <tr
                                 key={s.id}
                                 className="hover:bg-slate-50/40 transition"
                               >
-                                <td className="px-4 py-2 text-center text-slate-400 font-mono sticky left-0 bg-white">
-                                  {idx + 1}
-                                </td>
-                                <td className="px-4 py-2 font-semibold text-slate-700 sticky left-10 bg-white">
+                                <td className="px-4 py-2 font-semibold text-slate-700 sticky left-0 bg-white">
                                   {s.nama_siswa}
                                 </td>
-                                {lingkupList.map((l) => {
-                                  const cell = nilaiMap[s.id]?.[l.id];
-                                  const key = `${s.id}_${l.id}`;
-                                  const isSaving = savingCell === key;
-                                  const isSaved = savedFlash === key;
+                                {lpList.map((lp) => {
+                                  const rec = nilaiSumatif[s.id]?.[lp.id];
+                                  const cellKey = `s-${s.id}-${lp.id}`;
                                   return (
                                     <td
-                                      key={l.id}
+                                      key={lp.id}
                                       className="px-3 py-2 text-center"
                                     >
-                                      <div className="relative inline-block">
-                                        <input
-                                          type="number"
-                                          min={0}
-                                          max={100}
-                                          value={cell?.nilai ?? ""}
-                                          onChange={(e) =>
-                                            handleNilaiChange(
-                                              s.id,
-                                              l.id,
-                                              e.target.value,
-                                            )
-                                          }
-                                          onBlur={() =>
-                                            handleNilaiBlur(s.id, l.id)
-                                          }
-                                          className={`w-16 rounded-lg border px-2 py-1 text-center text-xs outline-none transition ${
-                                            isSaved
-                                              ? "border-emerald-300 bg-emerald-50"
-                                              : "border-slate-200 focus:border-blue-500"
-                                          }`}
-                                          placeholder="—"
-                                        />
-                                        {isSaving && (
-                                          <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
-                                        )}
-                                      </div>
+                                      <NilaiInput
+                                        value={rec?.nilai}
+                                        onChange={(e) =>
+                                          handleSumatifChange(
+                                            s.id,
+                                            lp.id,
+                                            e.target.value,
+                                          )
+                                        }
+                                        onBlur={() =>
+                                          handleSumatifBlur(s.id, lp.id)
+                                        }
+                                        saving={savingSCell === cellKey}
+                                        saved={savedSFlash === cellKey}
+                                        width="w-16"
+                                      />
                                     </td>
                                   );
                                 })}
                                 <td className="px-4 py-2 text-center bg-blue-50/30">
                                   <span
-                                    className={`font-bold font-mono ${akhir?.color || "text-slate-400"}`}
+                                    className={`font-bold font-mono ${nilaiColor(avg)}`}
                                   >
-                                    {akhir?.formatted || "—"}
+                                    {formatGrade(avg)}
                                   </span>
                                 </td>
                               </tr>
@@ -1481,20 +1371,10 @@ export default function PenilaianGuruMapelPage() {
                       </table>
                     </div>
                   )}
-
-                  {lingkupList.length > 0 && siswaList.length > 0 && (
-                    <p className="text-[11px] text-slate-400">
-                      Nilai tersimpan otomatis saat Anda pindah dari kolom (klik
-                      di luar kolom). "Nilai Akhir" dihitung real-time dari
-                      rata-rata seluruh lingkup materi yang sudah diisi. Data
-                      ini juga langsung terlihat di dashboard wali kelas/guru
-                      pendamping kelas {selectedKelas.nama_kelas}.
-                    </p>
-                  )}
                 </div>
               )}
 
-              {/* ---------------- TAB: NILAI UJIAN ---------------- */}
+              {/* ---------------- TAB: UJIAN ---------------- */}
               {innerTab === "ujian" && (
                 <div className="space-y-4">
                   {loadingUjianAktif ? (
@@ -1521,6 +1401,9 @@ export default function PenilaianGuruMapelPage() {
                             }`}
                           >
                             {u.nama_ujian}
+                            <span className="ml-1.5 opacity-70">
+                              ({JENIS_LABEL[u.jenis_ujian] || u.jenis_ujian})
+                            </span>
                           </button>
                         ))}
                       </div>
@@ -1542,9 +1425,6 @@ export default function PenilaianGuruMapelPage() {
                           <table className="w-full min-w-[420px] text-xs">
                             <thead>
                               <tr className="bg-slate-50 text-left uppercase tracking-wider text-slate-400 text-[10px] font-semibold border-b border-slate-100">
-                                <th className="px-4 py-2.5 text-center w-10">
-                                  No
-                                </th>
                                 <th className="px-4 py-2.5 min-w-[180px]">
                                   Nama Siswa
                                 </th>
@@ -1554,61 +1434,30 @@ export default function PenilaianGuruMapelPage() {
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100 bg-white">
-                              {siswaList.map((s, idx) => {
-                                const cell = nilaiUjian[s.id];
-                                const isSaving = savingUjianCell === s.id;
-                                const isSaved = savedUjianFlash === s.id;
-                                const nilaiDisplay =
-                                  cell?.nilai !== undefined &&
-                                  cell?.nilai !== null &&
-                                  cell?.nilai !== ""
-                                    ? formatGrade(cell.nilai)
-                                    : null;
-                                const colorClass =
-                                  cell?.nilai !== undefined &&
-                                  cell?.nilai !== null &&
-                                  cell?.nilai !== ""
-                                    ? nilaiColor(cell.nilai)
-                                    : "text-slate-400";
+                              {siswaList.map((s) => {
+                                const rec = nilaiUjian[s.id];
                                 return (
                                   <tr
                                     key={s.id}
                                     className="hover:bg-slate-50/40 transition"
                                   >
-                                    <td className="px-4 py-2 text-center text-slate-400 font-mono">
-                                      {idx + 1}
-                                    </td>
                                     <td className="px-4 py-2 font-semibold text-slate-700">
                                       {s.nama_siswa}
                                     </td>
                                     <td className="px-4 py-2 text-center bg-blue-50/20">
-                                      <div className="relative inline-block">
-                                        <input
-                                          type="number"
-                                          min={0}
-                                          max={100}
-                                          step="0.1"
-                                          value={cell?.nilai ?? ""}
-                                          onChange={(e) =>
-                                            handleNilaiUjianChange(
-                                              s.id,
-                                              e.target.value,
-                                            )
-                                          }
-                                          onBlur={() =>
-                                            handleNilaiUjianBlur(s.id)
-                                          }
-                                          className={`w-20 rounded-lg border px-2 py-1 text-center text-xs font-semibold outline-none transition ${
-                                            isSaved
-                                              ? "border-emerald-300 bg-emerald-50"
-                                              : "border-slate-200 focus:border-blue-500"
-                                          }`}
-                                          placeholder="—"
-                                        />
-                                        {isSaving && (
-                                          <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
-                                        )}
-                                      </div>
+                                      <NilaiInput
+                                        value={rec?.nilai}
+                                        onChange={(e) =>
+                                          handleUjianChange(
+                                            s.id,
+                                            e.target.value,
+                                          )
+                                        }
+                                        onBlur={() => handleUjianBlur(s.id)}
+                                        saving={savingUCell === s.id}
+                                        saved={savedUFlash === s.id}
+                                        width="w-20"
+                                      />
                                     </td>
                                   </tr>
                                 );
