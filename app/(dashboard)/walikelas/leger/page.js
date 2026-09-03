@@ -31,7 +31,6 @@ function average(arr) {
   return nums.reduce((a, b) => a + b, 0) / nums.length;
 }
 
-// Nilai kosong ditampilkan sebagai "0"
 function formatGrade(value) {
   if (value === null || value === undefined || isNaN(Number(value))) return "0";
   return Math.round(Number(value)).toString();
@@ -72,10 +71,12 @@ export default function LegerPage() {
           );
         setKelas(kelasData);
 
+        // ========== AMBIL MAPEL + GURU PENGAMPU ==========
         const [
           siswaData,
           mapelKhusus,
           mapelTingkat,
+          plotingData,
           presentaseData,
           ujianData,
           absensiData,
@@ -93,6 +94,11 @@ export default function LegerPage() {
             filter: `target_tingkat ~ "${String(kelasData.tingkat)}"`,
             requestKey: null,
           }),
+          pb.collection("ploting_guru").getFullList({
+            filter: `kelas_id ~ "${kelasData.id}"`,
+            expand: "guru_id",
+            requestKey: null,
+          }),
           pb.collection("presentase_penilaian").getFullList({
             requestKey: null,
           }),
@@ -108,16 +114,79 @@ export default function LegerPage() {
 
         setSiswaList(siswaData);
 
+        // ========== GABUNG & FILTER MAPEL ==========
+        // - mapelKhusus sudah pasti cocok (filter spesifik_kelas_id ~ kelasData.id)
+        // - mapelTingkat berisi semua mapel dengan target_tingkat sesuai,
+        //   termasuk yang memiliki spesifik_kelas_id untuk kelas lain.
+        //   Maka kita filter ulang: jika mapel punya spesifik_kelas_id,
+        //   harus mengandung kelasData.id; jika tidak (generik), lolos.
         const combined = [...mapelKhusus, ...mapelTingkat];
-        const uniqueMapel = Array.from(
+        const uniqueMapelRaw = Array.from(
           new Map(combined.map((m) => [m.id, m])).values(),
-        ).sort((a, b) =>
-          (a.nama_mapel || a.nama || "").localeCompare(
-            b.nama_mapel || b.nama || "",
-          ),
         );
-        setMapelList(uniqueMapel);
 
+        const uniqueMapel = uniqueMapelRaw.filter((m) => {
+          const spesifik = m.spesifik_kelas_id;
+          const punyaRestriksi = Array.isArray(spesifik) && spesifik.length > 0;
+          if (!punyaRestriksi) return true; // mapel generik
+          return spesifik.includes(kelasData.id); // mapel khusus harus cocok
+        });
+
+        // ========== BUILD GURU MAP ==========
+        const guruMap = new Map();
+        plotingData.forEach((plot) => {
+          if (plot.mapel_id && plot.expand?.guru_id) {
+            const guruObj = Array.isArray(plot.expand.guru_id)
+              ? plot.expand.guru_id[0]
+              : plot.expand.guru_id;
+
+            const namaGuru =
+              guruObj?.nama_lengkap || guruObj?.name || guruObj?.username;
+
+            if (namaGuru) {
+              if (Array.isArray(plot.mapel_id)) {
+                plot.mapel_id.forEach((mId) => guruMap.set(mId, namaGuru));
+              } else {
+                guruMap.set(plot.mapel_id, namaGuru);
+              }
+            }
+          }
+        });
+
+        // ========== DEDUPLIKASI BERDASARKAN NAMA MAPEL ==========
+        const mapelByName = new Map();
+        uniqueMapel.forEach((m) => {
+          const key = (m.nama_mapel || m.nama || "").trim();
+          if (!mapelByName.has(key)) {
+            mapelByName.set(key, m);
+          } else {
+            // Jika sudah ada, pilih yang memiliki guru (jika yang baru punya guru dan yang lama tidak)
+            const existing = mapelByName.get(key);
+            const existingGuru = guruMap.get(existing.id);
+            const newGuru = guruMap.get(m.id);
+            if (!existingGuru && newGuru) {
+              mapelByName.set(key, m);
+            }
+            // Jika keduanya punya guru, tetap pakai yang pertama (existing)
+          }
+        });
+        const deduplicatedMapel = Array.from(mapelByName.values());
+
+        // Urutkan berdasarkan nama, lalu tempel guru_pengampu
+        const sortedMapel = deduplicatedMapel
+          .sort((a, b) =>
+            (a.nama_mapel || a.nama || "").localeCompare(
+              b.nama_mapel || b.nama || "",
+            ),
+          )
+          .map((m) => ({
+            ...m,
+            guru_pengampu: guruMap.get(m.id) || "Walikelas",
+          }));
+
+        setMapelList(sortedMapel);
+
+        // ========== PERHITUNGAN NILAI (tidak berubah) ==========
         function getBobot(nama) {
           const found = presentaseData.find(
             (p) =>
@@ -132,7 +201,7 @@ export default function LegerPage() {
         const bobotUas = getBobot(NAMA_BOBOT.uas);
         const bobotKehadiran = getBobot(NAMA_BOBOT.kehadiran);
 
-        // ---------- Kehadiran ----------
+        // Kehadiran
         const kehadiranMap = {};
         siswaData.forEach((s) => {
           const records = absensiData.filter((a) => a.siswa_id === s.id);
@@ -144,7 +213,7 @@ export default function LegerPage() {
           kehadiranMap[s.id] = (hadir / records.length) * 100;
         });
 
-        // ---------- UTS / UAS ----------
+        // UTS / UAS
         const utsIds = ujianData
           .filter((u) => u.jenis_ujian === JENIS_UTS)
           .map((u) => u.id);
@@ -181,11 +250,11 @@ export default function LegerPage() {
           uasAvgMap[s.id] = avgUjian(uasIds, s.id);
         });
 
-        // ---------- Formatif & Sumatif ----------
+        // Formatif & Sumatif
         let tpAll = [];
         let lpAll = [];
-        if (uniqueMapel.length > 0) {
-          const mapelFilter = uniqueMapel
+        if (sortedMapel.length > 0) {
+          const mapelFilter = sortedMapel
             .map((m) => `mapel_id ~ "${m.id}"`)
             .join(" || ");
           [tpAll, lpAll] = await Promise.all([
@@ -250,9 +319,9 @@ export default function LegerPage() {
           }
         });
 
-        // ---------- Nilai Akhir Rapor (dengan aturan baru untuk absensi) ----------
+        // Nilai Akhir
         const nilaiAkhir = {};
-        uniqueMapel.forEach((m) => {
+        sortedMapel.forEach((m) => {
           nilaiAkhir[m.id] = {};
           siswaData.forEach((s) => {
             const formatifAvg = average(formatifValues[m.id]?.[s.id] || []);
@@ -261,7 +330,6 @@ export default function LegerPage() {
             const uasVal = uasAvgMap[s.id];
             const kehadiranVal = kehadiranMap[s.id];
 
-            // ★ MODIFIED: komponen inti (tanpa absensi)
             const otherComponents = [
               { value: formatifAvg, bobot: bobotFormatif },
               { value: sumatifAvg, bobot: bobotSumatif },
@@ -275,7 +343,6 @@ export default function LegerPage() {
                 k.bobot > 0,
             );
 
-            // ★ MODIFIED: hanya masukkan absensi jika ada komponen lain yang tidak kosong
             let komponen = [...otherComponents];
             if (otherComponents.length > 0) {
               if (
@@ -432,13 +499,13 @@ export default function LegerPage() {
 
       sheet.addRow([]);
 
-      // Header
+      // Header (dengan nama guru di bawah nama mapel)
       const headerRow = sheet.addRow([]);
       headerRow.getCell(1).value = "-";
       headerRow.getCell(2).value = "NAMA";
       let col = 3;
       mapelList.forEach((m) => {
-        headerRow.getCell(col).value = m.nama_mapel || m.nama;
+        headerRow.getCell(col).value = `${m.nama_mapel || m.nama}`;
         col++;
       });
       headerRow.getCell(colJumlah).value = "JUMLAH";
@@ -477,7 +544,7 @@ export default function LegerPage() {
         });
       });
 
-      // Baris ringkasan
+      // Baris ringkasan — SEKARANG DIBULATKAN KE INTEGER (Math.round)
       function addSummaryRow(label, valueFn) {
         const row = sheet.addRow([]);
         sheet.mergeCells(row.number, 1, row.number, 2);
@@ -486,8 +553,9 @@ export default function LegerPage() {
         let c = 3;
         mapelList.forEach((m) => {
           const v = valueFn(m);
+          // Gunakan Math.round agar konsisten dengan tampilan tabel
           row.getCell(c).value =
-            v !== null && v !== undefined ? Math.round(v * 100) / 100 : 0;
+            v !== null && v !== undefined ? Math.round(v) : 0;
           c++;
         });
 
@@ -503,7 +571,7 @@ export default function LegerPage() {
       // Lebar kolom & freeze panes
       sheet.getColumn(1).width = 6;
       sheet.getColumn(2).width = 28;
-      for (let i = 3; i < colJumlah; i++) sheet.getColumn(i).width = 12;
+      for (let i = 3; i < colJumlah; i++) sheet.getColumn(i).width = 14;
       sheet.getColumn(colJumlah).width = 10;
       sheet.getColumn(colRata1).width = 10;
       sheet.getColumn(colRata2).width = 10;
@@ -569,8 +637,8 @@ export default function LegerPage() {
               Leger Nilai — {kelas.nama_kelas}
             </h1>
             <p className="text-sm text-blue-100">
-              Rekap nilai akhir rapor seluruh mata pelajaran (bobot diatur
-              admin).
+              Rekap nilai akhir rapor untuk mata pelajaran yang diampu di kelas
+              ini (bobot diatur admin).
             </p>
           </div>
           <button
@@ -587,7 +655,7 @@ export default function LegerPage() {
       <div className="bg-white border border-gray-100 rounded-2xl shadow-sm overflow-x-auto">
         {mapelList.length === 0 ? (
           <div className="p-8 text-center text-gray-400 font-medium text-sm">
-            Belum ada mata pelajaran untuk kelas ini.
+            Belum ada mata pelajaran yang diampu untuk kelas ini.
           </div>
         ) : (
           <table className="w-full text-xs border-collapse">
@@ -604,7 +672,10 @@ export default function LegerPage() {
                     key={m.id}
                     className="px-2 py-2 font-bold border border-gray-200 bg-emerald-50 min-w-[80px]"
                   >
-                    {m.nama_mapel || m.nama}
+                    <div>{m.nama_mapel || m.nama}</div>
+                    <div className="text-[10px] font-normal normal-case text-gray-500">
+                      {m.guru_pengampu}
+                    </div>
                   </th>
                 ))}
                 <th className="px-2 py-2 font-bold border border-gray-200 bg-yellow-100 min-w-[70px]">

@@ -60,11 +60,25 @@ export default function PilihMapelPenilaian() {
           // DEBUG: Cek data ploting yang berhasil ditarik dari PocketBase
           console.log("Data Ploting Raw:", plotingData);
 
-          // 4. Gabungkan mapel & hapus duplikat
+          // 4. Gabungkan & filter mapel yang benar-benar berlaku untuk kelas ini
+          //    - mapelKhusus sudah pasti cocok (filter spesifik_kelas_id ~ kelas.id)
+          //    - mapelTingkat mungkin berisi mapel yang memiliki spesifik_kelas_id
+          //      untuk kelas lain, sehingga harus difilter ulang.
           const combinedMapel = [...mapelKhusus, ...mapelTingkat];
-          const uniqueMapel = Array.from(
+          const uniqueMapelRaw = Array.from(
             new Map(combinedMapel.map((item) => [item.id, item])).values(),
           );
+
+          // Filter: jika mapel memiliki spesifik_kelas_id (array tidak kosong),
+          // maka kelas.id harus ada di dalamnya agar lolos.
+          // Mapel generik (spesifik_kelas_id kosong/null) tetap lolos berdasarkan target_tingkat.
+          const uniqueMapel = uniqueMapelRaw.filter((m) => {
+            const spesifik = m.spesifik_kelas_id;
+            const punyaRestriksi =
+              Array.isArray(spesifik) && spesifik.length > 0;
+            if (!punyaRestriksi) return true; // mapel generik
+            return spesifik.includes(kelas.id); // mapel khusus, harus cocok
+          });
 
           // 5. Buat Mapping Guru secara Fleksibel
           const guruMap = new Map();
