@@ -627,6 +627,7 @@ export default function LegerPage() {
         >
           ← Kembali
         </button>
+        {/* Header Gradient (tanpa tombol export) */}
         <div className="relative overflow-hidden bg-gradient-to-r from-blue-600 via-blue-600 to-blue-700 text-white rounded-3xl p-6 md:p-8 shadow-lg flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div className="absolute right-0 bottom-0 w-80 h-80 bg-white/5 rounded-full translate-x-10 translate-y-20 pointer-events-none" />
           <div className="relative z-10 space-y-1">
@@ -641,13 +642,28 @@ export default function LegerPage() {
               ini (bobot diatur admin).
             </p>
           </div>
-          <button
-            onClick={handleExportLeger}
-            disabled={exporting || mapelList.length === 0}
-            className="relative z-10 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold px-4 py-2.5 rounded-lg whitespace-nowrap inline-flex items-center gap-2"
-          >
-            {exporting ? "Mengexport..." : "⬇ Export Excel"}
-          </button>
+        </div>
+
+        {/* Card Putih untuk Rekap Nilai & Export */}
+        <div className="mt-4 bg-white rounded-lg shadow-md p-4 md:p-6 border border-gray-100">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div className="space-y-1">
+              <h2 className="text-lg font-bold text-gray-800">
+                REKAP NILAI LEGER
+              </h2>
+              <p className="text-xs text-gray-500">
+                Download file Excel nilai leger kelas anda yang tersedia secara
+                realtime.
+              </p>
+            </div>
+            <button
+              onClick={handleExportLeger}
+              disabled={exporting || mapelList.length === 0}
+              className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold px-4 py-2.5 rounded-lg whitespace-nowrap inline-flex items-center gap-2 self-start md:self-center"
+            >
+              {exporting ? "Mengexport..." : "⬇ Export Excel"}
+            </button>
+          </div>
         </div>
       </div>
 
