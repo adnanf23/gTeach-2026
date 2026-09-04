@@ -360,15 +360,13 @@ export default function PenilaianMapelPage() {
     return result;
   }, [absensiList, siswaList]);
 
-  // ================= RAPOR MAP (dengan perubahan) =================
+  // ================= RAPOR MAP =================
   const raporMap = useMemo(() => {
     const result = {};
     siswaList.forEach((s) => {
       const formatifVal = formatifAvgMap[s.id];
       const sumatifVal = sumatifAvgMap[s.id];
 
-      // Jika formatif DAN sumatif dua-duanya kosong -> nilai akhir = 0
-      // (kehadiran/UTS/UAS diabaikan untuk kondisi ini)
       const formatifKosong =
         formatifVal === null || formatifVal === undefined || isNaN(formatifVal);
       const sumatifKosong =
@@ -441,11 +439,10 @@ export default function PenilaianMapelPage() {
     }
   }
 
-  // ================= SIMPAN NILAI FORMATIF (dengan -1) =================
+  // ================= SIMPAN NILAI FORMATIF =================
   async function handleSaveFormatif(siswaId, tpId, kField, rawValue) {
     const cellKey = `f-${siswaId}-${tpId}-${kField}`;
     const existing = nilaiFormatif[siswaId]?.[tpId];
-    // Kosongkan -> simpan -1
     const nilaiValue = rawValue === "" ? -1 : Number(rawValue);
 
     if (
@@ -461,7 +458,6 @@ export default function PenilaianMapelPage() {
     try {
       let saved;
       if (existing?.recordId) {
-        // Update: kirim semua field dengan nilai saat ini (termasuk -1)
         const currentValues = {
           k1: existing.k1 ?? -1,
           k2: existing.k2 ?? -1,
@@ -473,7 +469,6 @@ export default function PenilaianMapelPage() {
           .collection("nilai_formatif")
           .update(existing.recordId, currentValues, { requestKey: null });
       } else {
-        // Create: semua -1, lalu timpa field yang diisi
         const data = {
           tp_id: tpId,
           siswa_id: siswaId,
@@ -489,7 +484,6 @@ export default function PenilaianMapelPage() {
           .create(data, { requestKey: null });
       }
 
-      // Update state
       setNilaiFormatif((prev) => ({
         ...prev,
         [siswaId]: {
@@ -553,7 +547,7 @@ export default function PenilaianMapelPage() {
       setCellStatus((prev) => ({ ...prev, [cellKey]: "error" }));
       return;
     }
-    if (nilaiValue === null) return; // biarkan kosong
+    if (nilaiValue === null) return;
     if (existing?.nilai === nilaiValue) return;
 
     setCellStatus((prev) => ({ ...prev, [cellKey]: "saving" }));
@@ -662,7 +656,7 @@ export default function PenilaianMapelPage() {
     }
   }
 
-  // ================= EXPORT RAPOR (5 Sheet + Border + Auto Width + Fixed Width untuk L/P & K1-K4) =================
+  // ================= EXPORT RAPOR (5 Sheet + Border + Auto Width + Fixed Width) =================
   async function handleExportRapor() {
     if (!mapel || !kelas) return;
     try {
@@ -675,7 +669,7 @@ export default function PenilaianMapelPage() {
       // ========== WARNA ==========
       const GREEN = "FFD9EAD3";
       const YELLOW = "FFFFFF00";
-      const CYAN = "FFE0FFFF"; // MODIFIKASI: tambahkan warna cyan
+      const CYAN = "FFE0FFFF"; // MODIFIKASI: warna cyan untuk nilai mentah
 
       // ========== UTILITY ==========
       function setAutoWidth(worksheet) {
@@ -724,7 +718,6 @@ export default function PenilaianMapelPage() {
         addBorder(cell);
       }
 
-      // Untuk cell/kolom hasil (JUMLAH, RATA-RATA, dll) — kuning
       function styleResult(cell) {
         cell.fill = {
           type: "pattern",
@@ -735,7 +728,6 @@ export default function PenilaianMapelPage() {
         addBorder(cell);
       }
 
-      // MODIFIKASI: style untuk cell nilai mentah — cyan
       function styleNilai(cell) {
         cell.fill = {
           type: "pattern",
@@ -746,7 +738,6 @@ export default function PenilaianMapelPage() {
         addBorder(cell);
       }
 
-      // Style semua cell di satu baris, termasuk yang kosong (biar border tetap muncul)
       function styleRow(row, styleFn) {
         row.eachCell({ includeEmpty: true }, (cell) => styleFn(cell));
       }
@@ -794,7 +785,7 @@ export default function PenilaianMapelPage() {
       setAutoWidth(sheetKelas);
 
       // ================================================================
-      // 2. SHEET FORMATIF (dengan fixed width untuk L/P dan K1-K4)
+      // 2. SHEET FORMATIF
       // ================================================================
       const sheetFormatif = workbook.addWorksheet("FORMATIF", {
         properties: { tabColor: { argb: GREEN } },
@@ -810,7 +801,6 @@ export default function PenilaianMapelPage() {
       );
       sheetFormatif.addRow([]);
 
-      // Baris 4: Header utama
       const headerRow1 = sheetFormatif.addRow([]);
       let colIdx = 1;
       const colNomor = colIdx;
@@ -835,7 +825,6 @@ export default function PenilaianMapelPage() {
       const colRata = colIdx;
       headerRow1.getCell(colIdx).value = "RATA-RATA NILAI";
 
-      // Baris 5: Sub-header (K1-K4 per TP)
       const headerRow2 = sheetFormatif.addRow([]);
       colIdx = 5;
       tpList.forEach(() => {
@@ -875,17 +864,16 @@ export default function PenilaianMapelPage() {
         rowData.push(avg !== null ? Number(avg.toFixed(2)) : null);
 
         const row = sheetFormatif.addRow(rowData);
-        styleRow(row, styleBody); // border & alignment, tanpa fill
+        styleRow(row, styleBody);
 
-        // MODIFIKASI: warnai sel nilai K1-K4 dengan cyan
-        let colStart = 5; // kolom pertama K1
+        // MODIFIKASI: warnai K1-K4 dengan cyan
+        let colStart = 5;
         for (let i = 0; i < tpList.length; i++) {
           for (let j = 0; j < 4; j++) {
             styleNilai(row.getCell(colStart + j));
           }
           colStart += 4;
         }
-        // kolom rata-rata tetap kuning
         styleResult(row.getCell(colRata));
 
         row.height = 18;
@@ -950,15 +938,13 @@ export default function PenilaianMapelPage() {
         const row = sheetSumatif.addRow(rowData);
         styleRow(row, styleBody);
 
-        // MODIFIKASI: warnai nilai setiap LP (mulai kolom 6) dengan cyan
+        // MODIFIKASI: warnai LP, STS, SAS dengan cyan
         const colLPStart = 6;
         for (let i = 0; i < lpList.length; i++) {
           styleNilai(row.getCell(colLPStart + i));
         }
-        // STS dan SAS (setelah rata-rata) juga cyan
         styleNilai(row.getCell(colRataSumatif + 1));
         styleNilai(row.getCell(colRataSumatif + 2));
-        // Rata-rata tetap kuning
         styleResult(row.getCell(colRataSumatif));
       });
 
@@ -1089,11 +1075,10 @@ export default function PenilaianMapelPage() {
         ]);
         styleRow(row, styleBody);
 
-        // MODIFIKASI: warnai kolom komponen (3 s.d. 7) dengan cyan
+        // MODIFIKASI: warnai komponen (kolom 3-7) dengan cyan
         for (let i = 3; i <= 7; i++) {
           styleNilai(row.getCell(i));
         }
-        // kolom Nilai Akhir Rapor tetap kuning
         styleResult(row.getCell(colNilaiAkhir));
       });
 
@@ -1277,14 +1262,14 @@ export default function PenilaianMapelPage() {
                       <th
                         key={tp.id}
                         colSpan={4}
-                        className="text-center px-2 py-2 font-bold border-l border-gray-200"
+                        className="text-center px-2 py-2 font-bold border-l border-gray-200 min-w-[80px]"
                       >
                         {tp.no_tp}
                       </th>
                     ))}
                     <th
                       rowSpan={2}
-                      className="text-center px-4 py-3 font-bold min-w-[110px] bg-blue-50 text-blue-700 align-bottom"
+                      className="text-center px-4 py-3 font-bold min-w-[110px] bg-blue-50 text-blue-700 align-bottom whitespace-nowrap"
                     >
                       Nilai Akhir
                     </th>
@@ -1294,7 +1279,7 @@ export default function PenilaianMapelPage() {
                       ["K1", "K2", "K3", "K4"].map((k, i) => (
                         <th
                           key={`${tp.id}-${k}`}
-                          className={`text-center px-1 py-1.5 font-semibold ${
+                          className={`text-center px-1 py-1.5 font-semibold min-w-[50px] ${
                             i === 0 ? "border-l border-gray-200" : ""
                           }`}
                         >
@@ -1338,7 +1323,7 @@ export default function PenilaianMapelPage() {
                                       v,
                                     )
                                   }
-                                  width="w-12"
+                                  width="w-16" // MODIFIKASI: lebar input diperbesar
                                 />
                               </td>
                             );
@@ -1347,7 +1332,7 @@ export default function PenilaianMapelPage() {
                         <td
                           className={`px-4 py-2 text-center font-extrabold font-mono ${getGradeColor(
                             avg,
-                          )} bg-blue-50/50`}
+                          )} bg-blue-50/50 whitespace-nowrap`}
                         >
                           {formatGrade(avg)}
                         </td>
@@ -1427,12 +1412,12 @@ export default function PenilaianMapelPage() {
                     {lpList.map((lp) => (
                       <th
                         key={lp.id}
-                        className="text-center px-3 py-3 font-bold min-w-[110px]"
+                        className="text-center px-3 py-3 font-bold min-w-[120px]"
                       >
                         {lp.nama}
                       </th>
                     ))}
-                    <th className="text-center px-4 py-3 font-bold min-w-[110px] bg-blue-50 text-blue-700">
+                    <th className="text-center px-4 py-3 font-bold min-w-[110px] bg-blue-50 text-blue-700 whitespace-nowrap">
                       Nilai Akhir
                     </th>
                   </tr>
@@ -1460,7 +1445,7 @@ export default function PenilaianMapelPage() {
                                 onSave={(v) =>
                                   handleSaveSumatif(siswa.id, lp.id, v)
                                 }
-                                width="w-20"
+                                width="w-24" // MODIFIKASI: lebar input diperbesar
                               />
                             </td>
                           );
@@ -1468,7 +1453,7 @@ export default function PenilaianMapelPage() {
                         <td
                           className={`px-4 py-2.5 text-center font-extrabold font-mono ${getGradeColor(
                             avg,
-                          )} bg-blue-50/50`}
+                          )} bg-blue-50/50 whitespace-nowrap`}
                         >
                           {formatGrade(avg)}
                         </td>
@@ -1528,7 +1513,7 @@ export default function PenilaianMapelPage() {
                         <th className="text-left px-4 py-3 font-bold min-w-[180px]">
                           Siswa
                         </th>
-                        <th className="text-center px-4 py-3 font-bold min-w-[110px]">
+                        <th className="text-center px-4 py-3 font-bold min-w-[120px]">
                           Nilai Ujian
                         </th>
                       </tr>
@@ -1553,7 +1538,7 @@ export default function PenilaianMapelPage() {
                                 value={rec?.nilai}
                                 status={cellStatus[cellKey]}
                                 onSave={(v) => handleSaveUjian(siswa.id, v)}
-                                width="w-24"
+                                width="w-24" // MODIFIKASI: lebar input diperbesar
                               />
                             </td>
                           </tr>
@@ -1613,7 +1598,7 @@ export default function PenilaianMapelPage() {
                   <th className="text-center px-3 py-3 font-bold min-w-[100px]">
                     Kehadiran
                   </th>
-                  <th className="text-center px-4 py-3 font-bold min-w-[120px] bg-blue-50 text-blue-700">
+                  <th className="text-center px-4 py-3 font-bold min-w-[120px] bg-blue-50 text-blue-700 whitespace-nowrap">
                     Nilai Akhir
                   </th>
                 </tr>
@@ -1631,32 +1616,32 @@ export default function PenilaianMapelPage() {
                       <td
                         className={`px-3 py-2.5 text-center font-semibold ${getGradeColor(
                           formatifAvgMap[siswa.id],
-                        )}`}
+                        )} whitespace-nowrap`}
                       >
                         {formatGrade(formatifAvgMap[siswa.id])}
                       </td>
                       <td
                         className={`px-3 py-2.5 text-center font-semibold ${getGradeColor(
                           sumatifAvgMap[siswa.id],
-                        )}`}
+                        )} whitespace-nowrap`}
                       >
                         {formatGrade(sumatifAvgMap[siswa.id])}
                       </td>
                       <td
                         className={`px-3 py-2.5 text-center font-semibold ${getGradeColor(
                           utsAvgMap[siswa.id],
-                        )}`}
+                        )} whitespace-nowrap`}
                       >
                         {formatGrade(utsAvgMap[siswa.id])}
                       </td>
                       <td
                         className={`px-3 py-2.5 text-center font-semibold ${getGradeColor(
                           uasAvgMap[siswa.id],
-                        )}`}
+                        )} whitespace-nowrap`}
                       >
                         {formatGrade(uasAvgMap[siswa.id])}
                       </td>
-                      <td className="px-3 py-2.5 text-center font-semibold text-slate-600">
+                      <td className="px-3 py-2.5 text-center font-semibold text-slate-600 whitespace-nowrap">
                         {kehadiranMap[siswa.id] !== null
                           ? `${kehadiranMap[siswa.id].toFixed(1)}%`
                           : "-"}
@@ -1664,7 +1649,7 @@ export default function PenilaianMapelPage() {
                       <td
                         className={`px-4 py-2.5 text-center font-extrabold font-mono ${getGradeColor(
                           raporMap[siswa.id],
-                        )} bg-blue-50/50`}
+                        )} bg-blue-50/50 whitespace-nowrap`}
                       >
                         {formatGrade(raporMap[siswa.id])}
                       </td>
