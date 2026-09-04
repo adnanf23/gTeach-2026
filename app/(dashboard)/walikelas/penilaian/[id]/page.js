@@ -675,6 +675,7 @@ export default function PenilaianMapelPage() {
       // ========== WARNA ==========
       const GREEN = "FFD9EAD3";
       const YELLOW = "FFFFFF00";
+      const CYAN = "FFE0FFFF"; // MODIFIKASI: tambahkan warna cyan
 
       // ========== UTILITY ==========
       function setAutoWidth(worksheet) {
@@ -734,6 +735,17 @@ export default function PenilaianMapelPage() {
         addBorder(cell);
       }
 
+      // MODIFIKASI: style untuk cell nilai mentah — cyan
+      function styleNilai(cell) {
+        cell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: CYAN },
+        };
+        cell.alignment = { horizontal: "center", vertical: "middle" };
+        addBorder(cell);
+      }
+
       // Style semua cell di satu baris, termasuk yang kosong (biar border tetap muncul)
       function styleRow(row, styleFn) {
         row.eachCell({ includeEmpty: true }, (cell) => styleFn(cell));
@@ -780,7 +792,6 @@ export default function PenilaianMapelPage() {
         styleRow(row, styleBody);
       });
       setAutoWidth(sheetKelas);
-      // Tidak ada fixed width khusus di sheet ini
 
       // ================================================================
       // 2. SHEET FORMATIF (dengan fixed width untuk L/P dan K1-K4)
@@ -835,13 +846,10 @@ export default function PenilaianMapelPage() {
         colIdx += 4;
       });
 
-      // Style semua cell di kedua baris, termasuk yang kosong, biar border tetap muncul
       styleRow(headerRow1, styleHeader);
       styleRow(headerRow2, styleHeader);
-      // Header kolom RATA-RATA NILAI → kuning
       styleResult(headerRow1.getCell(colRata));
 
-      // Merge vertikal (baris 4-5) untuk kolom yang tidak punya sub-header
       [colNomor, colNama, colLP, colKelas, colRata].forEach((col) => {
         sheetFormatif.mergeCells(4, col, 5, col);
       });
@@ -867,16 +875,25 @@ export default function PenilaianMapelPage() {
         rowData.push(avg !== null ? Number(avg.toFixed(2)) : null);
 
         const row = sheetFormatif.addRow(rowData);
-        styleRow(row, styleBody);
+        styleRow(row, styleBody); // border & alignment, tanpa fill
+
+        // MODIFIKASI: warnai sel nilai K1-K4 dengan cyan
+        let colStart = 5; // kolom pertama K1
+        for (let i = 0; i < tpList.length; i++) {
+          for (let j = 0; j < 4; j++) {
+            styleNilai(row.getCell(colStart + j));
+          }
+          colStart += 4;
+        }
+        // kolom rata-rata tetap kuning
         styleResult(row.getCell(colRata));
+
         row.height = 18;
       });
 
       setAutoWidth(sheetFormatif);
-      // Fixed width: L/P (kolom 3) = 5
       setFixedWidth(sheetFormatif, 3, 5);
       setFixedWidth(sheetFormatif, 1, 10);
-      // Fixed width untuk K1-K4 setiap TP: mulai kolom 5, setiap 4 kolom
       let startCol = 5;
       for (let i = 0; i < tpList.length; i++) {
         for (let j = 0; j < 4; j++) {
@@ -932,11 +949,20 @@ export default function PenilaianMapelPage() {
 
         const row = sheetSumatif.addRow(rowData);
         styleRow(row, styleBody);
+
+        // MODIFIKASI: warnai nilai setiap LP (mulai kolom 6) dengan cyan
+        const colLPStart = 6;
+        for (let i = 0; i < lpList.length; i++) {
+          styleNilai(row.getCell(colLPStart + i));
+        }
+        // STS dan SAS (setelah rata-rata) juga cyan
+        styleNilai(row.getCell(colRataSumatif + 1));
+        styleNilai(row.getCell(colRataSumatif + 2));
+        // Rata-rata tetap kuning
         styleResult(row.getCell(colRataSumatif));
       });
 
       setAutoWidth(sheetSumatif);
-      // Fixed L/P di kolom 4 = 5
       setFixedWidth(sheetSumatif, 4, 5);
 
       // ================================================================
@@ -1002,7 +1028,6 @@ export default function PenilaianMapelPage() {
       });
 
       setAutoWidth(sheetKehadiran);
-      // Fixed L/P di kolom 4 = 5
       setFixedWidth(sheetKehadiran, 4, 5);
       setFixedWidth(sheetKehadiran, 6, 10);
       setFixedWidth(sheetKehadiran, 7, 10);
@@ -1063,11 +1088,16 @@ export default function PenilaianMapelPage() {
             : null,
         ]);
         styleRow(row, styleBody);
+
+        // MODIFIKASI: warnai kolom komponen (3 s.d. 7) dengan cyan
+        for (let i = 3; i <= 7; i++) {
+          styleNilai(row.getCell(i));
+        }
+        // kolom Nilai Akhir Rapor tetap kuning
         styleResult(row.getCell(colNilaiAkhir));
       });
 
       setAutoWidth(sheetAkhir);
-      // Tidak ada L/P di sheet ini
 
       // ================================================================
       // GENERATE FILE
