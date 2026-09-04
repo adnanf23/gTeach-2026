@@ -699,7 +699,8 @@ export default function PenilaianMapelPage() {
         };
       }
 
-      function styleHeader(cell) {
+      // ===== MODIFIKASI: tambahkan parameter horizontal =====
+      function styleHeader(cell, horizontal = "center") {
         cell.fill = {
           type: "pattern",
           pattern: "solid",
@@ -707,15 +708,15 @@ export default function PenilaianMapelPage() {
         };
         cell.font = { bold: true, color: { argb: "FF000000" }, size: 11 };
         cell.alignment = {
-          horizontal: "center",
+          horizontal: horizontal,
           vertical: "middle",
           wrapText: true,
         };
         addBorder(cell);
       }
 
-      function styleBody(cell) {
-        cell.alignment = { horizontal: "center", vertical: "middle" };
+      function styleBody(cell, horizontal = "center") {
+        cell.alignment = { horizontal: horizontal, vertical: "middle" };
         addBorder(cell);
       }
 
@@ -739,8 +740,15 @@ export default function PenilaianMapelPage() {
         addBorder(cell);
       }
 
-      function styleRow(row, styleFn) {
-        row.eachCell({ includeEmpty: true }, (cell) => styleFn(cell));
+      // ===== MODIFIKASI: styleRow bisa menerima horizontal per kolom =====
+      function styleRow(row, styleFn, horizontalMap = null) {
+        row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+          const horiz =
+            horizontalMap && horizontalMap[colNumber]
+              ? horizontalMap[colNumber]
+              : "center";
+          styleFn(cell, horiz);
+        });
       }
 
       function addHeading(worksheet, title, colCount, rowIndex = 1) {
@@ -750,7 +758,7 @@ export default function PenilaianMapelPage() {
         const mergedCell = worksheet.getCell(rowIndex, 1);
         mergedCell.font = { bold: true, size: 16, color: { argb: "FF000000" } };
         mergedCell.alignment = { horizontal: "center", vertical: "middle" };
-        addBorder(mergedCell);
+        // TIDAK ada border pada judul
         row.height = 30;
       }
 
@@ -770,7 +778,9 @@ export default function PenilaianMapelPage() {
       sheetKelas.addRow([]);
 
       const headerRowKelas = sheetKelas.addRow(headerKelas);
-      styleRow(headerRowKelas, styleHeader);
+      // kolom 2 (Nama Siswa) rata kiri
+      const horizontalMapKelasHeader = { 2: "left" };
+      styleRow(headerRowKelas, styleHeader, horizontalMapKelasHeader);
       headerRowKelas.height = 25;
 
       siswaList.forEach((s, idx) => {
@@ -781,7 +791,8 @@ export default function PenilaianMapelPage() {
           s.nis || "-",
           s.nisn || "-",
         ]);
-        styleRow(row, styleBody);
+        const horizMap = { 2: "left" };
+        styleRow(row, styleBody, horizMap);
       });
       setAutoWidth(sheetKelas);
 
@@ -836,7 +847,9 @@ export default function PenilaianMapelPage() {
         colIdx += 4;
       });
 
-      styleRow(headerRow1, styleHeader);
+      // Kolom NAMA (indeks 2) rata kiri
+      const horizMapFormatif1 = { 2: "left" };
+      styleRow(headerRow1, styleHeader, horizMapFormatif1);
       styleRow(headerRow2, styleHeader);
       styleResult(headerRow1.getCell(colRata));
 
@@ -865,7 +878,8 @@ export default function PenilaianMapelPage() {
         rowData.push(avg !== null ? Number(avg.toFixed(2)) : null);
 
         const row = sheetFormatif.addRow(rowData);
-        styleRow(row, styleBody);
+        const horizMap = { 2: "left" };
+        styleRow(row, styleBody, horizMap);
 
         // warnai K1-K4 dengan cyan
         let colStart = 5;
@@ -912,7 +926,8 @@ export default function PenilaianMapelPage() {
       );
 
       const headerRowSumatif = sheetSumatif.addRow(headerSumatif);
-      styleRow(headerRowSumatif, styleHeader);
+      const horizMapSumatif = { 3: "left" }; // NAMA di indeks 3
+      styleRow(headerRowSumatif, styleHeader, horizMapSumatif);
       styleResult(headerRowSumatif.getCell(colRataSumatif));
       headerRowSumatif.height = 25;
 
@@ -937,7 +952,8 @@ export default function PenilaianMapelPage() {
         rowData.push(sas !== null ? Number(sas.toFixed(2)) : null);
 
         const row = sheetSumatif.addRow(rowData);
-        styleRow(row, styleBody);
+        const horizMap = { 3: "left" };
+        styleRow(row, styleBody, horizMap);
 
         // warnai LP, STS, SAS dengan cyan
         const colLPStart = 6;
@@ -953,14 +969,15 @@ export default function PenilaianMapelPage() {
       setFixedWidth(sheetSumatif, 4, 5);
 
       // ================================================================
-      // 4. SHEET KEHADIRAN
+      // 4. SHEET KEHADIRAN (DIPERBAIKI)
       // ================================================================
       const sheetKehadiran = workbook.addWorksheet("KEHADIRAN", {
         properties: { tabColor: { argb: GREEN } },
       });
 
-      const colCountKehadiran = 11;
-      const colPersenKehadiran = 11;
+      const colCountKehadiran = 12; // total kolom = 12
+      const colPersenKehadiran = 12; // PERBAIKAN: sekarang 12 (sebelumnya 11)
+
       addHeading(
         sheetKehadiran,
         "DAFTAR HADIR PESERTA DIDIK",
@@ -977,14 +994,16 @@ export default function PenilaianMapelPage() {
         "KELAS",
         "KETIDAKHADIRAN",
         "Jumlah",
+        "Hadir",
         "Sakit",
         "Izin",
         "Alpa",
         "% Kehadiran",
       ];
       const headerRowKehadiran = sheetKehadiran.addRow(headerKehadiran);
-      styleRow(headerRowKehadiran, styleHeader);
-      styleResult(headerRowKehadiran.getCell(colPersenKehadiran));
+      const horizMapKehadiran = { 3: "left" }; // NAMA di indeks 3
+      styleRow(headerRowKehadiran, styleHeader, horizMapKehadiran);
+      styleResult(headerRowKehadiran.getCell(colPersenKehadiran)); // sekarang benar
       headerRowKehadiran.height = 25;
 
       siswaList.forEach((siswa, idx) => {
@@ -1005,23 +1024,27 @@ export default function PenilaianMapelPage() {
           kelas.nama_kelas,
           ketidakhadiran,
           total,
+          hadir,
           sakit,
           izin,
           alpa,
           persenKehadiran !== null ? Number(persenKehadiran.toFixed(2)) : null,
         ]);
-        styleRow(row, styleBody);
-        styleResult(row.getCell(colPersenKehadiran));
+        const horizMap = { 3: "left" };
+        styleRow(row, styleBody, horizMap);
+        styleResult(row.getCell(colPersenKehadiran)); // sekarang benar
       });
 
       setAutoWidth(sheetKehadiran);
+      setFixedWidth(sheetKehadiran, 1, 5);
       setFixedWidth(sheetKehadiran, 4, 5);
       setFixedWidth(sheetKehadiran, 6, 10);
       setFixedWidth(sheetKehadiran, 7, 10);
       setFixedWidth(sheetKehadiran, 8, 10);
       setFixedWidth(sheetKehadiran, 9, 10);
       setFixedWidth(sheetKehadiran, 10, 10);
-      setFixedWidth(sheetKehadiran, 11, 17);
+      setFixedWidth(sheetKehadiran, 11, 10);
+      setFixedWidth(sheetKehadiran, 12, 17); // kolom persentase lebar 17
 
       // ================================================================
       // 5. SHEET NILAI AKHIR
@@ -1047,7 +1070,8 @@ export default function PenilaianMapelPage() {
       sheetAkhir.addRow([]);
 
       const headerRowAkhir = sheetAkhir.addRow(headerAkhir);
-      styleRow(headerRowAkhir, styleHeader);
+      const horizMapAkhir = { 2: "left" }; // Nama Siswa di indeks 2
+      styleRow(headerRowAkhir, styleHeader, horizMapAkhir);
       styleResult(headerRowAkhir.getCell(colNilaiAkhir));
       headerRowAkhir.height = 25;
 
@@ -1074,7 +1098,8 @@ export default function PenilaianMapelPage() {
             ? Number(raporMap[siswa.id].toFixed(2))
             : null,
         ]);
-        styleRow(row, styleBody);
+        const horizMap = { 2: "left" };
+        styleRow(row, styleBody, horizMap);
 
         // warnai komponen (kolom 3-7) dengan cyan
         for (let i = 3; i <= 7; i++) {

@@ -460,48 +460,51 @@ export default function LegerPage() {
         if (!argb) return;
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb } };
       }
-      function styleHeader(cell, argb) {
+      // --- FUNGSI DENGAN PARAMETER HORIZONTAL ---
+      function styleHeader(cell, argb, horizontal = "center") {
         fillCell(cell, argb);
         cell.font = { bold: true, size: 10 };
         cell.alignment = {
-          horizontal: "center",
+          horizontal: horizontal,
           vertical: "middle",
           wrapText: true,
         };
         addBorder(cell);
       }
-      function styleBody(cell, argb) {
+      function styleBody(cell, argb, horizontal = "center") {
         fillCell(cell, argb);
-        cell.alignment = { horizontal: "center", vertical: "middle" };
+        cell.alignment = {
+          horizontal: horizontal,
+          vertical: "middle",
+        };
         addBorder(cell);
       }
 
-      const totalCols = 2 + mapelList.length + 4;
+      // Total kolom = 2 + mapel + 3 (Jumlah, Rata, Rank)
+      const totalCols = 2 + mapelList.length + 3;
       const colJumlah = 3 + mapelList.length;
-      const colRata1 = colJumlah + 1;
-      const colRata2 = colRata1 + 1;
-      const colRank = colRata2 + 1;
+      const colRata = colJumlah + 1;
+      const colRank = colRata + 1;
 
       function fillForColumn(colNumber) {
         if (colNumber >= 3 && colNumber < colJumlah) return GREEN;
-        if (colNumber >= colJumlah && colNumber <= colRata2) return YELLOW;
+        if (colNumber === colJumlah || colNumber === colRata) return YELLOW;
         return null;
       }
 
       // Judul
       sheet.mergeCells(1, 1, 1, totalCols);
       const title = sheet.getCell(1, 1);
-      title.value = `LEGER NILAI RAPOR - ${kelas.nama_kelas} (TINGKAT ${kelas.tingkat})`;
+      title.value = `LEGER NILAI RAPOR - ${kelas.nama_kelas} TAHUN AJARAN 2026/2027`;
       title.font = { bold: true, size: 14 };
       title.alignment = { horizontal: "center", vertical: "middle" };
-      addBorder(title);
       sheet.getRow(1).height = 26;
 
       sheet.addRow([]);
 
-      // Header (dengan nama guru di bawah nama mapel)
+      // Header
       const headerRow = sheet.addRow([]);
-      headerRow.getCell(1).value = "-";
+      headerRow.getCell(1).value = "No";
       headerRow.getCell(2).value = "NAMA";
       let col = 3;
       mapelList.forEach((m) => {
@@ -509,12 +512,13 @@ export default function LegerPage() {
         col++;
       });
       headerRow.getCell(colJumlah).value = "JUMLAH";
-      headerRow.getCell(colRata1).value = "RATA RATA";
-      headerRow.getCell(colRata2).value = "RATA RATA";
+      headerRow.getCell(colRata).value = "RATA RATA";
       headerRow.getCell(colRank).value = "RANK";
 
+      // ---- Header dengan alignment khusus untuk kolom 2 ----
       headerRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-        styleHeader(cell, fillForColumn(colNumber));
+        const horiz = colNumber === 2 ? "left" : "center";
+        styleHeader(cell, fillForColumn(colNumber), horiz);
       });
       headerRow.height = 40;
 
@@ -535,16 +539,17 @@ export default function LegerPage() {
         const jml = jumlahMap[siswa.id];
         const rata = rataRataMap[siswa.id];
         row.getCell(colJumlah).value = jml !== null ? Math.round(jml) : 0;
-        row.getCell(colRata1).value = rata !== null ? Math.round(rata) : 0;
-        row.getCell(colRata2).value = rata !== null ? Math.round(rata) : 0;
+        row.getCell(colRata).value = rata !== null ? Math.round(rata) : 0;
         row.getCell(colRank).value = rankMap[siswa.id] ?? 0;
 
+        // ---- Data dengan alignment khusus untuk kolom 2 ----
         row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-          styleBody(cell, fillForColumn(colNumber));
+          const horiz = colNumber === 2 ? "left" : "center";
+          styleBody(cell, fillForColumn(colNumber), horiz);
         });
       });
 
-      // Baris ringkasan — SEKARANG DIBULATKAN KE INTEGER (Math.round)
+      // Baris ringkasan (hanya mapel)
       function addSummaryRow(label, valueFn) {
         const row = sheet.addRow([]);
         sheet.mergeCells(row.number, 1, row.number, 2);
@@ -553,14 +558,13 @@ export default function LegerPage() {
         let c = 3;
         mapelList.forEach((m) => {
           const v = valueFn(m);
-          // Gunakan Math.round agar konsisten dengan tampilan tabel
           row.getCell(c).value =
             v !== null && v !== undefined ? Math.round(v) : 0;
           c++;
         });
 
         row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-          styleBody(cell, CYAN);
+          styleBody(cell, CYAN); // tetap center untuk ringkasan
           if (colNumber === 1) cell.font = { bold: true };
         });
       }
@@ -568,14 +572,14 @@ export default function LegerPage() {
       addSummaryRow("Nilai Tertinggi", (m) => mapelStats[m.id]?.tertinggi);
       addSummaryRow("Nilai Terendah", (m) => mapelStats[m.id]?.terendah);
 
-      // Lebar kolom & freeze panes
+      // Lebar kolom (sudah diperkecil)
       sheet.getColumn(1).width = 6;
       sheet.getColumn(2).width = 28;
-      for (let i = 3; i < colJumlah; i++) sheet.getColumn(i).width = 14;
-      sheet.getColumn(colJumlah).width = 10;
-      sheet.getColumn(colRata1).width = 10;
-      sheet.getColumn(colRata2).width = 10;
-      sheet.getColumn(colRank).width = 8;
+      for (let i = 3; i < colJumlah; i++) sheet.getColumn(i).width = 10;
+      sheet.getColumn(colJumlah).width = 8;
+      sheet.getColumn(colRata).width = 8;
+      sheet.getColumn(colRank).width = 6;
+
       sheet.views = [{ state: "frozen", xSplit: 2, ySplit: 4 }];
 
       const buffer = await workbook.xlsx.writeBuffer();
