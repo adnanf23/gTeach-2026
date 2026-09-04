@@ -360,9 +360,25 @@ export default function PenilaianMapelPage() {
     return result;
   }, [absensiList, siswaList]);
 
+  // ================= RAPOR MAP (dengan perubahan) =================
   const raporMap = useMemo(() => {
     const result = {};
     siswaList.forEach((s) => {
+      const formatifVal = formatifAvgMap[s.id];
+      const sumatifVal = sumatifAvgMap[s.id];
+
+      // Jika formatif DAN sumatif dua-duanya kosong -> nilai akhir = 0
+      // (kehadiran/UTS/UAS diabaikan untuk kondisi ini)
+      const formatifKosong =
+        formatifVal === null || formatifVal === undefined || isNaN(formatifVal);
+      const sumatifKosong =
+        sumatifVal === null || sumatifVal === undefined || isNaN(sumatifVal);
+
+      if (formatifKosong && sumatifKosong) {
+        result[s.id] = 0;
+        return;
+      }
+
       const komponen = [
         { value: formatifAvgMap[s.id], bobot: bobotFormatif },
         { value: sumatifAvgMap[s.id], bobot: bobotSumatif },
@@ -656,6 +672,10 @@ export default function PenilaianMapelPage() {
       workbook.creator = "Sistem Penilaian";
       workbook.created = new Date();
 
+      // ========== WARNA ==========
+      const GREEN = "FFD9EAD3";
+      const YELLOW = "FFFFFF00";
+
       // ========== UTILITY ==========
       function setAutoWidth(worksheet) {
         worksheet.columns.forEach((column) => {
@@ -687,7 +707,7 @@ export default function PenilaianMapelPage() {
         cell.fill = {
           type: "pattern",
           pattern: "solid",
-          fgColor: { argb: "FFFFD700" },
+          fgColor: { argb: GREEN },
         };
         cell.font = { bold: true, color: { argb: "FF000000" }, size: 11 };
         cell.alignment = {
@@ -699,6 +719,17 @@ export default function PenilaianMapelPage() {
       }
 
       function styleBody(cell) {
+        cell.alignment = { horizontal: "center", vertical: "middle" };
+        addBorder(cell);
+      }
+
+      // Untuk cell/kolom hasil (JUMLAH, RATA-RATA, dll) — kuning
+      function styleResult(cell) {
+        cell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: YELLOW },
+        };
         cell.alignment = { horizontal: "center", vertical: "middle" };
         addBorder(cell);
       }
@@ -723,7 +754,7 @@ export default function PenilaianMapelPage() {
       // 1. SHEET DATA KELAS
       // ================================================================
       const sheetKelas = workbook.addWorksheet("DATA KELAS", {
-        properties: { tabColor: { argb: "FFFFD700" } },
+        properties: { tabColor: { argb: GREEN } },
       });
       const headerKelas = ["No", "Nama Siswa", "Jenis Kelamin", "NIS", "NISN"];
       const colCountKelas = headerKelas.length;
@@ -755,7 +786,7 @@ export default function PenilaianMapelPage() {
       // 2. SHEET FORMATIF (dengan fixed width untuk L/P dan K1-K4)
       // ================================================================
       const sheetFormatif = workbook.addWorksheet("FORMATIF", {
-        properties: { tabColor: { argb: "FFFFD700" } },
+        properties: { tabColor: { argb: GREEN } },
       });
 
       const totalCols = 4 + tpList.length * 4 + 1;
@@ -807,6 +838,8 @@ export default function PenilaianMapelPage() {
       // Style semua cell di kedua baris, termasuk yang kosong, biar border tetap muncul
       styleRow(headerRow1, styleHeader);
       styleRow(headerRow2, styleHeader);
+      // Header kolom RATA-RATA NILAI → kuning
+      styleResult(headerRow1.getCell(colRata));
 
       // Merge vertikal (baris 4-5) untuk kolom yang tidak punya sub-header
       [colNomor, colNama, colLP, colKelas, colRata].forEach((col) => {
@@ -835,6 +868,7 @@ export default function PenilaianMapelPage() {
 
         const row = sheetFormatif.addRow(rowData);
         styleRow(row, styleBody);
+        styleResult(row.getCell(colRata));
         row.height = 18;
       });
 
@@ -855,10 +889,11 @@ export default function PenilaianMapelPage() {
       // 3. SHEET SUMATIF
       // ================================================================
       const sheetSumatif = workbook.addWorksheet("SUMATIF", {
-        properties: { tabColor: { argb: "FFFFD700" } },
+        properties: { tabColor: { argb: GREEN } },
       });
 
       const colCountSumatif = 5 + lpList.length + 3;
+      const colRataSumatif = 5 + lpList.length + 1;
       addHeading(sheetSumatif, "DAFTAR NILAI SUMATIF", colCountSumatif, 1);
       sheetSumatif.addRow([]);
 
@@ -872,6 +907,7 @@ export default function PenilaianMapelPage() {
 
       const headerRowSumatif = sheetSumatif.addRow(headerSumatif);
       styleRow(headerRowSumatif, styleHeader);
+      styleResult(headerRowSumatif.getCell(colRataSumatif));
       headerRowSumatif.height = 25;
 
       siswaList.forEach((siswa, idx) => {
@@ -896,6 +932,7 @@ export default function PenilaianMapelPage() {
 
         const row = sheetSumatif.addRow(rowData);
         styleRow(row, styleBody);
+        styleResult(row.getCell(colRataSumatif));
       });
 
       setAutoWidth(sheetSumatif);
@@ -906,10 +943,11 @@ export default function PenilaianMapelPage() {
       // 4. SHEET KEHADIRAN
       // ================================================================
       const sheetKehadiran = workbook.addWorksheet("KEHADIRAN", {
-        properties: { tabColor: { argb: "FFFFD700" } },
+        properties: { tabColor: { argb: GREEN } },
       });
 
       const colCountKehadiran = 11;
+      const colPersenKehadiran = 11;
       addHeading(
         sheetKehadiran,
         "DAFTAR HADIR PESERTA DIDIK",
@@ -933,6 +971,7 @@ export default function PenilaianMapelPage() {
       ];
       const headerRowKehadiran = sheetKehadiran.addRow(headerKehadiran);
       styleRow(headerRowKehadiran, styleHeader);
+      styleResult(headerRowKehadiran.getCell(colPersenKehadiran));
       headerRowKehadiran.height = 25;
 
       siswaList.forEach((siswa, idx) => {
@@ -959,6 +998,7 @@ export default function PenilaianMapelPage() {
           persenKehadiran !== null ? Number(persenKehadiran.toFixed(2)) : null,
         ]);
         styleRow(row, styleBody);
+        styleResult(row.getCell(colPersenKehadiran));
       });
 
       setAutoWidth(sheetKehadiran);
@@ -975,7 +1015,7 @@ export default function PenilaianMapelPage() {
       // 5. SHEET NILAI AKHIR
       // ================================================================
       const sheetAkhir = workbook.addWorksheet("NILAI AKHIR", {
-        properties: { tabColor: { argb: "FFFFD700" } },
+        properties: { tabColor: { argb: GREEN } },
       });
 
       const headerAkhir = [
@@ -989,12 +1029,14 @@ export default function PenilaianMapelPage() {
         "Nilai Akhir Rapor",
       ];
       const colCountAkhir = headerAkhir.length;
+      const colNilaiAkhir = colCountAkhir;
 
       addHeading(sheetAkhir, "NILAI AKHIR RAPOR", colCountAkhir, 1);
       sheetAkhir.addRow([]);
 
       const headerRowAkhir = sheetAkhir.addRow(headerAkhir);
       styleRow(headerRowAkhir, styleHeader);
+      styleResult(headerRowAkhir.getCell(colNilaiAkhir));
       headerRowAkhir.height = 25;
 
       siswaList.forEach((siswa, idx) => {
@@ -1021,6 +1063,7 @@ export default function PenilaianMapelPage() {
             : null,
         ]);
         styleRow(row, styleBody);
+        styleResult(row.getCell(colNilaiAkhir));
       });
 
       setAutoWidth(sheetAkhir);
