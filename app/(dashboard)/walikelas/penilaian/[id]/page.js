@@ -74,7 +74,6 @@ const DAFTAR_NO_TP = [
 // KOMPONEN INPUT NILAI
 // ================================================================
 function NilaiInput({ value, status, disabled, onSave, width = "w-16" }) {
-  // Ubah -1 menjadi string kosong untuk ditampilkan
   const displayValue = value === -1 ? "" : (value ?? "");
   return (
     <input
@@ -242,13 +241,13 @@ export default function PenilaianMapelPage() {
           setNilaiSumatif(map);
         }
 
-        // Nilai Ujian
+        // ========== PERBAIKAN: Nilai Ujian dengan filter mapel_id ==========
         if (ujianData.length > 0) {
           const ujianFilter = ujianData
             .map((u) => `pengaturan_ujian_id = "${u.id}"`)
             .join(" || ");
           const nuData = await pb.collection("nilai_ujian").getFullList({
-            filter: `${ujianFilter}`,
+            filter: `mapel_id = "${mapelId}" && (${ujianFilter})`, // PERBAIKAN: tambahkan mapel_id
             requestKey: null,
           });
           const map = {};
@@ -595,7 +594,7 @@ export default function PenilaianMapelPage() {
     }
   }
 
-  // ================= SIMPAN NILAI UJIAN =================
+  // ================= SIMPAN NILAI UJIAN (PERBAIKAN) =================
   async function handleSaveUjian(siswaId, rawValue) {
     if (!selectedUjianId) return;
     const cellKey = `u-${siswaId}`;
@@ -624,10 +623,12 @@ export default function PenilaianMapelPage() {
             { requestKey: null },
           );
       } else {
+        // PERBAIKAN: sertakan mapel_id saat create
         saved = await pb.collection("nilai_ujian").create(
           {
             siswa_id: siswaId,
             pengaturan_ujian_id: selectedUjianId,
+            mapel_id: mapelId, // <-- tambahan ini
             nilai: nilaiValue,
           },
           { requestKey: null },
@@ -669,7 +670,7 @@ export default function PenilaianMapelPage() {
       // ========== WARNA ==========
       const GREEN = "FFD9EAD3";
       const YELLOW = "FFFFFF00";
-      const CYAN = "FFE0FFFF"; // MODIFIKASI: warna cyan untuk nilai mentah
+      const CYAN = "FFE0FFFF";
 
       // ========== UTILITY ==========
       function setAutoWidth(worksheet) {
@@ -866,7 +867,7 @@ export default function PenilaianMapelPage() {
         const row = sheetFormatif.addRow(rowData);
         styleRow(row, styleBody);
 
-        // MODIFIKASI: warnai K1-K4 dengan cyan
+        // warnai K1-K4 dengan cyan
         let colStart = 5;
         for (let i = 0; i < tpList.length; i++) {
           for (let j = 0; j < 4; j++) {
@@ -938,7 +939,7 @@ export default function PenilaianMapelPage() {
         const row = sheetSumatif.addRow(rowData);
         styleRow(row, styleBody);
 
-        // MODIFIKASI: warnai LP, STS, SAS dengan cyan
+        // warnai LP, STS, SAS dengan cyan
         const colLPStart = 6;
         for (let i = 0; i < lpList.length; i++) {
           styleNilai(row.getCell(colLPStart + i));
@@ -1075,7 +1076,7 @@ export default function PenilaianMapelPage() {
         ]);
         styleRow(row, styleBody);
 
-        // MODIFIKASI: warnai komponen (kolom 3-7) dengan cyan
+        // warnai komponen (kolom 3-7) dengan cyan
         for (let i = 3; i <= 7; i++) {
           styleNilai(row.getCell(i));
         }
@@ -1323,7 +1324,7 @@ export default function PenilaianMapelPage() {
                                       v,
                                     )
                                   }
-                                  width="w-16" // MODIFIKASI: lebar input diperbesar
+                                  width="w-16"
                                 />
                               </td>
                             );
@@ -1445,7 +1446,7 @@ export default function PenilaianMapelPage() {
                                 onSave={(v) =>
                                   handleSaveSumatif(siswa.id, lp.id, v)
                                 }
-                                width="w-24" // MODIFIKASI: lebar input diperbesar
+                                width="w-24"
                               />
                             </td>
                           );
@@ -1538,7 +1539,7 @@ export default function PenilaianMapelPage() {
                                 value={rec?.nilai}
                                 status={cellStatus[cellKey]}
                                 onSave={(v) => handleSaveUjian(siswa.id, v)}
-                                width="w-24" // MODIFIKASI: lebar input diperbesar
+                                width="w-24"
                               />
                             </td>
                           </tr>

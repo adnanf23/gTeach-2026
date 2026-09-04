@@ -423,9 +423,9 @@ export default function PenilaianGuruMapelPage() {
     };
   }, [selectedKelas]);
 
-  // 6. Ambil nilai_ujian saat ujian dipilih (khusus ploting_guru_id ini)
+  // 6. Ambil nilai_ujian saat ujian dipilih (scoped by mapel, bukan ploting_guru)
   useEffect(() => {
-    if (!selectedUjianId || !selectedPloting || siswaList.length === 0) {
+    if (!selectedUjianId || !selectedMapelId || siswaList.length === 0) {
       setNilaiUjian({});
       return;
     }
@@ -438,7 +438,7 @@ export default function PenilaianGuruMapelPage() {
           .map((s) => `siswa_id = "${s.id}"`)
           .join(" || ");
         const data = await pb.collection("nilai_ujian").getFullList({
-          filter: `pengaturan_ujian_id = "${selectedUjianId}" && ploting_guru_id = "${selectedPloting.id}" && (${filterSiswa})`,
+          filter: `pengaturan_ujian_id = "${selectedUjianId}" && mapel_id = "${selectedMapelId}" && (${filterSiswa})`,
           requestKey: null,
         });
         if (!isMounted) return;
@@ -462,7 +462,7 @@ export default function PenilaianGuruMapelPage() {
     return () => {
       isMounted = false;
     };
-  }, [selectedUjianId, selectedPloting, siswaList]);
+  }, [selectedUjianId, selectedMapelId, siswaList]);
 
   // ================= NILAI AKHIR (untuk kolom "Nilai Akhir" per tabel) ====
   // abaikan -1
@@ -692,7 +692,7 @@ export default function PenilaianGuruMapelPage() {
     }
   }
 
-  // ---------------- Handlers: Nilai Ujian (tetap pakai null) ----------------
+  // ---------------- Handlers: Nilai Ujian (dengan mapel_id) ----------------
   function handleUjianChange(siswaId, rawValue) {
     setNilaiUjian((prev) => ({
       ...prev,
@@ -701,7 +701,7 @@ export default function PenilaianGuruMapelPage() {
   }
 
   async function handleUjianBlur(siswaId) {
-    if (!selectedUjianId || !selectedPloting) return;
+    if (!selectedUjianId || !selectedPloting || !selectedMapelId) return;
     const existing = nilaiUjian[siswaId];
     const rawValue = existing?.nilai;
     if (rawValue === "" || rawValue === undefined || rawValue === null) return;
@@ -723,6 +723,7 @@ export default function PenilaianGuruMapelPage() {
             siswa_id: siswaId,
             ploting_guru_id: selectedPloting.id,
             pengaturan_ujian_id: selectedUjianId,
+            mapel_id: selectedMapelId, // TAMBAHAN: kunci sinkron dengan dashboard wali kelas
             nilai: clamped,
           },
           { requestKey: null },
@@ -749,7 +750,7 @@ export default function PenilaianGuruMapelPage() {
     setSelectedKelasId(null);
   }
 
-  // ---------------- Render (tidak diubah, hanya komponen NilaiInput sudah menangani -1) ----------------
+  // ---------------- Render (tidak diubah) ----------------
   if (!authChecked) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center text-slate-500">
