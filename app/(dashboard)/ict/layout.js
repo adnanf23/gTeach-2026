@@ -57,9 +57,9 @@ const NAV = [
     icon: "mapel",
   },
   {
-    key: "absensi",
-    label: "Absensi Kelas",
-    href: "/ict/absensi",
+    key: "Tracker Harian",
+    label: "Tracker Harian",
+    href: "/ict/tracker",
     icon: "absensi",
   },
   {

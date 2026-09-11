@@ -308,33 +308,29 @@ export default function PlotingGuruPage() {
           }
         }
 
-        await pb
-          .collection("ploting_guru")
-          .update(
-            editingRecord.id,
-            {
-              guru_id: form.guruId,
-              mapel_id: form.mapelId,
-              kelas_id: eligibleIds,
-            },
-            { requestKey: null },
-          );
+        await pb.collection("ploting_guru").update(
+          editingRecord.id,
+          {
+            guru_id: form.guruId,
+            mapel_id: form.mapelId,
+            kelas_id: eligibleIds,
+          },
+          { requestKey: null },
+        );
 
         setMessage({
           type: "success",
           text: `Ploting diperbarui — tertaut ke ${eligibleIds.length} kelas.`,
         });
       } else {
-        await pb
-          .collection("ploting_guru")
-          .create(
-            {
-              guru_id: form.guruId,
-              mapel_id: form.mapelId,
-              kelas_id: eligibleIds,
-            },
-            { requestKey: null },
-          );
+        await pb.collection("ploting_guru").create(
+          {
+            guru_id: form.guruId,
+            mapel_id: form.mapelId,
+            kelas_id: eligibleIds,
+          },
+          { requestKey: null },
+        );
 
         setMessage({
           type: "success",
@@ -494,17 +490,6 @@ export default function PlotingGuruPage() {
   return (
     <div className="min-h-screen bg-slate-50 pb-16">
       <Toast toast={message} onClose={() => setMessage(null)} />
-
-      {/* Header */}
-      <div className="border-b border-slate-200 bg-white">
-        <div className="mx-auto max-w-5xl px-4 py-5">
-          <h1 className="text-xl font-semibold text-slate-900">Ploting Guru</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Hubungkan guru dengan mata pelajaran — kelasnya otomatis mengikuti
-            tingkat / kelas spesifik pada mapel tersebut.
-          </p>
-        </div>
-      </div>
 
       <div className="mx-auto max-w-5xl px-4 py-6">
         {/* Toolbar */}

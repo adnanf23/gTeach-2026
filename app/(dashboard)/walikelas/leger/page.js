@@ -126,6 +126,9 @@ export default function LegerPage() {
         );
 
         const uniqueMapel = uniqueMapelRaw.filter((m) => {
+          // Hanya mapel kategori umum yang masuk leger akademik
+          if ((m.kategori || "").toLowerCase() !== "umum") return false;
+
           const spesifik = m.spesifik_kelas_id;
           const punyaRestriksi = Array.isArray(spesifik) && spesifik.length > 0;
           if (!punyaRestriksi) return true; // mapel generik

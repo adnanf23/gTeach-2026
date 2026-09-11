@@ -42,6 +42,8 @@ const icons = {
   pengaturan: "M8 5a3 3 0 100 6 3 3 0 000-6zM8 1v2M8 13v2M1 8h2M13 8h2",
   // Tambahan ikon baru untuk System Logs ICT
   log: "M2 2h12v12H2V2zM5 6h6M5 9h6M5 12h3",
+  // Ikon untuk menu Atur Nilai
+  aturNilai: "M2 2h12v12H2V2zM4 5h8M4 8h8M4 11h5",
 };
 
 // Array NAV utama untuk Administrator Sekolah
@@ -78,6 +80,12 @@ const NAV = [
     href: "/admin/ploting-guru",
     icon: "pengajaran",
   },
+  {
+    key: "atur-nilai",
+    label: "Atur Nilai",
+    href: "/admin/atur-nilai",
+    icon: "aturNilai",
+  },
   { key: "nilai", label: "Rekap Nilai", href: "/admin/nilai", icon: "nilai" },
   {
     key: "Manajemen Ujian",
@@ -86,6 +94,9 @@ const NAV = [
     icon: "pembelajaran",
   },
 ];
+
+// Menu tambahan khusus role ICT (silakan isi jika diperlukan)
+const ICT_NAV = [];
 
 export default function AdminLayout({ children }) {
   const router = useRouter();
