@@ -192,9 +192,7 @@ export default function AdminLayout({ children }) {
               gTeach Space
             </h1>
             {/* Teks sub-header berubah dinamis mengikuti role */}
-            <p className="text-[10.5px] text-gray-400">
-              {user?.role === "ict" ? "ICT Technical Server" : "Administrator"}
-            </p>
+            <p className="text-[10.5px] text-gray-400">{user.role}</p>
           </div>
           <button
             className="ml-auto lg:hidden text-gray-400 hover:text-gray-600"

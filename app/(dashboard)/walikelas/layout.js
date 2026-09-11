@@ -43,7 +43,9 @@ const icons = {
   log: "M2 2h12v12H2V2zM5 6h6M5 9h6M5 12h3",
   profile: "M8 2a3 3 0 100 6 3 3 0 000-6zM2 14c0-3 2.7-5 6-5s6 2 6 5",
   // ✨ Tambahan ikon untuk Leger
-  leger: "M2 4h12v10H2V4z M4 8h8 M4 12h6", // path sederhana (bisa disesuaikan)
+  leger: "M2 4h12v10H2V4z M4 8h8 M4 12h6",
+  // ✨ Tambahan ikon untuk Catatan Kasus (dokumen + garis)
+  catatan: "M3 2h7l3 3v9H3V2z M10 2v3h3 M5 8h6 M5 11h4",
 };
 
 // Array NAV utama untuk Administrator Sekolah
@@ -78,13 +80,20 @@ const NAV = [
     key: "leger",
     label: "Leger",
     href: "/walikelas/leger",
-    icon: "leger", // menggunakan ikon yang baru ditambahkan
+    icon: "leger",
   },
   {
     key: "agenda",
     label: "Agenda Mengajar",
     href: "/walikelas/agenda",
     icon: "pengajaran",
+  },
+  // ✨ Tambahan menu Catatan Kasus di bawah Agenda Mengajar
+  {
+    key: "catatan_kasus",
+    label: "Catatan Kasus",
+    href: "/walikelas/catatan-kasus",
+    icon: "catatan",
   },
 ];
 
@@ -303,7 +312,7 @@ export default function AdminLayout({ children }) {
           </button>
           <div className="flex items-center gap-2 min-w-0">
             <span className="text-[12px] text-gray-400 hidden sm:block">
-              {user?.role === "ict" ? "ICT" : "Admin"}
+              {user.role}
             </span>
             <span className="text-gray-300 text-[11px] hidden sm:block">/</span>
             <span className="text-[12px] font-semibold text-gray-700 truncate">

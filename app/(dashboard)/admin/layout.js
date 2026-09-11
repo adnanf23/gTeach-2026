@@ -44,6 +44,8 @@ const icons = {
   log: "M2 2h12v12H2V2zM5 6h6M5 9h6M5 12h3",
   // Ikon untuk menu Atur Nilai
   aturNilai: "M2 2h12v12H2V2zM4 5h8M4 8h8M4 11h5",
+  // ✨ Ikon untuk Catatan Khusus (dokumen + garis)
+  catatan: "M3 2h7l3 3v9H3V2z M10 2v3h3 M5 8h6 M5 11h4",
 };
 
 // Array NAV utama untuk Administrator Sekolah
@@ -92,6 +94,13 @@ const NAV = [
     label: "Manajemen Ujian",
     href: "/admin/manajemen-ujian",
     icon: "pembelajaran",
+  },
+  // ✨ Tambahan menu Catatan Khusus di paling bawah
+  {
+    key: "catatan-kasus",
+    label: "Catatan kasus",
+    href: "/admin/catatan-kasus",
+    icon: "catatan",
   },
 ];
 
