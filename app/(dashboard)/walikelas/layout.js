@@ -42,13 +42,10 @@ const icons = {
   pengaturan: "M8 5a3 3 0 100 6 3 3 0 000-6zM8 1v2M8 13v2M1 8h2M13 8h2",
   log: "M2 2h12v12H2V2zM5 6h6M5 9h6M5 12h3",
   profile: "M8 2a3 3 0 100 6 3 3 0 000-6zM2 14c0-3 2.7-5 6-5s6 2 6 5",
-  // ✨ Tambahan ikon untuk Leger
   leger: "M2 4h12v10H2V4z M4 8h8 M4 12h6",
-  // ✨ Tambahan ikon untuk Catatan Kasus (dokumen + garis)
   catatan: "M3 2h7l3 3v9H3V2z M10 2v3h3 M5 8h6 M5 11h4",
 };
 
-// Array NAV utama untuk Administrator Sekolah
 const NAV = [
   { key: "overview", label: "Overview", href: "/walikelas/", icon: "overview" },
   {
@@ -75,7 +72,6 @@ const NAV = [
     href: "/walikelas/penilaian",
     icon: "nilai",
   },
-  // ✨ Tambahan menu Leger di bawah Rekap Nilai
   {
     key: "leger",
     label: "Leger",
@@ -88,7 +84,6 @@ const NAV = [
     href: "/walikelas/agenda",
     icon: "pengajaran",
   },
-  // ✨ Tambahan menu Catatan Kasus di bawah Agenda Mengajar
   {
     key: "catatan_kasus",
     label: "Catatan Kasus",
@@ -97,7 +92,6 @@ const NAV = [
   },
 ];
 
-// Menu tambahan khusus jika yang login adalah akun dengan role 'ict'
 const ICT_NAV = [
   {
     key: "system_logs",
@@ -107,7 +101,6 @@ const ICT_NAV = [
   },
 ];
 
-// Menu profil dan pengaturan
 const PROFILE_NAV = [
   {
     key: "profile",
@@ -122,13 +115,28 @@ export default function AdminLayout({ children }) {
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [user, setUser] = useState(null);
+  // FIX: flag agar layout tidak render sebelum sesi dicek.
+  // Kunci perbaikan "Cannot read properties of null (reading 'role')".
+  const [checked, setChecked] = useState(false);
 
   useEffect(() => {
-    if (pb.authStore.isValid) {
-      setUser(pb.authStore.model);
-    } else {
-      router.push("/login");
+    if (!pb.authStore.isValid) {
+      router.replace("/login");
+      return;
     }
+
+    const currentUser = pb.authStore.model;
+
+    // Guard role: halaman /walikelas/* hanya untuk guru walikelas / pendamping.
+    // (ICT juga diizinkan bila ingin mengakses menu System Logs.)
+    const allowedRoles = ["guru walikelas", "guru pendamping", "ict"];
+    if (!currentUser || !allowedRoles.includes(currentUser.role)) {
+      router.replace("/login");
+      return;
+    }
+
+    setUser(currentUser);
+    setChecked(true);
   }, [router]);
 
   const handleLogout = async () => {
@@ -140,7 +148,7 @@ export default function AdminLayout({ children }) {
 
       createSystemLog({
         type: "succes",
-        msg: `User '${targetUser?.nama_lengkap || "User"} ( ${targetUser?.role} )' berhasil logout dari sistem.`,
+        msg: `User '${targetUser?.nama_lengkap || "User"} ( ${targetUser?.role ?? "-"} )' berhasil logout dari sistem.`,
         endpoint: currentEndpoint,
         statusCode: 200,
         payload: {
@@ -152,15 +160,16 @@ export default function AdminLayout({ children }) {
       pb.authStore.clear();
       Cookies.remove("pb_auth", { path: "/" });
       setUser(null);
-      router.replace("/login");
-      location.reload();
     } catch (logError) {
       console.error("Gagal proses logout:", logError);
-      router.replace("/login");
+    } finally {
+      // FIX: hindari `location.reload()` mentah; pakai hard redirect yang aman.
+      if (typeof window !== "undefined") {
+        window.location.replace("/login");
+      }
     }
   };
 
-  // Menggabungkan menu utama dengan menu ICT secara dinamis jika role sesuai
   const currentNavList = user?.role === "ict" ? [...NAV, ...ICT_NAV] : NAV;
 
   const activeKey =
@@ -173,7 +182,6 @@ export default function AdminLayout({ children }) {
   const activeNav =
     currentNavList.find((n) => n.key === activeKey) || currentNavList[0];
 
-  // Cek apakah halaman aktif adalah profile atau settings
   const isProfileActive =
     pathname === "/walikelas/profile" || pathname === "/walikelas/settings";
   const activeProfileNav = PROFILE_NAV.find((n) => pathname === n.href);
@@ -187,6 +195,19 @@ export default function AdminLayout({ children }) {
         .toUpperCase()
     : user?.username?.slice(0, 2).toUpperCase() || "AD";
 
+  // FIX: sebelum sesi selesai dicek, jangan render layout.
+  // Ini mencegah `user.role` dievaluasi saat user masih null (SSR / prerender).
+  if (!checked) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-50 text-gray-400 text-[13px]">
+        <div className="flex items-center gap-2">
+          <div className="w-4 h-4 border-2 border-gray-300 border-t-transparent rounded-full animate-spin" />
+          <span>Memuat…</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-screen min-h-[600px] bg-gray-50 text-[13px] font-sans overflow-hidden text-black">
       {/* Overlay mobile */}
@@ -199,14 +220,17 @@ export default function AdminLayout({ children }) {
 
       {/* ── SIDEBAR ── */}
       <aside
-        className={`fixed lg:relative inset-y-0 left-0 z-30 w-[220px] min-w-[220px] bg-white border-r border-gray-100 flex flex-col overflow-y-auto transition-transform duration-200 ease-in-out ${sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}
+        className={`fixed lg:relative inset-y-0 left-0 z-30 w-[220px] min-w-[220px] bg-white border-r border-gray-100 flex flex-col overflow-y-auto transition-transform duration-200 ease-in-out ${
+          sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
+        }`}
       >
         <div className="flex items-center gap-2.5 px-4 py-3.5 border-b border-gray-100">
           <div className="min-w-0">
             <h1 className="text-lg font-semibold text-gray-800 leading-tight truncate">
               gTeach Space
             </h1>
-            <p className="text-[10.5px] text-gray-400">{user?.role}</p>
+            {/* FIX: sudah pakai optional chaining */}
+            <p className="text-[10.5px] text-gray-400">{user?.role ?? ""}</p>
           </div>
           <button
             className="ml-auto lg:hidden text-gray-400 hover:text-gray-600"
@@ -218,7 +242,6 @@ export default function AdminLayout({ children }) {
 
         {/* List Menu Navigasi */}
         <div className="pt-2 pb-2 flex-1">
-          {/* Menu utama */}
           {currentNavList.map(({ key, label, icon, href }) => {
             const isActive = activeKey === key;
             return (
@@ -256,7 +279,6 @@ export default function AdminLayout({ children }) {
             </span>
           </div>
 
-          {/* Menu Profil dan Pengaturan */}
           {PROFILE_NAV.map(({ key, label, icon, href }) => {
             const isActive = pathname === href;
             return (
@@ -312,13 +334,14 @@ export default function AdminLayout({ children }) {
           </button>
           <div className="flex items-center gap-2 min-w-0">
             <span className="text-[12px] text-gray-400 hidden sm:block">
-              {user.role}
+              {/* FIX: baris ini dulu `{user.role}` → penyebab error build */}
+              {user?.role ?? ""}
             </span>
             <span className="text-gray-300 text-[11px] hidden sm:block">/</span>
             <span className="text-[12px] font-semibold text-gray-700 truncate">
               {isProfileActive && activeProfileNav
                 ? activeProfileNav.label
-                : activeNav.label}
+                : (activeNav?.label ?? "")}
             </span>
           </div>
           <div className="ml-auto flex items-center gap-3">
@@ -332,11 +355,11 @@ export default function AdminLayout({ children }) {
         </header>
 
         {/* Page content */}
-        <div className="flex-1 no-scrollbar overflow-y-auto no-scrollbar p-4 sm:p-5 lg:p-6">
+        <div className="flex-1 no-scrollbar overflow-y-auto p-4 sm:p-5 lg:p-6">
           <h1 className="text-[20px] sm:text-[22px] font-semibold text-gray-900 mb-5 no-print">
             {isProfileActive && activeProfileNav
               ? activeProfileNav.label
-              : activeNav.label}
+              : (activeNav?.label ?? "")}
           </h1>
           {children}
         </div>

@@ -40,7 +40,6 @@ const icons = {
   mapel:
     "M2 4.5A2.5 2.5 0 014.5 2H14v10.5a1 1 0 01-1 1H4.5A2.5 2.5 0 012 11V4.5z M2 11h12 M6 2v10",
   pengaturan: "M8 5a3 3 0 100 6 3 3 0 000-6zM8 1v2M8 13v2M1 8h2M13 8h2",
-  // Tambahan ikon baru untuk System Logs ICT
   log: "M2 2h12v12H2V2zM5 6h6M5 9h6M5 12h3",
 };
 
@@ -104,28 +103,40 @@ export default function AdminLayout({ children }) {
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [user, setUser] = useState(null);
+  // FIX: flag agar tidak render apa pun sebelum sesi dicek.
+  // Ini mencegah `user.role` dievaluasi saat user masih null (SSR / prerender).
+  const [checked, setChecked] = useState(false);
 
   useEffect(() => {
-    if (pb.authStore.isValid) {
-      setUser(pb.authStore.model);
-    } else {
-      router.push("/login");
+    if (!pb.authStore.isValid) {
+      router.replace("/login");
+      return;
     }
+
+    const currentUser = pb.authStore.model;
+
+    // Guard role: halaman /ict/* hanya untuk role ict (dan admin jika diizinkan)
+    if (currentUser?.role !== "ict" && currentUser?.role !== "admin") {
+      router.replace("/login");
+      return;
+    }
+
+    setUser(currentUser);
+    setChecked(true);
   }, [router]);
 
-  // 1. Tambahkan keyword 'async' di sini
   const handleLogout = async () => {
     try {
       const currentEndpoint =
         typeof window !== "undefined" ? window.location.pathname : "-";
 
-      // 1. Ambil snapshot data user saat ini sebelum dihapus dari state
+      // Ambil snapshot data user saat ini sebelum dihapus dari state
       const targetUser = user || pb.authStore.model;
 
-      // 2. Tembak log ke backend TANPA await agar user tidak menunggu loading
+      // Tembak log ke backend TANPA await agar user tidak menunggu loading
       createSystemLog({
         type: "succes", // Menyiasati typo 'succes' di database
-        msg: `User '${targetUser?.nama_lengkap || "User"}( ${targetUser?.role} )' berhasil logout dari sistem.`,
+        msg: `User '${targetUser?.nama_lengkap || "User"}( ${targetUser?.role ?? "-"} )' berhasil logout dari sistem.`,
         endpoint: currentEndpoint,
         statusCode: 200,
         payload: {
@@ -133,20 +144,19 @@ export default function AdminLayout({ children }) {
           role: targetUser?.role,
         },
       }).catch((err) => console.error("Gagal mencatat log logout:", err));
-      // .catch di atas menjaga jika server log error, aplikasi tidak crash
 
-      // 3. Langsung eksekusi proses bersih-bersih auth (Instan bagi user)
+      // Bersihkan auth
       pb.authStore.clear();
       Cookies.remove("pb_auth", { path: "/" });
       setUser(null);
-      router.replace("/login");
     } catch (logError) {
-      // Fallback jika ada error fatal di block try
       console.error("Gagal proses logout:", logError);
-      // Tetap paksa pindah halaman jika terjadi error terduga
-      router.replace("/login");
     } finally {
-      location.reload();
+      // FIX: hindari `location.reload()` yang tidak aman.
+      // Hard redirect ke /login sekaligus menyegarkan state aplikasi.
+      if (typeof window !== "undefined") {
+        window.location.replace("/login");
+      }
     }
   };
 
@@ -172,8 +182,21 @@ export default function AdminLayout({ children }) {
         .toUpperCase()
     : user?.username?.slice(0, 2).toUpperCase() || "AD";
 
+  // FIX: sebelum sesi selesai dicek, jangan render layout.
+  // Ini adalah kunci perbaikan error "Cannot read properties of null (reading 'role')".
+  if (!checked) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-50 text-gray-400 text-[13px]">
+        <div className="flex items-center gap-2">
+          <div className="w-4 h-4 border-2 border-gray-300 border-t-transparent rounded-full animate-spin" />
+          <span>Memuat…</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className=" flex h-screen min-h-[600px] bg-gray-50 text-[13px] font-sans overflow-hidden text-black">
+    <div className="flex h-screen min-h-[600px] bg-gray-50 text-[13px] font-sans overflow-hidden text-black">
       {/* Overlay mobile */}
       {sidebarOpen && (
         <div
@@ -184,15 +207,17 @@ export default function AdminLayout({ children }) {
 
       {/* ── SIDEBAR ── */}
       <aside
-        className={`fixed lg:relative inset-y-0 left-0 z-30 w-[220px] min-w-[220px] bg-white border-r border-gray-100 flex flex-col overflow-y-auto transition-transform duration-200 ease-in-out ${sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}
+        className={`fixed lg:relative inset-y-0 left-0 z-30 w-[220px] min-w-[220px] bg-white border-r border-gray-100 flex flex-col overflow-y-auto transition-transform duration-200 ease-in-out ${
+          sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
+        }`}
       >
         <div className="flex items-center gap-2.5 px-4 py-3.5 border-b border-gray-100">
           <div className="min-w-0">
             <h1 className="text-lg font-semibold text-gray-800 leading-tight truncate">
               gTeach Space
             </h1>
-            {/* Teks sub-header berubah dinamis mengikuti role */}
-            <p className="text-[10.5px] text-gray-400">{user.role}</p>
+            {/* FIX: pakai optional chaining + fallback agar aman saat user null */}
+            <p className="text-[10.5px] text-gray-400">{user?.role ?? ""}</p>
           </div>
           <button
             className="ml-auto lg:hidden text-gray-400 hover:text-gray-600"
@@ -204,7 +229,6 @@ export default function AdminLayout({ children }) {
 
         {/* List Menu Navigasi */}
         <div className="pt-2 pb-2 flex-1">
-          {/* Menggunakan list menu dinamis hasil filter role */}
           {currentNavList.map(({ key, label, icon, href }) => {
             const isActive = activeKey === key;
             return (
@@ -214,11 +238,17 @@ export default function AdminLayout({ children }) {
                   router.push(href);
                   setSidebarOpen(false);
                 }}
-                className={`w-full flex items-center gap-2 px-3 py-[6px] rounded-lg text-left text-[12.5px] transition-colors mx-1 mb-0.5 ${isActive ? "bg-[#4d8bff] text-white font-medium" : "text-gray-500 hover:bg-gray-50 hover:text-gray-700"}`}
+                className={`w-full flex items-center gap-2 px-3 py-[6px] rounded-lg text-left text-[12.5px] transition-colors mx-1 mb-0.5 ${
+                  isActive
+                    ? "bg-[#4d8bff] text-white font-medium"
+                    : "text-gray-500 hover:bg-gray-50 hover:text-gray-700"
+                }`}
                 style={{ width: "calc(100% - 8px)" }}
               >
                 <span
-                  className={`flex-shrink-0 ${isActive ? "text-blue-200" : "opacity-50"}`}
+                  className={`flex-shrink-0 ${
+                    isActive ? "text-blue-200" : "opacity-50"
+                  }`}
                 >
                   <Icon d={icons[icon]} />
                 </span>
@@ -266,7 +296,7 @@ export default function AdminLayout({ children }) {
             </span>
             <span className="text-gray-300 text-[11px] hidden sm:block">/</span>
             <span className="text-[12px] font-semibold text-gray-700 truncate">
-              {activeNav.label}
+              {activeNav?.label ?? ""}
             </span>
           </div>
           <div className="ml-auto flex items-center gap-3">
@@ -282,7 +312,7 @@ export default function AdminLayout({ children }) {
         {/* Page content */}
         <div className="flex-1 overflow-y-auto no-scrollbar p-4 sm:p-5 lg:p-6">
           <h1 className="text-[20px] sm:text-[22px] font-semibold text-gray-900 mb-5 no-print">
-            {activeNav.label}
+            {activeNav?.label ?? ""}
           </h1>
           {children}
         </div>
