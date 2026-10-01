@@ -115,24 +115,18 @@ export default function LegerPage() {
         setSiswaList(siswaData);
 
         // ========== GABUNG & FILTER MAPEL ==========
-        // - mapelKhusus sudah pasti cocok (filter spesifik_kelas_id ~ kelasData.id)
-        // - mapelTingkat berisi semua mapel dengan target_tingkat sesuai,
-        //   termasuk yang memiliki spesifik_kelas_id untuk kelas lain.
-        //   Maka kita filter ulang: jika mapel punya spesifik_kelas_id,
-        //   harus mengandung kelasData.id; jika tidak (generik), lolos.
         const combined = [...mapelKhusus, ...mapelTingkat];
         const uniqueMapelRaw = Array.from(
           new Map(combined.map((m) => [m.id, m])).values(),
         );
 
         const uniqueMapel = uniqueMapelRaw.filter((m) => {
-          // Hanya mapel kategori umum yang masuk leger akademik
           if ((m.kategori || "").toLowerCase() !== "umum") return false;
 
           const spesifik = m.spesifik_kelas_id;
           const punyaRestriksi = Array.isArray(spesifik) && spesifik.length > 0;
-          if (!punyaRestriksi) return true; // mapel generik
-          return spesifik.includes(kelasData.id); // mapel khusus harus cocok
+          if (!punyaRestriksi) return true;
+          return spesifik.includes(kelasData.id);
         });
 
         // ========== BUILD GURU MAP ==========
@@ -163,19 +157,16 @@ export default function LegerPage() {
           if (!mapelByName.has(key)) {
             mapelByName.set(key, m);
           } else {
-            // Jika sudah ada, pilih yang memiliki guru (jika yang baru punya guru dan yang lama tidak)
             const existing = mapelByName.get(key);
             const existingGuru = guruMap.get(existing.id);
             const newGuru = guruMap.get(m.id);
             if (!existingGuru && newGuru) {
               mapelByName.set(key, m);
             }
-            // Jika keduanya punya guru, tetap pakai yang pertama (existing)
           }
         });
         const deduplicatedMapel = Array.from(mapelByName.values());
 
-        // Urutkan berdasarkan nama, lalu tempel guru_pengampu
         const sortedMapel = deduplicatedMapel
           .sort((a, b) =>
             (a.nama_mapel || a.nama || "").localeCompare(
@@ -189,7 +180,7 @@ export default function LegerPage() {
 
         setMapelList(sortedMapel);
 
-        // ========== PERHITUNGAN NILAI (tidak berubah) ==========
+        // ========== PERHITUNGAN NILAI ==========
         function getBobot(nama) {
           const found = presentaseData.find(
             (p) =>
@@ -265,7 +256,8 @@ export default function LegerPage() {
               filter: mapelFilter,
               requestKey: null,
             }),
-            pb.collection("lingkup_mater").getFullList({
+            pb.collection("lingkup_materi").getFullList({
+              // ✅ FIX: sebelumnya "lingkup_mater" (tidak ada di schema)
               filter: mapelFilter,
               requestKey: null,
             }),
@@ -463,7 +455,6 @@ export default function LegerPage() {
         if (!argb) return;
         cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb } };
       }
-      // --- FUNGSI DENGAN PARAMETER HORIZONTAL ---
       function styleHeader(cell, argb, horizontal = "center") {
         fillCell(cell, argb);
         cell.font = { bold: true, size: 10 };
@@ -483,7 +474,6 @@ export default function LegerPage() {
         addBorder(cell);
       }
 
-      // Total kolom = 2 + mapel + 3 (Jumlah, Rata, Rank)
       const totalCols = 2 + mapelList.length + 3;
       const colJumlah = 3 + mapelList.length;
       const colRata = colJumlah + 1;
@@ -518,7 +508,6 @@ export default function LegerPage() {
       headerRow.getCell(colRata).value = "RATA RATA";
       headerRow.getCell(colRank).value = "RANK";
 
-      // ---- Header dengan alignment khusus untuk kolom 2 ----
       headerRow.eachCell({ includeEmpty: true }, (cell, colNumber) => {
         const horiz = colNumber === 2 ? "left" : "center";
         styleHeader(cell, fillForColumn(colNumber), horiz);
@@ -545,14 +534,13 @@ export default function LegerPage() {
         row.getCell(colRata).value = rata !== null ? Math.round(rata) : 0;
         row.getCell(colRank).value = rankMap[siswa.id] ?? 0;
 
-        // ---- Data dengan alignment khusus untuk kolom 2 ----
         row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
           const horiz = colNumber === 2 ? "left" : "center";
           styleBody(cell, fillForColumn(colNumber), horiz);
         });
       });
 
-      // Baris ringkasan (hanya mapel)
+      // Baris ringkasan
       function addSummaryRow(label, valueFn) {
         const row = sheet.addRow([]);
         sheet.mergeCells(row.number, 1, row.number, 2);
@@ -567,7 +555,7 @@ export default function LegerPage() {
         });
 
         row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
-          styleBody(cell, CYAN); // tetap center untuk ringkasan
+          styleBody(cell, CYAN);
           if (colNumber === 1) cell.font = { bold: true };
         });
       }
@@ -575,7 +563,7 @@ export default function LegerPage() {
       addSummaryRow("Nilai Tertinggi", (m) => mapelStats[m.id]?.tertinggi);
       addSummaryRow("Nilai Terendah", (m) => mapelStats[m.id]?.terendah);
 
-      // Lebar kolom (sudah diperkecil)
+      // Lebar kolom
       sheet.getColumn(1).width = 6;
       sheet.getColumn(2).width = 28;
       for (let i = 3; i < colJumlah; i++) sheet.getColumn(i).width = 10;
@@ -634,7 +622,6 @@ export default function LegerPage() {
         >
           ← Kembali
         </button>
-        {/* Header Gradient (tanpa tombol export) */}
         <div className="relative overflow-hidden bg-gradient-to-r from-blue-600 via-blue-600 to-blue-700 text-white rounded-3xl p-6 md:p-8 shadow-lg flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div className="absolute right-0 bottom-0 w-80 h-80 bg-white/5 rounded-full translate-x-10 translate-y-20 pointer-events-none" />
           <div className="relative z-10 space-y-1">
