@@ -30,6 +30,12 @@ const DAFTAR_NO_TP = [
   "TP 10",
 ];
 
+// ================================================================
+// FITUR BARU: Kriteria aktif per TP (K1-K4)
+// ================================================================
+const SEMUA_KRITERIA = ["k1", "k2", "k3", "k4"];
+const LS_KEY_KRITERIA_TP = "kriteria_tp_map_v1";
+
 function firstOf(val) {
   return Array.isArray(val) ? val[0] : val;
 }
@@ -95,6 +101,14 @@ function safeSheetName(name, used) {
   }
   used.add(final.toLowerCase());
   return final;
+}
+
+// --- Helper kriteria per TP (module-level, dipakai juga saat export) ---
+function getActiveKForTpFromMap(tpId, map) {
+  const setting = map[tpId];
+  if (!setting) return SEMUA_KRITERIA;
+  const active = SEMUA_KRITERIA.filter((k) => setting[k]);
+  return active.length > 0 ? active : [SEMUA_KRITERIA[0]];
 }
 
 // ================================================================
@@ -180,6 +194,44 @@ export default function PenilaianGuruMapelPage() {
   const [savingFCell, setSavingFCell] = useState(null);
   const [savedFFlash, setSavedFFlash] = useState(null);
 
+  // =========================================================
+  // FITUR BARU: Kriteria aktif per TP
+  // Struktur: { [tpId]: { k1: bool, k2: bool, k3: bool, k4: bool } }
+  // =========================================================
+  const [kriteriaTpMap, setKriteriaTpMap] = useState({});
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(LS_KEY_KRITERIA_TP);
+      if (saved) setKriteriaTpMap(JSON.parse(saved));
+    } catch (e) {
+      console.warn("Gagal load kriteria TP:", e);
+    }
+  }, []);
+
+  function getActiveKForTp(tpId) {
+    return getActiveKForTpFromMap(tpId, kriteriaTpMap);
+  }
+
+  function toggleKriteriaForTp(tpId, k) {
+    const current = kriteriaTpMap[tpId] || {
+      k1: true,
+      k2: true,
+      k3: true,
+      k4: true,
+    };
+    const next = { ...current, [k]: !current[k] };
+    // minimal 1 K aktif per TP
+    if (!SEMUA_KRITERIA.some((key) => next[key])) return;
+    const newMap = { ...kriteriaTpMap, [tpId]: next };
+    setKriteriaTpMap(newMap);
+    try {
+      localStorage.setItem(LS_KEY_KRITERIA_TP, JSON.stringify(newMap));
+    } catch (e) {
+      console.warn("Gagal simpan kriteria TP:", e);
+    }
+  }
+
   // ---- Sumatif ----
   const [lpList, setLpList] = useState([]);
   const [nilaiSumatif, setNilaiSumatif] = useState({});
@@ -224,7 +276,6 @@ export default function PenilaianGuruMapelPage() {
   }, [router]);
 
   // 2. Ambil semua ploting_guru milik guru ini
-  //    NOTE: tidak ada auto-select agar selalu mulai dari step 1.
   useEffect(() => {
     if (!authChecked || unauthorized || !user?.id) return;
     let isMounted = true;
@@ -245,8 +296,6 @@ export default function PenilaianGuruMapelPage() {
         );
         if (!isMounted) return;
         setPlotingList(records);
-        // ❌ AUTO-SELECT DIHAPUS:
-        // if (records.length === 1) setSelectedPlotingId(records[0].id);
       } catch (err) {
         console.error("Error fetching ploting_guru:", err);
         if (isMounted) setError("Gagal memuat daftar mata pelajaran Anda.");
@@ -262,7 +311,6 @@ export default function PenilaianGuruMapelPage() {
   }, [authChecked, unauthorized, user]);
 
   // 3. Bangun daftar kelas dari kelas_id ploting terpilih
-  //    NOTE: tidak ada auto-select agar selalu mulai dari step 2.
   useEffect(() => {
     if (!selectedPloting) {
       setKelasOptions([]);
@@ -309,8 +357,6 @@ export default function PenilaianGuruMapelPage() {
 
         if (!isMounted) return;
         setKelasOptions(options);
-        // ❌ AUTO-SELECT DIHAPUS:
-        // if (options.length === 1) setSelectedKelasId(options[0].kelas.id);
       } catch (err) {
         console.error("Error building kelas options:", err);
         if (isMounted)
@@ -497,35 +543,56 @@ export default function PenilaianGuruMapelPage() {
   }, [selectedUjianId, selectedMapelId, siswaList]);
 
   // ================= NILAI AKHIR =================
+  // PERUBAHAN: Formatif dihitung dari slot maksimal = Σ (jumlah K aktif tiap TP).
+  // Nilai kosong dianggap 0 (tidak mengurangi pembagi).
   const formatifAvgMap = useMemo(() => {
     const result = {};
+    const totalSlotMaksimal = tpList.reduce(
+      (sum, tp) => sum + getActiveKForTp(tp.id).length,
+      0,
+    );
+
     siswaList.forEach((s) => {
       const perTp = nilaiFormatif[s.id] || {};
-      const semuaK = [];
-      Object.values(perTp).forEach((rec) => {
-        ["k1", "k2", "k3", "k4"].forEach((k) => {
+      let totalNilai = 0;
+
+      tpList.forEach((tp) => {
+        const rec = perTp[tp.id];
+        if (!rec) return;
+        getActiveKForTp(tp.id).forEach((k) => {
           const val = rec[k];
           if (typeof val === "number" && !isNaN(val) && val !== -1) {
-            semuaK.push(val);
+            totalNilai += val;
           }
         });
       });
-      result[s.id] = average(semuaK);
+
+      result[s.id] =
+        totalSlotMaksimal > 0 ? totalNilai / totalSlotMaksimal : null;
     });
     return result;
-  }, [nilaiFormatif, siswaList]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nilaiFormatif, siswaList, tpList, kriteriaTpMap]);
 
+  // PERUBAHAN: Sumatif juga dihitung dari total LP (nilai kosong = 0).
   const sumatifAvgMap = useMemo(() => {
     const result = {};
+    const totalLpMaksimal = lpList.length;
+
     siswaList.forEach((s) => {
       const perLp = nilaiSumatif[s.id] || {};
-      const vals = Object.values(perLp)
-        .map((r) => r.nilai)
-        .filter((v) => typeof v === "number" && !isNaN(v) && v !== -1);
-      result[s.id] = average(vals);
+      let totalNilai = 0;
+
+      Object.values(perLp).forEach((r) => {
+        if (typeof r.nilai === "number" && !isNaN(r.nilai) && r.nilai !== -1) {
+          totalNilai += r.nilai;
+        }
+      });
+
+      result[s.id] = totalLpMaksimal > 0 ? totalNilai / totalLpMaksimal : null;
     });
     return result;
-  }, [nilaiSumatif, siswaList]);
+  }, [nilaiSumatif, siswaList, lpList]);
 
   // ---------------- Handlers: Tambah TP ----------------
   async function handleAddTp() {
@@ -588,6 +655,19 @@ export default function PenilaianGuruMapelPage() {
         });
         return next;
       });
+
+      // Bersihkan pengaturan kriteria TP ini dari localStorage
+      if (kriteriaTpMap[tp.id]) {
+        const newMap = { ...kriteriaTpMap };
+        delete newMap[tp.id];
+        setKriteriaTpMap(newMap);
+        try {
+          localStorage.setItem(LS_KEY_KRITERIA_TP, JSON.stringify(newMap));
+        } catch (e) {
+          console.warn(e);
+        }
+      }
+
       setConfirmDialog(null);
     } catch (err) {
       console.error("Gagal hapus TP:", err?.response?.data || err);
@@ -868,6 +948,9 @@ export default function PenilaianGuruMapelPage() {
       setExportProgress("Mengambil data...");
       setError("");
 
+      // Snapshot kriteria TP saat ini (dari state, jaga-jaga jika LS belum sinkron)
+      const kriteriaSnapshot = { ...kriteriaTpMap };
+
       // 1. Ambil semua ploting guru ini
       const plotings = await pb.collection("ploting_guru").getFullList({
         filter: `guru_id = "${user.id}"`,
@@ -938,6 +1021,18 @@ export default function PenilaianGuruMapelPage() {
       const tpById = new Map(tpAll.map((t) => [t.id, t]));
       const lmById = new Map(lmAll.map((l) => [l.id, l]));
       const lmOrder = new Map(lmAll.map((l, i) => [l.id, i]));
+
+      // Map: mapelId -> { noTp -> tpId }  (untuk cek kriteria per TP)
+      const tpIdByMapelNumber = new Map();
+      tpAll.forEach((tp) => {
+        const mapelId = firstOf(tp.mapel_id);
+        if (!mapelIdsArr.includes(mapelId)) return;
+        const noTp = parseInt(String(tp.no_tp || "").replace(/\D/g, ""), 10);
+        if (!noTp) return;
+        if (!tpIdByMapelNumber.has(mapelId))
+          tpIdByMapelNumber.set(mapelId, new Map());
+        tpIdByMapelNumber.get(mapelId).set(noTp, tp.id);
+      });
 
       // 4. Workbook
       const workbook = new ExcelJS.Workbook();
@@ -1159,6 +1254,9 @@ export default function PenilaianGuruMapelPage() {
             titleRow.height = 42;
           }
 
+          // Map: noTp -> tpId untuk mapel ini
+          const tpIdByNo = tpIdByMapelNumber.get(m.id) || new Map();
+
           // Baris per siswa
           if (siswaSorted.length === 0) {
             const row = sheet.addRow([]);
@@ -1185,8 +1283,16 @@ export default function PenilaianGuruMapelPage() {
               ]);
               for (let t = 1; t <= maxTpGlobal; t++) {
                 const ks = perTp[t] || [null, null, null, null];
+                const tpId = tpIdByNo.get(t);
+                const activeK = tpId
+                  ? getActiveKForTpFromMap(tpId, kriteriaSnapshot)
+                  : SEMUA_KRITERIA;
                 for (let k = 0; k < 4; k++) {
-                  row.getCell(FIXED + (t - 1) * 4 + k + 1).value = ks[k];
+                  const kField = SEMUA_KRITERIA[k];
+                  const isActive = activeK.includes(kField);
+                  row.getCell(FIXED + (t - 1) * 4 + k + 1).value = isActive
+                    ? ks[k]
+                    : null;
                 }
               }
               lmNames.forEach((nm, l) => {
@@ -1584,8 +1690,9 @@ export default function PenilaianGuruMapelPage() {
                 <div className="space-y-3">
                   <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                     <p className="text-[11px] text-slate-400">
-                      Setiap TP punya 4 kriteria (K1-K4). Nilai akhir =
-                      rata-rata semua K yang terisi.
+                      Tiap TP bisa punya kriteria berbeda — klik badge{" "}
+                      <span className="font-bold text-slate-600">K1–K4</span> di
+                      header TP. Nilai kosong dianggap <b>0</b>.
                     </p>
                     {!addingTp ? (
                       <button
@@ -1654,25 +1761,56 @@ export default function PenilaianGuruMapelPage() {
                             >
                               Nama Siswa
                             </th>
-                            {tpList.map((tp) => (
-                              <th
-                                key={tp.id}
-                                colSpan={4}
-                                className="text-center px-2 py-2 font-semibold border-l border-slate-200"
-                              >
-                                <div className="flex flex-col items-center justify-center gap-1">
-                                  <span>{tp.no_tp}</span>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDeleteTp(tp)}
-                                    title={`Hapus ${tp.no_tp}`}
-                                    className="text-[9px] font-bold text-red-600 hover:text-white hover:bg-red-600 border border-red-300 hover:border-red-600 rounded px-1.5 py-0.5 transition-colors normal-case tracking-normal"
-                                  >
-                                    Hapus
-                                  </button>
-                                </div>
-                              </th>
-                            ))}
+                            {tpList.map((tp) => {
+                              const activeK = getActiveKForTp(tp.id);
+                              return (
+                                <th
+                                  key={tp.id}
+                                  colSpan={activeK.length}
+                                  className="text-center px-2 py-2 font-semibold border-l border-slate-200"
+                                >
+                                  <div className="flex flex-col items-center justify-center gap-1">
+                                    <span>{tp.no_tp}</span>
+                                    {/* Toggle K per TP */}
+                                    <div className="flex gap-0.5">
+                                      {SEMUA_KRITERIA.map((k) => {
+                                        const isActive = activeK.includes(k);
+                                        return (
+                                          <button
+                                            key={k}
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.preventDefault();
+                                              toggleKriteriaForTp(tp.id, k);
+                                            }}
+                                            title={
+                                              isActive
+                                                ? `${k.toUpperCase()} aktif – klik nonaktifkan`
+                                                : `${k.toUpperCase()} nonaktif – klik aktifkan`
+                                            }
+                                            className={`text-[9px] font-bold px-1.5 py-0.5 rounded transition-colors ${
+                                              isActive
+                                                ? "bg-emerald-600 text-white"
+                                                : "bg-slate-200 text-slate-400 hover:bg-slate-300"
+                                            }`}
+                                          >
+                                            {k.toUpperCase()}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteTp(tp)}
+                                      title={`Hapus ${tp.no_tp}`}
+                                      className="text-[9px] font-bold text-red-600 hover:text-white hover:bg-red-600 border border-red-300 hover:border-red-600 rounded px-1.5 py-0.5 transition-colors normal-case tracking-normal"
+                                    >
+                                      Hapus
+                                    </button>
+                                  </div>
+                                </th>
+                              );
+                            })}
                             <th
                               rowSpan={2}
                               className="px-4 py-2.5 text-center min-w-[100px] bg-blue-50/60 text-blue-600 align-bottom"
@@ -1681,16 +1819,17 @@ export default function PenilaianGuruMapelPage() {
                             </th>
                           </tr>
                           <tr className="bg-slate-50 text-slate-400 text-[9px] uppercase tracking-wider border-b border-slate-100">
-                            {tpList.map((tp) =>
-                              ["k1", "k2", "k3", "k4"].map((k, i) => (
+                            {tpList.map((tp) => {
+                              const activeK = getActiveKForTp(tp.id);
+                              return activeK.map((k, i) => (
                                 <th
                                   key={`${tp.id}-${k}`}
                                   className={`text-center px-1 py-1.5 font-semibold ${i === 0 ? "border-l border-slate-200" : ""}`}
                                 >
                                   {k.toUpperCase()}
                                 </th>
-                              )),
-                            )}
+                              ));
+                            })}
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 bg-white">
@@ -1706,39 +1845,38 @@ export default function PenilaianGuruMapelPage() {
                                 </td>
                                 {tpList.map((tp) => {
                                   const rec = nilaiFormatif[s.id]?.[tp.id];
-                                  return ["k1", "k2", "k3", "k4"].map(
-                                    (kField, i) => {
-                                      const cellKey = `f-${s.id}-${tp.id}-${kField}`;
-                                      return (
-                                        <td
-                                          key={cellKey}
-                                          className={`px-1 py-1.5 text-center ${i === 0 ? "border-l border-slate-100" : ""}`}
-                                        >
-                                          <NilaiInput
-                                            value={rec?.[kField]}
-                                            onChange={(e) =>
-                                              handleFormatifChange(
-                                                s.id,
-                                                tp.id,
-                                                kField,
-                                                e.target.value,
-                                              )
-                                            }
-                                            onBlur={() =>
-                                              handleFormatifBlur(
-                                                s.id,
-                                                tp.id,
-                                                kField,
-                                              )
-                                            }
-                                            saving={savingFCell === cellKey}
-                                            saved={savedFFlash === cellKey}
-                                            width="w-12"
-                                          />
-                                        </td>
-                                      );
-                                    },
-                                  );
+                                  const activeK = getActiveKForTp(tp.id);
+                                  return activeK.map((kField, i) => {
+                                    const cellKey = `f-${s.id}-${tp.id}-${kField}`;
+                                    return (
+                                      <td
+                                        key={cellKey}
+                                        className={`px-1 py-1.5 text-center ${i === 0 ? "border-l border-slate-100" : ""}`}
+                                      >
+                                        <NilaiInput
+                                          value={rec?.[kField]}
+                                          onChange={(e) =>
+                                            handleFormatifChange(
+                                              s.id,
+                                              tp.id,
+                                              kField,
+                                              e.target.value,
+                                            )
+                                          }
+                                          onBlur={() =>
+                                            handleFormatifBlur(
+                                              s.id,
+                                              tp.id,
+                                              kField,
+                                            )
+                                          }
+                                          saving={savingFCell === cellKey}
+                                          saved={savedFFlash === cellKey}
+                                          width="w-12"
+                                        />
+                                      </td>
+                                    );
+                                  });
                                 })}
                                 <td className="px-4 py-2 text-center bg-blue-50/30">
                                   <span
@@ -1762,7 +1900,8 @@ export default function PenilaianGuruMapelPage() {
                 <div className="space-y-3">
                   <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                     <p className="text-[11px] text-slate-400">
-                      Nilai akhir sumatif = rata-rata semua LP yang terisi.
+                      Nilai akhir sumatif = total perolehan ÷ jumlah LP. Nilai
+                      kosong dianggap <b>0</b>.
                     </p>
                     <button
                       type="button"

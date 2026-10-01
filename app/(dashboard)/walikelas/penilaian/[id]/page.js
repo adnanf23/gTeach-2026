@@ -20,6 +20,8 @@ const NAMA_BOBOT = {
 const JENIS_UTS = "ahb";
 const JENIS_UAS = "asas";
 
+const SEMUA_KRITERIA = ["k1", "k2", "k3", "k4"];
+
 // ================================================================
 // UTIL
 // ================================================================
@@ -114,6 +116,62 @@ export default function PenilaianMapelPage() {
   const [addingTp, setAddingTp] = useState(false);
   const [selectedNoTp, setSelectedNoTp] = useState("");
   const [savingTp, setSavingTp] = useState(false);
+
+  // =========================================================
+  // FITUR BARU: KRITERIA AKTIF PER TP
+  // Struktur: { [tpId]: { k1: bool, k2: bool, k3: bool, k4: bool } }
+  // =========================================================
+  const [activeKriteriaMap, setActiveKriteriaMap] = useState({});
+
+  // Load pengaturan dari localStorage per mapel
+  useEffect(() => {
+    if (!mapelId) return;
+    try {
+      const saved = localStorage.getItem(`kriteria_tp_mapel_${mapelId}`);
+      if (saved) {
+        setActiveKriteriaMap(JSON.parse(saved));
+      }
+    } catch (e) {
+      console.warn("Gagal load pengaturan kriteria:", e);
+    }
+  }, [mapelId]);
+
+  // Helper: ambil daftar K yang aktif untuk 1 TP
+  function getActiveKForTp(tpId) {
+    const setting = activeKriteriaMap[tpId];
+    if (!setting) return SEMUA_KRITERIA; // default semua aktif
+    const active = SEMUA_KRITERIA.filter((k) => setting[k]);
+    return active.length > 0 ? active : [SEMUA_KRITERIA[0]];
+  }
+
+  // Helper: cek apakah 1 K aktif untuk 1 TP
+  function isKActive(tpId, k) {
+    return getActiveKForTp(tpId).includes(k);
+  }
+
+  // Toggle 1 K untuk 1 TP
+  function toggleKriteriaForTp(tpId, k) {
+    const current = activeKriteriaMap[tpId] || {
+      k1: true,
+      k2: true,
+      k3: true,
+      k4: true,
+    };
+    const next = { ...current, [k]: !current[k] };
+
+    // Minimal 1 K harus aktif per TP
+    if (!SEMUA_KRITERIA.some((key) => next[key])) return;
+
+    const newMap = { ...activeKriteriaMap, [tpId]: next };
+    setActiveKriteriaMap(newMap);
+
+    if (mapelId) {
+      localStorage.setItem(
+        `kriteria_tp_mapel_${mapelId}`,
+        JSON.stringify(newMap),
+      );
+    }
+  }
 
   // SUMATIF
   const [lpList, setLpList] = useState([]);
@@ -296,35 +354,64 @@ export default function PenilaianMapelPage() {
   const bobotKehadiran = getBobot(NAMA_BOBOT.kehadiran);
 
   // ================= RATA-RATA =================
+  // Formatif: Total perolehan dibagi total slot maksimal.
+  // Total slot = Σ (jumlah K aktif untuk setiap TP).
   const formatifAvgMap = useMemo(() => {
     const result = {};
+
+    const totalSlotMaksimal = tpList.reduce(
+      (sum, tp) => sum + getActiveKForTp(tp.id).length,
+      0,
+    );
+
     siswaList.forEach((s) => {
       const perTp = nilaiFormatif[s.id] || {};
-      const semuaK = [];
-      Object.values(perTp).forEach((rec) => {
-        ["k1", "k2", "k3", "k4"].forEach((k) => {
+      let totalNilai = 0;
+
+      tpList.forEach((tp) => {
+        const rec = perTp[tp.id];
+        if (!rec) return;
+        const activeK = getActiveKForTp(tp.id);
+        activeK.forEach((k) => {
           const val = rec[k];
           if (typeof val === "number" && !isNaN(val) && val !== -1) {
-            semuaK.push(val);
+            totalNilai += val;
           }
         });
       });
-      result[s.id] = average(semuaK);
+
+      if (totalSlotMaksimal > 0) {
+        result[s.id] = totalNilai / totalSlotMaksimal;
+      } else {
+        result[s.id] = null;
+      }
     });
     return result;
-  }, [nilaiFormatif, siswaList]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nilaiFormatif, siswaList, tpList, activeKriteriaMap]);
 
   const sumatifAvgMap = useMemo(() => {
     const result = {};
+    const totalLpMaksimal = lpList.length;
+
     siswaList.forEach((s) => {
       const perLp = nilaiSumatif[s.id] || {};
-      const vals = Object.values(perLp)
-        .map((r) => r.nilai)
-        .filter((v) => typeof v === "number" && !isNaN(v) && v !== -1);
-      result[s.id] = average(vals);
+      let totalNilai = 0;
+
+      Object.values(perLp).forEach((r) => {
+        if (typeof r.nilai === "number" && !isNaN(r.nilai) && r.nilai !== -1) {
+          totalNilai += r.nilai;
+        }
+      });
+
+      if (totalLpMaksimal > 0) {
+        result[s.id] = totalNilai / totalLpMaksimal;
+      } else {
+        result[s.id] = null;
+      }
     });
     return result;
-  }, [nilaiSumatif, siswaList]);
+  }, [nilaiSumatif, siswaList, lpList]);
 
   const utsIds = useMemo(
     () =>
@@ -482,6 +569,20 @@ export default function PenilaianMapelPage() {
         });
         return next;
       });
+
+      // Hapus pengaturan kriteria TP ini dari localStorage
+      if (activeKriteriaMap[tp.id]) {
+        const newMap = { ...activeKriteriaMap };
+        delete newMap[tp.id];
+        setActiveKriteriaMap(newMap);
+        if (mapelId) {
+          localStorage.setItem(
+            `kriteria_tp_mapel_${mapelId}`,
+            JSON.stringify(newMap),
+          );
+        }
+      }
+
       setConfirmDialog(null);
     } catch (error) {
       if (!error?.isAbort) {
@@ -887,12 +988,28 @@ export default function PenilaianMapelPage() {
       });
       setAutoWidth(sheetKelas);
 
-      // 2. SHEET FORMATIF
+      // 2. SHEET FORMATIF (kolom menyesuaikan K aktif per TP)
       const sheetFormatif = workbook.addWorksheet("FORMATIF", {
         properties: { tabColor: { argb: GREEN } },
       });
 
-      const totalCols = 4 + tpList.length * 4 + 1;
+      // Hitung layout kolom: setiap TP bisa punya jumlah K berbeda
+      const tpColLayout = [];
+      let colCursor = 5; // setelah NOMOR(1), NAMA(2), L/P(3), NIS(4)
+      tpList.forEach((tp) => {
+        const activeK = getActiveKForTp(tp.id);
+        tpColLayout.push({
+          tpId: tp.id,
+          tpNo: tp.no_tp,
+          startCol: colCursor,
+          count: activeK.length,
+          activeK,
+        });
+        colCursor += activeK.length;
+      });
+      const colRata = colCursor;
+      const totalCols = colCursor;
+
       addHeading(sheetFormatif, "DAFTAR NILAI FORMATIF", totalCols, 1);
       addHeading(
         sheetFormatif,
@@ -903,37 +1020,29 @@ export default function PenilaianMapelPage() {
       sheetFormatif.addRow([]);
 
       const headerRow1 = sheetFormatif.addRow([]);
-      let colIdx = 1;
-      const colNomor = colIdx;
-      headerRow1.getCell(colIdx).value = "NOMOR";
-      colIdx++;
-      const colNama = colIdx;
-      headerRow1.getCell(colIdx).value = "NAMA";
-      colIdx++;
-      const colLP = colIdx;
-      headerRow1.getCell(colIdx).value = "L/P";
-      colIdx++;
-      const colKelas = colIdx;
-      headerRow1.getCell(colIdx).value = "NIS";
-      colIdx++;
-      tpList.forEach((tp) => {
-        const start = colIdx;
-        const end = colIdx + 3;
-        headerRow1.getCell(start).value = tp.no_tp;
-        sheetFormatif.mergeCells(4, start, 4, end);
-        colIdx += 4;
+      headerRow1.getCell(1).value = "NOMOR";
+      headerRow1.getCell(2).value = "NAMA";
+      headerRow1.getCell(3).value = "L/P";
+      headerRow1.getCell(4).value = "NIS";
+
+      tpColLayout.forEach((layout) => {
+        headerRow1.getCell(layout.startCol).value = layout.tpNo;
+        if (layout.count > 1) {
+          sheetFormatif.mergeCells(
+            4,
+            layout.startCol,
+            4,
+            layout.startCol + layout.count - 1,
+          );
+        }
       });
-      const colRata = colIdx;
-      headerRow1.getCell(colIdx).value = "RATA-RATA NILAI";
+      headerRow1.getCell(colRata).value = "RATA-RATA NILAI";
 
       const headerRow2 = sheetFormatif.addRow([]);
-      colIdx = 5;
-      tpList.forEach(() => {
-        headerRow2.getCell(colIdx).value = "K1";
-        headerRow2.getCell(colIdx + 1).value = "K2";
-        headerRow2.getCell(colIdx + 2).value = "K3";
-        headerRow2.getCell(colIdx + 3).value = "K4";
-        colIdx += 4;
+      tpColLayout.forEach((layout) => {
+        layout.activeK.forEach((k, i) => {
+          headerRow2.getCell(layout.startCol + i).value = k.toUpperCase();
+        });
       });
 
       const horizMapFormatif1 = { 2: "left" };
@@ -941,7 +1050,8 @@ export default function PenilaianMapelPage() {
       styleRow(headerRow2, styleHeader);
       styleResult(headerRow1.getCell(colRata));
 
-      [colNomor, colNama, colLP, colKelas, colRata].forEach((col) => {
+      // Merge baris 4-5 untuk kolom base + kolom rata
+      [1, 2, 3, 4, colRata].forEach((col) => {
         sheetFormatif.mergeCells(4, col, 5, col);
       });
 
@@ -949,47 +1059,42 @@ export default function PenilaianMapelPage() {
       headerRow2.height = 15;
 
       siswaList.forEach((siswa, idx) => {
-        const rowData = [];
-        rowData.push(idx + 1);
-        rowData.push(siswa.nama_siswa);
-        rowData.push(siswa.jenis_kelamin || "-");
-        rowData.push(siswa.nis);
-        tpList.forEach((tp) => {
-          const rec = nilaiFormatif[siswa.id]?.[tp.id] || {};
-          rowData.push(rec.k1 !== -1 ? rec.k1 : null);
-          rowData.push(rec.k2 !== -1 ? rec.k2 : null);
-          rowData.push(rec.k3 !== -1 ? rec.k3 : null);
-          rowData.push(rec.k4 !== -1 ? rec.k4 : null);
+        const rowData = new Array(totalCols).fill(null);
+        rowData[0] = idx + 1;
+        rowData[1] = siswa.nama_siswa;
+        rowData[2] = siswa.jenis_kelamin || "-";
+        rowData[3] = siswa.nis;
+
+        tpColLayout.forEach((layout) => {
+          const rec = nilaiFormatif[siswa.id]?.[layout.tpId] || {};
+          layout.activeK.forEach((k, i) => {
+            const v = rec[k];
+            rowData[layout.startCol - 1 + i] =
+              v !== undefined && v !== -1 ? v : null;
+          });
         });
+
         const avg = formatifAvgMap[siswa.id];
-        rowData.push(avg !== null ? Number(avg.toFixed(2)) : null);
+        rowData[colRata - 1] = avg !== null ? Number(avg.toFixed(2)) : null;
 
         const row = sheetFormatif.addRow(rowData);
         const horizMap = { 2: "left" };
         styleRow(row, styleBody, horizMap);
 
-        let colStart = 5;
-        for (let i = 0; i < tpList.length; i++) {
-          for (let j = 0; j < 4; j++) {
-            styleNilai(row.getCell(colStart + j));
+        // Warnai setiap sel K dengan CYAN
+        tpColLayout.forEach((layout) => {
+          for (let i = 0; i < layout.count; i++) {
+            styleNilai(row.getCell(layout.startCol + i));
           }
-          colStart += 4;
-        }
+        });
         styleResult(row.getCell(colRata));
 
         row.height = 18;
       });
 
       setAutoWidth(sheetFormatif);
-      setFixedWidth(sheetFormatif, 3, 5);
       setFixedWidth(sheetFormatif, 1, 10);
-      let startCol = 5;
-      for (let i = 0; i < tpList.length; i++) {
-        for (let j = 0; j < 4; j++) {
-          setFixedWidth(sheetFormatif, startCol + j, 6);
-        }
-        startCol += 4;
-      }
+      setFixedWidth(sheetFormatif, 3, 5);
 
       // 3. SHEET SUMATIF
       const sheetSumatif = workbook.addWorksheet("SUMATIF", {
@@ -1296,8 +1401,9 @@ export default function PenilaianMapelPage() {
                 Tujuan Pembelajaran (TP)
               </h2>
               <p className="text-xs text-gray-400 mt-1">
-                Setiap TP memiliki 4 kriteria penilaian (K1-K4). Nilai akhir
-                formatif = rata-rata semua K yang terisi.
+                Setiap TP bisa punya kriteria berbeda. Klik badge{" "}
+                <span className="font-bold">K1–K4</span> di header TP untuk
+                mengaktifkan / menonaktifkan kriteria. Nilai kosong dianggap 0.
               </p>
             </div>
             {!addingTp ? (
@@ -1360,25 +1466,56 @@ export default function PenilaianMapelPage() {
                     >
                       Siswa
                     </th>
-                    {tpList.map((tp) => (
-                      <th
-                        key={tp.id}
-                        colSpan={4}
-                        className="text-center px-2 py-2 font-bold border-l border-gray-200 min-w-[80px]"
-                      >
-                        <div className="flex flex-col items-center justify-center gap-1">
-                          <span>{tp.no_tp}</span>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteTp(tp)}
-                            title={`Hapus ${tp.no_tp}`}
-                            className="text-[10px] font-bold text-red-600 hover:text-white hover:bg-red-600 border border-red-300 hover:border-red-600 rounded-md px-2 py-0.5 transition-colors"
-                          >
-                            Hapus
-                          </button>
-                        </div>
-                      </th>
-                    ))}
+                    {tpList.map((tp) => {
+                      const activeK = getActiveKForTp(tp.id);
+                      return (
+                        <th
+                          key={tp.id}
+                          colSpan={activeK.length}
+                          className="text-center px-2 py-2 font-bold border-l border-gray-200 min-w-[80px]"
+                        >
+                          <div className="flex flex-col items-center justify-center gap-1">
+                            <span>{tp.no_tp}</span>
+                            {/* Toggle K per TP */}
+                            <div className="flex gap-0.5">
+                              {SEMUA_KRITERIA.map((k) => {
+                                const isActive = activeK.includes(k);
+                                return (
+                                  <button
+                                    key={k}
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      toggleKriteriaForTp(tp.id, k);
+                                    }}
+                                    title={
+                                      isActive
+                                        ? `${k.toUpperCase()} aktif - klik untuk nonaktifkan`
+                                        : `${k.toUpperCase()} nonaktif - klik untuk aktifkan`
+                                    }
+                                    className={`text-[9px] font-bold px-1.5 py-0.5 rounded transition-colors ${
+                                      isActive
+                                        ? "bg-emerald-600 text-white"
+                                        : "bg-gray-200 text-gray-400 hover:bg-gray-300"
+                                    }`}
+                                  >
+                                    {k.toUpperCase()}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteTp(tp)}
+                              title={`Hapus ${tp.no_tp}`}
+                              className="text-[10px] font-bold text-red-600 hover:text-white hover:bg-red-600 border border-red-300 hover:border-red-600 rounded-md px-2 py-0.5 transition-colors"
+                            >
+                              Hapus
+                            </button>
+                          </div>
+                        </th>
+                      );
+                    })}
                     <th
                       rowSpan={2}
                       className="text-center px-4 py-3 font-bold min-w-[110px] bg-blue-50 text-blue-700 align-bottom whitespace-nowrap"
@@ -1387,18 +1524,19 @@ export default function PenilaianMapelPage() {
                     </th>
                   </tr>
                   <tr className="bg-gray-50 text-gray-400 text-[10px] uppercase tracking-wider">
-                    {tpList.map((tp) =>
-                      ["K1", "K2", "K3", "K4"].map((k, i) => (
+                    {tpList.map((tp) => {
+                      const activeK = getActiveKForTp(tp.id);
+                      return activeK.map((k, i) => (
                         <th
                           key={`${tp.id}-${k}`}
                           className={`text-center px-1 py-1.5 font-semibold min-w-[50px] ${
                             i === 0 ? "border-l border-gray-200" : ""
                           }`}
                         >
-                          {k}
+                          {k.toUpperCase()}
                         </th>
-                      )),
-                    )}
+                      ));
+                    })}
                   </tr>
                 </thead>
                 <tbody>
@@ -1414,7 +1552,8 @@ export default function PenilaianMapelPage() {
                         </td>
                         {tpList.map((tp) => {
                           const rec = nilaiFormatif[siswa.id]?.[tp.id];
-                          return ["k1", "k2", "k3", "k4"].map((kField, i) => {
+                          const activeK = getActiveKForTp(tp.id);
+                          return activeK.map((kField, i) => {
                             const cellKey = `f-${siswa.id}-${tp.id}-${kField}`;
                             return (
                               <td
@@ -1424,7 +1563,7 @@ export default function PenilaianMapelPage() {
                                 }`}
                               >
                                 <NilaiInput
-                                  key={`${siswa.id}-${tp.id}-${kField}`}
+                                  key={`${siswa.id}-${tp.id}-${kField}-${isKActive(tp.id, kField)}`}
                                   value={rec?.[kField]}
                                   status={cellStatus[cellKey]}
                                   onSave={(v) =>
@@ -1468,7 +1607,8 @@ export default function PenilaianMapelPage() {
                   Lingkup Materi (LP)
                 </h2>
                 <p className="text-xs text-gray-400 mt-1">
-                  Nilai akhir sumatif = rata-rata semua LP yang terisi.
+                  Nilai akhir sumatif dihitung dari total perolehan dibagi total
+                  LP. Nilai kosong dianggap 0.
                 </p>
               </div>
               <button
