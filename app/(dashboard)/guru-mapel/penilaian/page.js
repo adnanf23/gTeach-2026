@@ -1772,7 +1772,7 @@ export default function PenilaianGuruMapelPage() {
                                   <div className="flex flex-col items-center justify-center gap-1">
                                     <span>{tp.no_tp}</span>
                                     {/* Toggle K per TP */}
-                                    <div className="flex gap-0.5">
+                                    <div className="flex gap-1">
                                       {SEMUA_KRITERIA.map((k) => {
                                         const isActive = activeK.includes(k);
                                         return (
@@ -1788,10 +1788,10 @@ export default function PenilaianGuruMapelPage() {
                                                 ? `${k.toUpperCase()} aktif – klik nonaktifkan`
                                                 : `${k.toUpperCase()} nonaktif – klik aktifkan`
                                             }
-                                            className={`text-[9px] font-bold px-1.5 py-0.5 rounded transition-colors ${
+                                            className={`text-[11px] font-bold px-2.5 py-1 rounded-md border-2 transition-all ${
                                               isActive
-                                                ? "bg-emerald-600 text-white"
-                                                : "bg-slate-200 text-slate-400 hover:bg-slate-300"
+                                                ? "bg-emerald-600 text-white border-emerald-700 shadow-sm"
+                                                : "bg-white text-slate-400 border-slate-300 hover:border-slate-400 hover:text-slate-600"
                                             }`}
                                           >
                                             {k.toUpperCase()}
