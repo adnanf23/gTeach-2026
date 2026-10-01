@@ -41,6 +41,7 @@ const HARI_PANJANG = [
   "Jumat",
   "Sabtu",
 ];
+const HARI_SINGKAT = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
 
 function pad(n) {
   return String(n).padStart(2, "0");
@@ -111,6 +112,47 @@ function monthRangeISO(date) {
   };
 }
 
+// 7 hari terakhir
+function weekBuckets() {
+  const days = [];
+  const now = new Date();
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+    const key = toISODate(d);
+    const next = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+    days.push({
+      key,
+      label: HARI_SINGKAT[d.getDay()],
+      dateLabel: `${d.getDate()}/${d.getMonth() + 1}`,
+      start: `${key} 00:00:00`,
+      end: `${toISODate(next)} 00:00:00`,
+    });
+  }
+  return days;
+}
+
+// Tanggal 1 s/d akhir bulan berjalan
+function monthBuckets() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  const days = [];
+  for (let i = 1; i <= lastDay; i++) {
+    const d = new Date(year, month, i);
+    const key = toISODate(d);
+    const next = new Date(year, month, i + 1);
+    days.push({
+      key,
+      label: String(i),
+      dateLabel: BULAN[month].slice(0, 3),
+      start: `${key} 00:00:00`,
+      end: `${toISODate(next)} 00:00:00`,
+    });
+  }
+  return days;
+}
+
 // ---------------------------------------------------------------------------
 // Helper nilai (identik Leger)
 // ---------------------------------------------------------------------------
@@ -133,9 +175,7 @@ async function buildLegerSiswaStats({ pb, kelasData, siswaData, absensiData }) {
         filter: `target_tingkat ~ "${String(kelasData.tingkat)}"`,
         requestKey: null,
       }),
-      pb.collection("presentase_penilaian").getFullList({
-        requestKey: null,
-      }),
+      pb.collection("presentase_penilaian").getFullList({ requestKey: null }),
       pb.collection("pengaturan_ujian").getFullList({
         filter: `status_akses = "buka" && (target_kelas_id ~ "${kelasData.id}" || target_tingkat ~ "${String(kelasData.tingkat)}")`,
         requestKey: null,
@@ -414,6 +454,173 @@ function Avatar({ name }) {
 }
 
 // ---------------------------------------------------------------------------
+// Chart: kehadiran kelas Anda vs rata-rata per kelas sekolah
+// Toggle: per minggu (7 hari) / per bulan (1..akhir bulan)
+// ---------------------------------------------------------------------------
+function KehadiranTrendChart({
+  weeklyData,
+  monthlyData,
+  viewMode,
+  onViewChange,
+}) {
+  const data = viewMode === "weekly" ? weeklyData : monthlyData;
+  const isMonthly = viewMode === "monthly";
+
+  if (!data || data.length === 0) return null;
+
+  const maxVal = Math.max(1, ...data.flatMap((d) => [d.hadirSaya, d.hadirAvg]));
+
+  // Ringkasan
+  const n = data.length || 1;
+  const sumSaya = data.reduce((s, d) => s + d.hadirSaya, 0);
+  const sumSekolah = data.reduce((s, d) => s + d.hadirAvg, 0);
+  const avgSaya = sumSaya / n;
+  const avgSekolah = sumSekolah / n;
+  const diff = avgSaya - avgSekolah;
+
+  const barMinWidth = isMonthly ? 26 : 38;
+
+  return (
+    <div>
+      {/* Toggle + Legend */}
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-500">
+          <span className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-sm bg-indigo-500" />
+            Siswa Hadir — Kelas Anda
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-sm bg-slate-300" />
+            Rata-rata Siswa Hadir / Kelas di Sekolah
+          </span>
+        </div>
+        <div className="inline-flex self-start rounded-lg border border-slate-200 bg-white p-0.5">
+          <button
+            type="button"
+            onClick={() => onViewChange("weekly")}
+            className={`rounded-md px-3 py-1 text-xs font-medium transition ${
+              viewMode === "weekly"
+                ? "bg-indigo-500 text-white"
+                : "text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            Per Minggu
+          </button>
+          <button
+            type="button"
+            onClick={() => onViewChange("monthly")}
+            className={`rounded-md px-3 py-1 text-xs font-medium transition ${
+              viewMode === "monthly"
+                ? "bg-indigo-500 text-white"
+                : "text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            Per Bulan
+          </button>
+        </div>
+      </div>
+
+      {/* Ringkasan — grid 2x2 di mobile, 4 kolom di desktop */}
+      <div className="mb-5 grid grid-cols-2 gap-x-3 gap-y-4 rounded-xl border border-slate-100 bg-slate-50/60 p-3 sm:grid-cols-4 sm:gap-3">
+        <div className="min-w-0">
+          <p className="truncate text-[11px] font-medium text-slate-500">
+            Kelas Anda
+          </p>
+          <p className="mt-0.5 text-lg font-bold leading-tight text-indigo-600 sm:text-xl">
+            {avgSaya.toFixed(1)}
+          </p>
+          <p className="text-[10px] text-slate-400">siswa hadir / hari</p>
+        </div>
+        <div className="min-w-0 sm:border-l sm:border-slate-200 sm:pl-3">
+          <p className="truncate text-[11px] font-medium text-slate-500">
+            Rata-rata Sekolah
+          </p>
+          <p className="mt-0.5 text-lg font-bold leading-tight text-slate-700 sm:text-xl">
+            {avgSekolah.toFixed(1)}
+          </p>
+          <p className="text-[10px] text-slate-400">siswa / kelas / hari</p>
+        </div>
+        <div className="min-w-0 border-t border-slate-100 pt-3 sm:border-l sm:border-t-0 sm:border-slate-200 sm:pl-3 sm:pt-0">
+          <p className="truncate text-[11px] font-medium text-slate-500">
+            Selisih
+          </p>
+          <p
+            className={`mt-0.5 text-lg font-bold leading-tight sm:text-xl ${
+              diff >= 0 ? "text-emerald-600" : "text-rose-600"
+            }`}
+          >
+            {diff >= 0 ? "+" : ""}
+            {diff.toFixed(1)}
+          </p>
+          <p className="text-[10px] text-slate-400">
+            {diff >= 0 ? "di atas rata-rata" : "di bawah rata-rata"}
+          </p>
+        </div>
+        <div className="min-w-0 border-t border-slate-100 pt-3 sm:border-l sm:border-t-0 sm:border-slate-200 sm:pl-3 sm:pt-0">
+          <p className="truncate text-[11px] font-medium text-slate-500">
+            Total Kehadiran
+          </p>
+          <p className="mt-0.5 text-lg font-bold leading-tight text-slate-700 sm:text-xl">
+            {sumSaya}
+          </p>
+          <p className="text-[10px] text-slate-400">
+            {isMonthly ? "bulan ini" : "7 hari terakhir"}
+          </p>
+        </div>
+      </div>
+
+      {/* Chart — selalu bisa discroll horizontal */}
+      <div className="overflow-x-auto pb-2">
+        <div
+          className="flex items-end gap-1.5 sm:gap-3"
+          style={{ minWidth: `${data.length * barMinWidth}px` }}
+        >
+          {data.map((d) => (
+            <div
+              key={d.key}
+              className="flex flex-1 flex-col items-center gap-2"
+            >
+              <div className="flex h-40 w-full items-end justify-center gap-0.5">
+                <div
+                  className="w-1/2 max-w-[14px] rounded-t-md bg-indigo-500 transition-all"
+                  style={{
+                    height: `${Math.max(
+                      (d.hadirSaya / maxVal) * 100,
+                      d.hadirSaya > 0 ? 4 : 0,
+                    )}%`,
+                  }}
+                  title={`Kelas Anda (${d.label}): ${d.hadirSaya} siswa hadir`}
+                />
+                <div
+                  className="w-1/2 max-w-[14px] rounded-t-md bg-slate-300 transition-all"
+                  style={{
+                    height: `${Math.max(
+                      (d.hadirAvg / maxVal) * 100,
+                      d.hadirAvg > 0 ? 4 : 0,
+                    )}%`,
+                  }}
+                  title={`Rata-rata sekolah (${d.label}): ${d.hadirAvg.toFixed(
+                    1,
+                  )} siswa/kelas`}
+                />
+              </div>
+              <div className="text-center leading-tight">
+                <p className="text-[10px] font-medium text-slate-500">
+                  {d.label}
+                </p>
+                {!isMonthly && (
+                  <p className="text-[9px] text-slate-300">{d.dateLabel}</p>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Halaman utama
 // ---------------------------------------------------------------------------
 export default function OverviewWaliKelasPage() {
@@ -435,7 +642,6 @@ export default function OverviewWaliKelasPage() {
   const [absensiHariIni, setAbsensiHariIni] = useState([]);
   const [agendaHariIni, setAgendaHariIni] = useState([]);
 
-  // ✅ Periode: dari Mulai tahun ajaran sampai hari ini
   const [periodeMulai, setPeriodeMulai] = useState(null);
   const [periodeLabel, setPeriodeLabel] = useState("");
   const [incompleteDaysPeriode, setIncompleteDaysPeriode] = useState([]);
@@ -444,6 +650,10 @@ export default function OverviewWaliKelasPage() {
   const [rankingSiswa, setRankingSiswa] = useState([]);
   const [rankingKelas, setRankingKelas] = useState([]);
   const [posisiKelasSaya, setPosisiKelasSaya] = useState(null);
+
+  const [weeklyTrend, setWeeklyTrend] = useState([]);
+  const [monthlyTrend, setMonthlyTrend] = useState([]);
+  const [trendView, setTrendView] = useState("weekly");
 
   const [nilaiTertinggi, setNilaiTertinggi] = useState(null);
   const [nilaiTerendah, setNilaiTerendah] = useState(null);
@@ -522,23 +732,19 @@ export default function OverviewWaliKelasPage() {
         const { start: todayStart, end: todayEnd } = dayRangeISO(today);
         const { start: monthStart, end: monthEnd } = monthRangeISO(today);
 
-        // Absensi hari ini
         const absensiToday = await pb.collection("absensi").getFullList({
           filter: `kelas_id="${kelasSaya.id}" && tanggal>="${todayStart}" && tanggal<="${todayEnd}"`,
           requestKey: null,
         });
         if (isMounted) setAbsensiHariIni(absensiToday);
 
-        // Agenda hari ini
         const agendaToday = await pb.collection("agenda_mengajar").getFullList({
           filter: `kelas_id="${kelasSaya.id}" && date>="${todayStart}" && date<="${todayEnd}"`,
           requestKey: null,
         });
         if (isMounted) setAgendaHariIni(agendaToday);
 
-        // =========================================================
-        // Tentukan periode: dari tahun_ajaran.Mulai sampai hari ini
-        // =========================================================
+        // Periode dari tahun ajaran
         const todayStr = toISODate(today);
         let periodeMulaiStr = toISODate(
           new Date(today.getFullYear(), today.getMonth(), 1),
@@ -575,21 +781,16 @@ export default function OverviewWaliKelasPage() {
           setPeriodeLabel(label);
         }
 
-        // Absensi bulan ini (untuk ranking)
         const absensiBulanIni = await pb.collection("absensi").getFullList({
           filter: `kelas_id="${kelasSaya.id}" && tanggal>="${monthStart}" && tanggal<="${monthEnd}"`,
           requestKey: null,
         });
 
-        // Absensi seluruh periode (untuk bubble)
         const absensiPeriode = await pb.collection("absensi").getFullList({
           filter: `kelas_id="${kelasSaya.id}" && tanggal>="${periodeMulaiStr} 00:00:00" && tanggal<="${todayStr} 23:59:59"`,
           requestKey: null,
         });
 
-        // =========================================================
-        // Hari kerja efektif bulan ini (untuk ranking)
-        // =========================================================
         const monthStartStr = toISODate(
           new Date(today.getFullYear(), today.getMonth(), 1),
         );
@@ -599,9 +800,7 @@ export default function OverviewWaliKelasPage() {
           hariLiburList,
         );
 
-        // =========================================================
-        // ✨ Bubble: hari kerja yang BELUM LENGKAP dari periode mulai
-        // =========================================================
+        // Hitung hari yang belum lengkap
         const absensiPeriodeByDate = {};
         for (const a of absensiPeriode) {
           const key = toISODate(new Date(a.tanggal));
@@ -630,9 +829,7 @@ export default function OverviewWaliKelasPage() {
           setTotalHariKerjaPeriode(totalKerja);
         }
 
-        // =========================================================
-        // Ranking siswa (bulan ini)
-        // =========================================================
+        // Ranking siswa
         const rekapPerSiswa = {};
         siswaKelasSaya.forEach((s) => {
           rekapPerSiswa[s.id] = { siswa: s, hadir: 0, total: 0 };
@@ -654,9 +851,7 @@ export default function OverviewWaliKelasPage() {
           .sort((a, b) => b.persen - a.persen || b.hadir - a.hadir);
         if (isMounted) setRankingSiswa(rankingSiswaHitung);
 
-        // =========================================================
         // Ranking kelas
-        // =========================================================
         const semuaKelas = await pb.collection("kelas").getFullList({
           requestKey: null,
         });
@@ -708,8 +903,68 @@ export default function OverviewWaliKelasPage() {
         }
 
         // =========================================================
-        // Rata-rata NILAI AKHIR per SISWA (logika sama Leger)
+        // Trend: siswa hadir kelas Anda vs rata-rata per kelas sekolah
+        // (dipakai untuk view mingguan & bulanan)
         // =========================================================
+        const weekly = weekBuckets();
+        const monthly = monthBuckets();
+
+        // Range gabungan
+        const rangeStart =
+          weekly[0].start < monthly[0].start
+            ? weekly[0].start
+            : monthly[0].start;
+        const rangeEnd =
+          weekly[weekly.length - 1].end > monthly[monthly.length - 1].end
+            ? weekly[weekly.length - 1].end
+            : monthly[monthly.length - 1].end;
+
+        const absensiRange = await pb.collection("absensi").getFullList({
+          filter: `tanggal>="${rangeStart}" && tanggal<"${rangeEnd}"`,
+          requestKey: null,
+        });
+
+        // Jumlah kelas yang punya siswa (untuk rata-rata per kelas)
+        const jumlahKelasAktif =
+          Object.values(jumlahSiswaPerKelas).filter((v) => v > 0).length || 1;
+
+        // Bucket: hadir per (tanggal, kelas)
+        const hadirPerTanggalKelas = {};
+        absensiRange.forEach((a) => {
+          if (a.status !== "hadir") return;
+          const key = (a.tanggal || "").slice(0, 10);
+          const kid = Array.isArray(a.kelas_id) ? a.kelas_id[0] : a.kelas_id;
+          if (!key || !kid) return;
+          if (!hadirPerTanggalKelas[key]) hadirPerTanggalKelas[key] = {};
+          hadirPerTanggalKelas[key][kid] =
+            (hadirPerTanggalKelas[key][kid] || 0) + 1;
+        });
+
+        function buildTrend(buckets) {
+          return buckets.map((b) => {
+            const perKelas = hadirPerTanggalKelas[b.key] || {};
+            const hadirSaya = perKelas[kelasSaya.id] || 0;
+            const totalHadirSekolah = Object.values(perKelas).reduce(
+              (s, v) => s + v,
+              0,
+            );
+            const hadirAvg = totalHadirSekolah / jumlahKelasAktif;
+            return {
+              key: b.key,
+              label: b.label,
+              dateLabel: b.dateLabel,
+              hadirSaya,
+              hadirAvg,
+            };
+          });
+        }
+
+        if (isMounted) {
+          setWeeklyTrend(buildTrend(weekly));
+          setMonthlyTrend(buildTrend(monthly));
+        }
+
+        // Rata-rata NILAI AKHIR
         try {
           const absensiAllKelas = await pb.collection("absensi").getFullList({
             filter: `kelas_id ~ "${kelasSaya.id}"`,
@@ -854,7 +1109,7 @@ export default function OverviewWaliKelasPage() {
       </div>
 
       <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-6">
-        {/* Peringatan: hari kerja belum lengkap (periode tahun ajaran) */}
+        {/* Peringatan */}
         {totalSiswa > 0 && incompleteDaysPeriode.length > 0 && (
           <div className="flex items-start gap-3 rounded-2xl border border-rose-200 bg-rose-50 p-4">
             <span className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-rose-500 text-xs font-bold text-white">
@@ -875,27 +1130,6 @@ export default function OverviewWaliKelasPage() {
           </div>
         )}
 
-        {/* Kalau semua sudah lengkap, tampil notif hijau */}
-        {totalSiswa > 0 &&
-          totalHariKerjaPeriode > 0 &&
-          incompleteDaysPeriode.length === 0 && (
-            <div className="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
-              <span className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-emerald-500 text-xs font-bold text-white">
-                ✓
-              </span>
-              <div className="flex-1">
-                <p className="text-sm font-semibold text-emerald-800">
-                  Semua absensi sudah lengkap 🎉
-                </p>
-                <p className="mt-0.5 text-xs text-emerald-700">
-                  Periode {periodeLabel} · {formatShort(periodeMulai)} –{" "}
-                  {formatShort(toISODate(today))}.
-                </p>
-              </div>
-            </div>
-          )}
-
-        {/* Notif hijau kalau semua lengkap */}
         {totalSiswa > 0 &&
           totalHariKerjaPeriode > 0 &&
           incompleteDaysPeriode.length === 0 && (
@@ -916,7 +1150,7 @@ export default function OverviewWaliKelasPage() {
             </div>
           )}
 
-        {/* Ringkasan */}
+        {/* BARIS 1 — Ringkasan */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Card>
             <p className="text-xs font-medium text-slate-400">Total Siswa</p>
@@ -988,6 +1222,24 @@ export default function OverviewWaliKelasPage() {
           </Card>
         </div>
 
+        {/* BARIS 2 — Chart kehadiran */}
+        <Card
+          title="Statistik Kehadiran Kelas"
+          subtitle="Jumlah siswa hadir kelas Anda dibandingkan rata-rata per kelas di sekolah"
+        >
+          {weeklyTrend.length === 0 ? (
+            <p className="text-sm text-slate-400">Belum ada data.</p>
+          ) : (
+            <KehadiranTrendChart
+              weeklyData={weeklyTrend}
+              monthlyData={monthlyTrend}
+              viewMode={trendView}
+              onViewChange={setTrendView}
+            />
+          )}
+        </Card>
+
+        {/* BARIS 3 — Siswa paling rajin & perlu perhatian */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <Card
             title="Siswa Paling Rajin"
@@ -1053,107 +1305,61 @@ export default function OverviewWaliKelasPage() {
           </Card>
         </div>
 
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <Card
-            title="Peringkat Kehadiran Antar Kelas"
-            subtitle="Rata-rata kehadiran bulan ini vs seluruh kelas"
-          >
-            {rankingKelas.length === 0 ? (
-              <p className="text-sm text-slate-400">Belum ada data absensi.</p>
-            ) : (
-              (() => {
-                const dataKelasSaya = rankingKelas.find(
-                  (r) => r.kelas.id === kelas?.id,
-                );
-                const persenKelasSaya = dataKelasSaya?.persen ?? 0;
-                return (
-                  <div className="flex items-center gap-6">
-                    <div>
-                      <p className="text-4xl font-bold text-indigo-600">
-                        #{posisiKelasSaya ?? "-"}
-                      </p>
-                      <p className="text-xs text-slate-400">
-                        dari {rankingKelas.length} kelas
-                      </p>
-                    </div>
-                    <div className="h-10 w-px bg-slate-200" />
-                    <div className="flex-1">
-                      <p className="text-2xl font-bold text-slate-800">
-                        {persenKelasSaya}%
-                      </p>
-                      <p className="text-xs text-slate-400">
-                        rata-rata kehadiran kelas
-                      </p>
-                      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
-                        <div
-                          className="h-full rounded-full bg-indigo-500"
-                          style={{ width: `${persenKelasSaya}%` }}
-                        />
-                      </div>
-                    </div>
+        {/* BARIS 4 — Rata-rata nilai akhir siswa */}
+        <Card
+          title="Rata-rata Nilai Akhir Siswa"
+          subtitle="Berdasarkan rata-rata nilai akhir rapor seluruh mapel — sama dengan halaman Leger"
+        >
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+              <p className="text-[11px] font-medium text-emerald-600">
+                Siswa Rata-rata Tertinggi
+              </p>
+              {nilaiTertinggi ? (
+                <div className="mt-1.5 flex items-center gap-2">
+                  <Avatar name={nilaiTertinggi.siswa?.nama_siswa} />
+                  <div className="min-w-0 flex-1">
+                    <p className="break-words text-xs font-semibold leading-tight text-slate-800">
+                      {nilaiTertinggi.siswa?.nama_siswa || "-"}
+                    </p>
+                    <p className="text-[10px] text-slate-500">
+                      Dari {nilaiTertinggi.jumlahMapel} mapel
+                    </p>
                   </div>
-                );
-              })()
-            )}
-          </Card>
-
-          <Card
-            title="Rata-rata Nilai Akhir Siswa"
-            subtitle="Berdasarkan rata-rata nilai akhir rapor seluruh mapel — sama dengan halaman Leger"
-          >
-            <div className="space-y-4">
-              {/* Tertinggi */}
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
-                <p className="text-[11px] font-medium text-emerald-600">
-                  Siswa Rata-rata Tertinggi
-                </p>
-                {nilaiTertinggi ? (
-                  <div className="mt-1.5 flex items-center gap-2">
-                    <Avatar name={nilaiTertinggi.siswa?.nama_siswa} />
-                    <div className="min-w-0 flex-1">
-                      <p className="break-words text-xs font-semibold leading-tight text-slate-800">
-                        {nilaiTertinggi.siswa?.nama_siswa || "-"}
-                      </p>
-                      <p className="text-[10px] text-slate-500">
-                        Dari {nilaiTertinggi.jumlahMapel} mapel
-                      </p>
-                    </div>
-                    <span className="shrink-0 text-lg font-bold text-emerald-600">
-                      {nilaiTertinggi.rataRata.toFixed(1)}
-                    </span>
-                  </div>
-                ) : (
-                  <p className="mt-1 text-xs text-slate-400">Belum ada data</p>
-                )}
-              </div>
-
-              {/* Terendah */}
-              <div className="rounded-xl border border-rose-200 bg-rose-50 p-3">
-                <p className="text-[11px] font-medium text-rose-600">
-                  Siswa Rata-rata Terendah
-                </p>
-                {nilaiTerendah ? (
-                  <div className="mt-1.5 flex items-center gap-2">
-                    <Avatar name={nilaiTerendah.siswa?.nama_siswa} />
-                    <div className="min-w-0 flex-1">
-                      <p className="break-words text-xs font-semibold leading-tight text-slate-800">
-                        {nilaiTerendah.siswa?.nama_siswa || "-"}
-                      </p>
-                      <p className="text-[10px] text-slate-500">
-                        Dari {nilaiTerendah.jumlahMapel} mapel
-                      </p>
-                    </div>
-                    <span className="shrink-0 text-lg font-bold text-rose-600">
-                      {nilaiTerendah.rataRata.toFixed(1)}
-                    </span>
-                  </div>
-                ) : (
-                  <p className="mt-1 text-xs text-slate-400">Belum ada data</p>
-                )}
-              </div>
+                  <span className="shrink-0 text-lg font-bold text-emerald-600">
+                    {nilaiTertinggi.rataRata.toFixed(1)}
+                  </span>
+                </div>
+              ) : (
+                <p className="mt-1 text-xs text-slate-400">Belum ada data</p>
+              )}
             </div>
-          </Card>
-        </div>
+
+            <div className="rounded-xl border border-rose-200 bg-rose-50 p-3">
+              <p className="text-[11px] font-medium text-rose-600">
+                Siswa Rata-rata Terendah
+              </p>
+              {nilaiTerendah ? (
+                <div className="mt-1.5 flex items-center gap-2">
+                  <Avatar name={nilaiTerendah.siswa?.nama_siswa} />
+                  <div className="min-w-0 flex-1">
+                    <p className="break-words text-xs font-semibold leading-tight text-slate-800">
+                      {nilaiTerendah.siswa?.nama_siswa || "-"}
+                    </p>
+                    <p className="text-[10px] text-slate-500">
+                      Dari {nilaiTerendah.jumlahMapel} mapel
+                    </p>
+                  </div>
+                  <span className="shrink-0 text-lg font-bold text-rose-600">
+                    {nilaiTerendah.rataRata.toFixed(1)}
+                  </span>
+                </div>
+              ) : (
+                <p className="mt-1 text-xs text-slate-400">Belum ada data</p>
+              )}
+            </div>
+          </div>
+        </Card>
       </div>
     </div>
   );

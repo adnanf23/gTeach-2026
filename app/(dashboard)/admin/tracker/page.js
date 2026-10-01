@@ -4,6 +4,62 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { pb, isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
 
 // ------------------------------------------------------------------
+// Helper tanggal & sistem absensi baru (hari libur, weekend, hari efektif)
+// ------------------------------------------------------------------
+const HARI_KEY = [
+  "minggu",
+  "senin",
+  "selasa",
+  "rabu",
+  "kamis",
+  "jumat",
+  "sabtu",
+];
+
+function toISODate(d) {
+  const x = new Date(d);
+  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
+}
+function parseISODate(str) {
+  if (!str) return null;
+  const [y, m, d] = str.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+function isWeekend(date) {
+  const d = date.getDay();
+  return d === 0 || d === 6;
+}
+function isHoliday(date, hariLiburList) {
+  if (!hariLiburList || hariLiburList.length === 0) return false;
+  const dateStr = toISODate(date);
+  const dayKey = HARI_KEY[date.getDay()];
+  for (const h of hariLiburList) {
+    if (h.tanggal) {
+      const liburDateStr = toISODate(new Date(h.tanggal));
+      if (liburDateStr === dateStr) return true;
+    }
+    if (h.hari && h.hari === dayKey) return true;
+  }
+  return false;
+}
+function countEffectiveDays(startStr, endStr, hariLiburList) {
+  if (!startStr || !endStr) return 0;
+  const start = parseISODate(startStr);
+  const end = parseISODate(endStr);
+  if (!start || !end || end < start) return 0;
+  let count = 0;
+  const cur = new Date(start);
+  while (cur <= end) {
+    if (!isWeekend(cur) && !isHoliday(cur, hariLiburList)) count++;
+    cur.setDate(cur.getDate() + 1);
+  }
+  return count;
+}
+function isWorkday(date, hariLiburList) {
+  return !isWeekend(date) && !isHoliday(date, hariLiburList);
+}
+
+// ------------------------------------------------------------------
 // Helper-helper kecil
 // ------------------------------------------------------------------
 const STATUS_CONFIG = {
@@ -601,6 +657,7 @@ export default function AgendaAbsensiDashboardPage() {
 
   const [kelasList, setKelasList] = useState([]);
   const [siswaList, setSiswaList] = useState([]);
+  const [hariLiburList, setHariLiburList] = useState([]);
   const [loadingBase, setLoadingBase] = useState(true);
   const [errorBase, setErrorBase] = useState("");
 
@@ -617,18 +674,24 @@ export default function AgendaAbsensiDashboardPage() {
     setLoadingBase(true);
     setErrorBase("");
     try {
-      const [kelas, siswa] = await Promise.all([
+      const [kelas, siswa, hariLibur] = await Promise.all([
         pb.collection("kelas").getFullList({
           sort: "tingkat,nama_kelas",
           expand: "walikelas_id,pendamping_id",
           requestKey: null,
         }),
+        pb.collection("siswa").getFullList({
+          sort: "nama_siswa",
+          requestKey: null,
+        }),
         pb
-          .collection("siswa")
-          .getFullList({ sort: "nama_siswa", requestKey: null }),
+          .collection("hari_libur")
+          .getFullList({ requestKey: null })
+          .catch(() => []),
       ]);
       setKelasList(kelas);
       setSiswaList(siswa);
+      setHariLiburList(hariLibur);
     } catch (err) {
       console.error(err);
       setErrorBase(
@@ -659,7 +722,7 @@ export default function AgendaAbsensiDashboardPage() {
   return (
     <div className="min-h-screen text-neutral-900">
       <div className="mx-auto max-w-7xl px-3 sm:px-4 md:px-6 lg:px-8 py-4 sm:py-6">
-        {/* Top bar: brand + tab pills + date + export + profile */}
+        {/* Top bar */}
         <div className="mb-6 md:mb-8 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white px-3 sm:px-5 py-3 shadow-sm">
           <div className="flex items-center gap-2 w-full sm:w-auto relative">
             <button
@@ -802,6 +865,7 @@ export default function AgendaAbsensiDashboardPage() {
             setSelectedDate={setSelectedDate}
             kelasList={kelasList}
             siswaPerKelas={siswaPerKelas}
+            hariLiburList={hariLiburList}
           />
         ) : (
           <AbsensiTabWrapper
@@ -810,6 +874,7 @@ export default function AgendaAbsensiDashboardPage() {
             kelasList={kelasList}
             siswaPerKelas={siswaPerKelas}
             totalSiswa={totalSiswa}
+            hariLiburList={hariLiburList}
           />
         )}
 
@@ -888,6 +953,12 @@ function StatCard({ label, value, sub, variant }) {
       sub: "text-neutral-400",
       accent: "bg-neutral-50/50",
     },
+    neutral: {
+      bg: "bg-neutral-100",
+      text: "text-neutral-600",
+      sub: "text-neutral-400",
+      accent: "bg-white/50",
+    },
   };
   const v = variants[variant] || variants.light;
   return (
@@ -923,17 +994,37 @@ function StatusListCard({
   emptyText,
   variant,
 }) {
-  const bgColor = variant === "blue" ? "bg-blue-50" : "bg-rose-50";
-  const textColor = variant === "blue" ? "text-blue-600" : "text-rose-600";
+  const bgColor =
+    variant === "blue"
+      ? "bg-blue-50"
+      : variant === "neutral"
+        ? "bg-neutral-50"
+        : "bg-rose-50";
+  const textColor =
+    variant === "blue"
+      ? "text-blue-600"
+      : variant === "neutral"
+        ? "text-neutral-600"
+        : "text-rose-600";
   const hoverColor =
-    variant === "blue" ? "hover:bg-blue-50" : "hover:bg-rose-50";
+    variant === "blue"
+      ? "hover:bg-blue-50"
+      : variant === "neutral"
+        ? "hover:bg-neutral-50"
+        : "hover:bg-rose-50";
 
   return (
     <div className="rounded-xl sm:rounded-2xl bg-white p-4 sm:p-5 shadow-sm">
       <div className="mb-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span
-            className={`h-2 w-2 rounded-full ${variant === "blue" ? "bg-blue-500" : "bg-rose-500"}`}
+            className={`h-2 w-2 rounded-full ${
+              variant === "blue"
+                ? "bg-blue-500"
+                : variant === "neutral"
+                  ? "bg-neutral-400"
+                  : "bg-rose-500"
+            }`}
           />
           <h3 className="text-xs sm:text-sm font-semibold text-neutral-800">
             {title}
@@ -1049,9 +1140,6 @@ function RankingCard({ title, subtitle, data, variant, valueLabel }) {
   );
 }
 
-// ------------------------------------------------------------------
-// Modal & Field primitives
-// ------------------------------------------------------------------
 function Modal({ children, onClose, narrow }) {
   useEffect(() => {
     const onKey = (e) => e.key === "Escape" && onClose();
@@ -1089,7 +1177,7 @@ function Field({ label, children }) {
 // Export modal
 // ------------------------------------------------------------------
 function ExportModal({
-  type, // "absensi" | "agenda"
+  type,
   kelasList,
   siswaPerKelas,
   defaultKelasId = "semua",
@@ -1232,7 +1320,7 @@ function ExportModal({
 }
 
 // ------------------------------------------------------------------
-// TOOLBAR (tanpa tombol Export)
+// Toolbar
 // ------------------------------------------------------------------
 function Toolbar({
   title,
@@ -1247,12 +1335,12 @@ function Toolbar({
   filterKelas,
   setFilterKelas,
   kelasList,
+  extraLabel,
 }) {
   const [isKelasOpen, setIsKelasOpen] = useState(false);
 
   return (
     <div className="space-y-3">
-      {/* Baris 1: Judul + Tanggal + Search */}
       <div className="flex flex-col sm:flex-row gap-3 rounded-xl sm:rounded-2xl bg-white p-3 sm:p-4 shadow-sm">
         <div className="flex flex-wrap items-center gap-2 sm:gap-3 w-full sm:w-auto">
           <h2 className="text-xs sm:text-sm font-semibold text-neutral-800">
@@ -1261,6 +1349,11 @@ function Toolbar({
           <p className="text-[10px] sm:text-xs text-neutral-400 hidden sm:inline">
             {formatTanggalID(selectedDate)}
           </p>
+          {extraLabel && (
+            <span className="text-[10px] sm:text-xs text-neutral-500">
+              {extraLabel}
+            </span>
+          )}
         </div>
 
         <div className="flex flex-1 gap-2">
@@ -1292,7 +1385,6 @@ function Toolbar({
         </div>
       </div>
 
-      {/* Baris 2: Filter Status + Filter Kelas */}
       <div className="flex flex-wrap items-center gap-2 rounded-xl bg-white p-3 sm:p-4 shadow-sm">
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] sm:text-xs font-medium text-neutral-500 mr-1 hidden sm:inline">
@@ -1411,6 +1503,7 @@ function AgendaTab({
   setSelectedDate,
   kelasList,
   siswaPerKelas,
+  hariLiburList,
 }) {
   const [agendaRange, setAgendaRange] = useState([]);
   const [agendaTanggal, setAgendaTanggal] = useState([]);
@@ -1424,6 +1517,18 @@ function AgendaTab({
   const [filterKelas, setFilterKelas] = useState("semua");
   const [filterStatus, setFilterStatus] = useState("semua");
   const [searchKelas, setSearchKelas] = useState("");
+
+  const selectedDateObj = useMemo(
+    () => parseISODate(selectedDate),
+    [selectedDate],
+  );
+  const selectedIsWeekend = selectedDateObj
+    ? isWeekend(selectedDateObj)
+    : false;
+  const selectedIsHoliday = selectedDateObj
+    ? isHoliday(selectedDateObj, hariLiburList)
+    : false;
+  const selectedIsWorkday = !selectedIsWeekend && !selectedIsHoliday;
 
   const loadPlotingGuru = useCallback(async () => {
     try {
@@ -1577,12 +1682,16 @@ function AgendaTab({
     [agendaPerKelas],
   );
   const kelasSudah = useMemo(
-    () => kelasList.filter((k) => kelasSudahIds.has(k.id)),
-    [kelasList, kelasSudahIds],
+    () =>
+      selectedIsWorkday ? kelasList.filter((k) => kelasSudahIds.has(k.id)) : [],
+    [kelasList, kelasSudahIds, selectedIsWorkday],
   );
   const kelasBelum = useMemo(
-    () => kelasList.filter((k) => !kelasSudahIds.has(k.id)),
-    [kelasList, kelasSudahIds],
+    () =>
+      selectedIsWorkday
+        ? kelasList.filter((k) => !kelasSudahIds.has(k.id))
+        : [],
+    [kelasList, kelasSudahIds, selectedIsWorkday],
   );
 
   const mapelSudah = useMemo(() => {
@@ -1651,9 +1760,10 @@ function AgendaTab({
   }, [agendaRange, kelasList]);
 
   const totalEntriHariIni = agendaTanggal.length;
-  const persenSudah = kelasList.length
-    ? Math.round((kelasSudah.length / kelasList.length) * 100)
-    : 0;
+  const persenSudah =
+    kelasList.length && selectedIsWorkday
+      ? Math.round((kelasSudah.length / kelasList.length) * 100)
+      : 0;
 
   const filteredKelas = useMemo(() => {
     let list =
@@ -1704,12 +1814,69 @@ function AgendaTab({
 
   const statusCounts = {
     semua: kelasList.length,
-    sudah: kelasSudah.length,
-    belum: kelasBelum.length,
+    sudah: selectedIsWorkday ? kelasSudah.length : 0,
+    belum: selectedIsWorkday ? kelasBelum.length : 0,
   };
+
+  // =========================================================
+  // BUBBLE MONITORING: kelas yang BELUM isi agenda (per kelas)
+  // =========================================================
+  const kelasBelumNama = kelasBelum.map((k) => k.nama_kelas);
 
   return (
     <div className="space-y-4 sm:space-y-6">
+      {/* Bubble monitoring: belum isi agenda */}
+      {selectedIsWorkday && kelasBelum.length > 0 && (
+        <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+          <span className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-amber-500 text-xs font-bold text-white">
+            !
+          </span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-amber-800">
+              {kelasBelum.length} kelas belum mengisi agenda pada{" "}
+              {formatTanggalID(selectedDate)}
+            </p>
+            <p className="mt-1 text-xs text-amber-700 break-words">
+              {kelasBelumNama.slice(0, 20).join(", ")}
+              {kelasBelumNama.length > 20 &&
+                ` +${kelasBelumNama.length - 20} kelas lain`}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Kalau bukan hari kerja */}
+      {!selectedIsWorkday && (
+        <div className="flex items-start gap-3 rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
+          <span className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-neutral-400 text-xs font-bold text-white">
+            i
+          </span>
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-neutral-700">
+              {selectedIsWeekend ? "Akhir pekan" : "Hari libur"}
+            </p>
+            <p className="mt-0.5 text-xs text-neutral-600">
+              Tanggal {formatTanggalID(selectedDate)} bukan hari kerja efektif.
+              Agenda mengajar tidak dihitung sebagai kewajiban.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Semua lengkap */}
+      {selectedIsWorkday && kelasBelum.length === 0 && kelasList.length > 0 && (
+        <div className="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+          <span className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-emerald-500 text-xs font-bold text-white">
+            ✓
+          </span>
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-emerald-800">
+              Semua kelas sudah mengisi agenda hari ini 🎉
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
         <StatCard
           label="Total Kelas"
@@ -1717,17 +1884,35 @@ function AgendaTab({
           sub={`${kelasList.reduce((s, k) => s + (siswaPerKelas.get(k.id)?.length || 0), 0)} siswa`}
           variant="dark"
         />
-        <StatCard
-          label="Sudah Isi Agenda"
-          value={loadingTanggal ? "…" : kelasSudah.length}
-          sub={`${persenSudah}%`}
-          variant="blue"
-        />
-        <StatCard
-          label="Belum Isi Agenda"
-          value={loadingTanggal ? "…" : kelasBelum.length}
-          variant="light"
-        />
+        {!selectedIsWorkday ? (
+          <StatCard
+            label="Status Hari Ini"
+            value="Libur"
+            sub={selectedIsWeekend ? "Akhir pekan" : "Hari libur"}
+            variant="neutral"
+          />
+        ) : (
+          <StatCard
+            label="Sudah Isi Agenda"
+            value={loadingTanggal ? "…" : kelasSudah.length}
+            sub={`${persenSudah}%`}
+            variant="blue"
+          />
+        )}
+        {!selectedIsWorkday ? (
+          <StatCard
+            label="Total Entri"
+            value="—"
+            sub="Tidak dihitung"
+            variant="light"
+          />
+        ) : (
+          <StatCard
+            label="Belum Isi Agenda"
+            value={loadingTanggal ? "…" : kelasBelum.length}
+            variant="light"
+          />
+        )}
         <StatCard
           label="Entri Hari Ini"
           value={loadingTanggal ? "…" : totalEntriHariIni}
@@ -1853,24 +2038,41 @@ function AgendaTab({
       </div>
 
       <div className="grid gap-3 sm:gap-4 lg:grid-cols-2">
-        <StatusListCard
-          title="Sudah Isi Agenda"
-          kelasArr={kelasSudah}
-          siswaPerKelas={siswaPerKelas}
-          onLihatSemua={() => goToDetail(null, "sudah")}
-          onLihatDetail={(id) => goToDetail(id, null)}
-          emptyText="Belum ada kelas yang mengisi agenda"
-          variant="blue"
-        />
-        <StatusListCard
-          title="Belum Isi Agenda"
-          kelasArr={kelasBelum}
-          siswaPerKelas={siswaPerKelas}
-          onLihatSemua={() => goToDetail(null, "belum")}
-          onLihatDetail={(id) => goToDetail(id, null)}
-          emptyText="Semua kelas sudah mengisi agenda"
-          variant="rose"
-        />
+        {selectedIsWorkday ? (
+          <>
+            <StatusListCard
+              title="Sudah Isi Agenda"
+              kelasArr={kelasSudah}
+              siswaPerKelas={siswaPerKelas}
+              onLihatSemua={() => goToDetail(null, "sudah")}
+              onLihatDetail={(id) => goToDetail(id, null)}
+              emptyText="Belum ada kelas yang mengisi agenda"
+              variant="blue"
+            />
+            <StatusListCard
+              title="Belum Isi Agenda"
+              kelasArr={kelasBelum}
+              siswaPerKelas={siswaPerKelas}
+              onLihatSemua={() => goToDetail(null, "belum")}
+              onLihatDetail={(id) => goToDetail(id, null)}
+              emptyText="Semua kelas sudah mengisi agenda"
+              variant="rose"
+            />
+          </>
+        ) : (
+          <div className="lg:col-span-2 rounded-2xl border border-neutral-200 bg-white p-4 sm:p-5 shadow-sm">
+            <div className="flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-neutral-400" />
+              <h3 className="text-xs sm:text-sm font-semibold text-neutral-800">
+                {selectedIsWeekend ? "Akhir Pekan" : "Hari Libur"}
+              </h3>
+            </div>
+            <p className="mt-2 text-xs sm:text-sm text-neutral-500">
+              Tanggal <b>{formatTanggalID(selectedDate)}</b> bukan hari kerja
+              efektif, jadi tidak dihitung dalam monitoring.
+            </p>
+          </div>
+        )}
       </div>
 
       <div className="grid gap-3 sm:gap-4 lg:grid-cols-2">
@@ -1927,6 +2129,8 @@ function AgendaTab({
                 onToggle={() => toggleExpand(k.id)}
                 guruPerMapel={guruPerMapel}
                 mapelMap={mapelMap}
+                selectedIsWorkday={selectedIsWorkday}
+                selectedIsWeekend={selectedIsWeekend}
               />
             ))}
           </div>
@@ -1944,6 +2148,8 @@ function KelasAgendaCard({
   onToggle,
   guruPerMapel,
   mapelMap,
+  selectedIsWorkday,
+  selectedIsWeekend,
 }) {
   const entryBySlot = new Map();
   for (const e of entries) {
@@ -1962,6 +2168,26 @@ function KelasAgendaCard({
     return Array.from(names);
   }, [entries, guruPerMapel]);
 
+  const statusLabel = !selectedIsWorkday
+    ? selectedIsWeekend
+      ? "Akhir pekan"
+      : "Libur"
+    : sudahIsi
+      ? "Sudah"
+      : "Belum";
+
+  const statusClass = !selectedIsWorkday
+    ? "bg-neutral-100 text-neutral-600"
+    : sudahIsi
+      ? "bg-blue-50 text-blue-700"
+      : "bg-rose-50 text-rose-600";
+
+  const iconClass = !selectedIsWorkday
+    ? "bg-neutral-100 text-neutral-500"
+    : sudahIsi
+      ? "bg-blue-50 text-blue-600"
+      : "bg-rose-50 text-rose-500";
+
   return (
     <div className="overflow-hidden rounded-xl sm:rounded-2xl bg-white shadow-sm transition-all hover:shadow-md">
       <button
@@ -1970,9 +2196,7 @@ function KelasAgendaCard({
       >
         <div className="flex items-center gap-2 sm:gap-3.5 min-w-0 flex-1">
           <div
-            className={`flex h-8 w-8 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-lg sm:rounded-xl text-[10px] sm:text-sm font-semibold ${
-              sudahIsi ? "bg-blue-50 text-blue-600" : "bg-rose-50 text-rose-500"
-            }`}
+            className={`flex h-8 w-8 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-lg sm:rounded-xl text-[10px] sm:text-sm font-semibold ${iconClass}`}
           >
             {kelas.nama_kelas?.slice(0, 2).toUpperCase()}
           </div>
@@ -2002,11 +2226,9 @@ function KelasAgendaCard({
             ))}
           </div>
           <span
-            className={`rounded-full px-1.5 sm:px-2.5 py-0.5 sm:py-1 text-[9px] sm:text-xs font-medium whitespace-nowrap ${
-              sudahIsi ? "bg-blue-50 text-blue-700" : "bg-rose-50 text-rose-600"
-            }`}
+            className={`rounded-full px-1.5 sm:px-2.5 py-0.5 sm:py-1 text-[9px] sm:text-xs font-medium whitespace-nowrap ${statusClass}`}
           >
-            {sudahIsi ? "Sudah" : "Belum"}
+            {statusLabel}
           </span>
           <svg
             className={`h-3 w-3 sm:h-4 sm:w-4 shrink-0 text-neutral-400 transition-transform ${expanded ? "rotate-180" : ""}`}
@@ -2097,6 +2319,7 @@ function AbsensiTabWrapper({
   kelasList,
   siswaPerKelas,
   totalSiswa,
+  hariLiburList,
 }) {
   const [absensiRange, setAbsensiRange] = useState([]);
   const [absensiTanggal, setAbsensiTanggal] = useState([]);
@@ -2107,6 +2330,18 @@ function AbsensiTabWrapper({
   const [filterKelas, setFilterKelas] = useState("semua");
   const [filterStatus, setFilterStatus] = useState("semua");
   const [searchSiswa, setSearchSiswa] = useState("");
+
+  const selectedDateObj = useMemo(
+    () => parseISODate(selectedDate),
+    [selectedDate],
+  );
+  const selectedIsWeekend = selectedDateObj
+    ? isWeekend(selectedDateObj)
+    : false;
+  const selectedIsHoliday = selectedDateObj
+    ? isHoliday(selectedDateObj, hariLiburList)
+    : false;
+  const selectedIsWorkday = !selectedIsWeekend && !selectedIsHoliday;
 
   const loadRange = useCallback(async () => {
     setLoadingRange(true);
@@ -2150,6 +2385,12 @@ function AbsensiTabWrapper({
     loadTanggal(selectedDate);
   }, [selectedDate, loadTanggal]);
 
+  // Hari kerja efektif 30 hari terakhir
+  const hariEfektif30 = useMemo(
+    () => countEffectiveDays(daysAgoStr(30), todayStr(), hariLiburList),
+    [hariLiburList],
+  );
+
   const kelasSudahAbsenIds = useMemo(() => {
     const set = new Set();
     for (const a of absensiTanggal) {
@@ -2159,39 +2400,61 @@ function AbsensiTabWrapper({
     return set;
   }, [absensiTanggal]);
 
-  const kelasSudah = useMemo(
-    () => kelasList.filter((k) => kelasSudahAbsenIds.has(k.id)),
-    [kelasList, kelasSudahAbsenIds],
-  );
-  const kelasBelum = useMemo(
-    () => kelasList.filter((k) => !kelasSudahAbsenIds.has(k.id)),
-    [kelasList, kelasSudahAbsenIds],
-  );
+  // Cek lengkap per kelas (semua siswa terisi?) untuk hari terpilih
+  const kelasLengkapIds = useMemo(() => {
+    const recordsPerKelas = new Map();
+    for (const a of absensiTanggal) {
+      const kid = firstOf(a.kelas_id);
+      if (!kid) continue;
+      recordsPerKelas.set(kid, (recordsPerKelas.get(kid) || 0) + 1);
+    }
+    const lengkap = new Set();
+    for (const k of kelasList) {
+      const jumlahSiswa = siswaPerKelas.get(k.id)?.length || 0;
+      if (jumlahSiswa > 0 && (recordsPerKelas.get(k.id) || 0) >= jumlahSiswa) {
+        lengkap.add(k.id);
+      }
+    }
+    return lengkap;
+  }, [absensiTanggal, kelasList, siswaPerKelas]);
 
+  const kelasSudah = useMemo(() => {
+    if (!selectedIsWorkday) return [];
+    return kelasList.filter((k) => kelasLengkapIds.has(k.id));
+  }, [kelasList, kelasLengkapIds, selectedIsWorkday]);
+
+  const kelasBelum = useMemo(() => {
+    if (!selectedIsWorkday) return [];
+    return kelasList.filter((k) => !kelasLengkapIds.has(k.id));
+  }, [kelasList, kelasLengkapIds, selectedIsWorkday]);
+
+  // Ranking pakai hari efektif × jumlah siswa
   const statistikKelas = useMemo(() => {
+    if (hariEfektif30 === 0) return [];
     const map = new Map();
     for (const a of absensiRange) {
       const kid = firstOf(a.kelas_id);
       if (!kid) continue;
-      if (!map.has(kid)) map.set(kid, { hadir: 0, total: 0 });
+      if (!map.has(kid)) map.set(kid, { hadir: 0 });
       const entry = map.get(kid);
-      entry.total += 1;
       if (a.status === "hadir") entry.hadir += 1;
     }
     const result = [];
     for (const k of kelasList) {
-      const entry = map.get(k.id);
-      if (!entry || entry.total === 0) continue;
+      const jumlahSiswa = siswaPerKelas.get(k.id)?.length || 0;
+      if (jumlahSiswa === 0) continue;
+      const entry = map.get(k.id) || { hadir: 0 };
+      const denom = hariEfektif30 * jumlahSiswa;
       result.push({
         kelas: k,
-        rate: (entry.hadir / entry.total) * 100,
-        total: entry.total,
+        rate: denom > 0 ? (entry.hadir / denom) * 100 : 0,
+        total: denom,
         hadir: entry.hadir,
       });
     }
     result.sort((a, b) => b.rate - a.rate);
     return result;
-  }, [absensiRange, kelasList]);
+  }, [absensiRange, kelasList, siswaPerKelas, hariEfektif30]);
 
   const terbaik = statistikKelas.slice(0, 5);
   const terendah = [...statistikKelas].reverse().slice(0, 5);
@@ -2213,9 +2476,9 @@ function AbsensiTabWrapper({
         ? kelasList
         : kelasList.filter((k) => k.id === filterKelas);
     if (filterStatus === "sudah")
-      list = list.filter((k) => kelasSudahAbsenIds.has(k.id));
+      list = list.filter((k) => kelasLengkapIds.has(k.id));
     else if (filterStatus === "belum")
-      list = list.filter((k) => !kelasSudahAbsenIds.has(k.id));
+      list = list.filter((k) => !kelasLengkapIds.has(k.id));
     if (searchSiswa.trim()) {
       const q = searchSiswa.trim().toLowerCase();
       list = list.filter((k) => {
@@ -2232,7 +2495,7 @@ function AbsensiTabWrapper({
     filterStatus,
     searchSiswa,
     siswaPerKelas,
-    kelasSudahAbsenIds,
+    kelasLengkapIds,
   ]);
 
   const toggleExpand = (kelasId) => {
@@ -2252,17 +2515,72 @@ function AbsensiTabWrapper({
       ?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  const persenSudah = kelasList.length
-    ? Math.round((kelasSudah.length / kelasList.length) * 100)
-    : 0;
+  const persenSudah =
+    kelasList.length && selectedIsWorkday
+      ? Math.round((kelasSudah.length / kelasList.length) * 100)
+      : 0;
   const statusCounts = {
     semua: kelasList.length,
-    sudah: kelasSudah.length,
-    belum: kelasBelum.length,
+    sudah: selectedIsWorkday ? kelasSudah.length : 0,
+    belum: selectedIsWorkday ? kelasBelum.length : 0,
   };
+
+  const kelasBelumNama = kelasBelum.map((k) => k.nama_kelas);
 
   return (
     <div className="space-y-4 sm:space-y-6">
+      {/* =========================================================
+          BUBBLE MONITORING: kelas belum LENGKAP isi absensi (per kelas)
+         ========================================================= */}
+      {selectedIsWorkday && kelasBelum.length > 0 && (
+        <div className="flex items-start gap-3 rounded-2xl border border-rose-200 bg-rose-50 p-4">
+          <span className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-rose-500 text-xs font-bold text-white">
+            !
+          </span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-rose-800">
+              {kelasBelum.length} kelas belum lengkap isi absensi pada{" "}
+              {formatTanggalID(selectedDate)}
+            </p>
+            <p className="mt-1 text-xs text-rose-700 break-words">
+              {kelasBelumNama.slice(0, 20).join(", ")}
+              {kelasBelumNama.length > 20 &&
+                ` +${kelasBelumNama.length - 20} kelas lain`}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {!selectedIsWorkday && (
+        <div className="flex items-start gap-3 rounded-2xl border border-neutral-200 bg-neutral-50 p-4">
+          <span className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-neutral-400 text-xs font-bold text-white">
+            i
+          </span>
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-neutral-700">
+              {selectedIsWeekend ? "Akhir pekan" : "Hari libur"}
+            </p>
+            <p className="mt-0.5 text-xs text-neutral-600">
+              Tanggal {formatTanggalID(selectedDate)} bukan hari kerja efektif,
+              jadi absensi tidak dihitung dalam monitoring.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {selectedIsWorkday && kelasBelum.length === 0 && kelasList.length > 0 && (
+        <div className="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+          <span className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-emerald-500 text-xs font-bold text-white">
+            ✓
+          </span>
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-emerald-800">
+              Semua kelas sudah lengkap isi absensi hari ini 🎉
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4">
         <StatCard
           label="Total Kelas"
@@ -2270,17 +2588,35 @@ function AbsensiTabWrapper({
           sub={`${totalSiswa} siswa`}
           variant="dark"
         />
-        <StatCard
-          label="Sudah Absen"
-          value={loadingTanggal ? "…" : kelasSudah.length}
-          sub={`${persenSudah}%`}
-          variant="blue"
-        />
-        <StatCard
-          label="Belum Absen"
-          value={loadingTanggal ? "…" : kelasBelum.length}
-          variant="light"
-        />
+        {!selectedIsWorkday ? (
+          <StatCard
+            label="Status Hari Ini"
+            value="Libur"
+            sub={selectedIsWeekend ? "Akhir pekan" : "Hari libur"}
+            variant="neutral"
+          />
+        ) : (
+          <StatCard
+            label="Sudah Lengkap"
+            value={loadingTanggal ? "…" : kelasSudah.length}
+            sub={`${persenSudah}%`}
+            variant="blue"
+          />
+        )}
+        {!selectedIsWorkday ? (
+          <StatCard
+            label="Hari Efektif 30h"
+            value={hariEfektif30}
+            sub="Sen–Jum non-libur"
+            variant="light"
+          />
+        ) : (
+          <StatCard
+            label="Belum Lengkap"
+            value={loadingTanggal ? "…" : kelasBelum.length}
+            variant="light"
+          />
+        )}
         <StatCard
           label="Rata-rata Hadir"
           value={`${Math.round(avgRate(terbaik, terendah))}%`}
@@ -2290,36 +2626,53 @@ function AbsensiTabWrapper({
       </div>
 
       <div className="grid gap-3 sm:gap-4 lg:grid-cols-2">
-        <StatusListCard
-          title="Sudah Absen"
-          kelasArr={kelasSudah}
-          siswaPerKelas={siswaPerKelas}
-          onLihatSemua={() => goToDetail(null, "sudah")}
-          onLihatDetail={(id) => goToDetail(id, null)}
-          emptyText="Belum ada kelas yang absen"
-          variant="blue"
-        />
-        <StatusListCard
-          title="Belum Absen"
-          kelasArr={kelasBelum}
-          siswaPerKelas={siswaPerKelas}
-          onLihatSemua={() => goToDetail(null, "belum")}
-          onLihatDetail={(id) => goToDetail(id, null)}
-          emptyText="Semua kelas sudah absen"
-          variant="rose"
-        />
+        {selectedIsWorkday ? (
+          <>
+            <StatusListCard
+              title="Sudah Lengkap"
+              kelasArr={kelasSudah}
+              siswaPerKelas={siswaPerKelas}
+              onLihatSemua={() => goToDetail(null, "sudah")}
+              onLihatDetail={(id) => goToDetail(id, null)}
+              emptyText="Belum ada kelas yang lengkap"
+              variant="blue"
+            />
+            <StatusListCard
+              title="Belum Lengkap"
+              kelasArr={kelasBelum}
+              siswaPerKelas={siswaPerKelas}
+              onLihatSemua={() => goToDetail(null, "belum")}
+              onLihatDetail={(id) => goToDetail(id, null)}
+              emptyText="Semua kelas sudah lengkap"
+              variant="rose"
+            />
+          </>
+        ) : (
+          <div className="lg:col-span-2 rounded-2xl border border-neutral-200 bg-white p-4 sm:p-5 shadow-sm">
+            <div className="flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-neutral-400" />
+              <h3 className="text-xs sm:text-sm font-semibold text-neutral-800">
+                {selectedIsWeekend ? "Akhir Pekan" : "Hari Libur"}
+              </h3>
+            </div>
+            <p className="mt-2 text-xs sm:text-sm text-neutral-500">
+              Tanggal <b>{formatTanggalID(selectedDate)}</b> bukan hari kerja
+              efektif, jadi tidak ada absensi yang perlu dilengkapi.
+            </p>
+          </div>
+        )}
       </div>
 
       <div className="grid gap-3 sm:gap-4 lg:grid-cols-2">
         <RankingCard
           title="Kehadiran Terbaik"
-          subtitle="30 hari terakhir"
+          subtitle={`30 hari · ${hariEfektif30} hari efektif × jumlah siswa`}
           data={terbaik}
           variant="emerald"
         />
         <RankingCard
           title="Kehadiran Terendah"
-          subtitle="30 hari terakhir"
+          subtitle={`30 hari · ${hariEfektif30} hari efektif × jumlah siswa`}
           data={terendah}
           variant="rose"
         />
@@ -2360,9 +2713,11 @@ function AbsensiTabWrapper({
                 kelas={k}
                 siswaKelas={siswaPerKelas.get(k.id) || []}
                 records={absensiPerKelas.get(k.id) || []}
-                sudahAbsen={kelasSudahAbsenIds.has(k.id)}
+                lengkap={kelasLengkapIds.has(k.id)}
                 expanded={expandedKelas.has(k.id)}
                 onToggle={() => toggleExpand(k.id)}
+                selectedIsWorkday={selectedIsWorkday}
+                selectedIsWeekend={selectedIsWeekend}
               />
             ))}
           </div>
@@ -2387,9 +2742,11 @@ function KelasAbsensiCard({
   kelas,
   siswaKelas,
   records,
-  sudahAbsen,
+  lengkap,
   expanded,
   onToggle,
+  selectedIsWorkday,
+  selectedIsWeekend,
 }) {
   const counts = { hadir: 0, sakit: 0, izin: 0, alpha: 0 };
   const statusBySiswaId = new Map();
@@ -2400,6 +2757,32 @@ function KelasAbsensiCard({
   }
   const belumTercatat = siswaKelas.length - records.length;
 
+  const statusLabel = !selectedIsWorkday
+    ? selectedIsWeekend
+      ? "Akhir pekan"
+      : "Libur"
+    : lengkap
+      ? "Lengkap"
+      : records.length > 0
+        ? "Sebagian"
+        : "Belum";
+
+  const statusClass = !selectedIsWorkday
+    ? "bg-neutral-100 text-neutral-600"
+    : lengkap
+      ? "bg-blue-50 text-blue-700"
+      : records.length > 0
+        ? "bg-amber-50 text-amber-700"
+        : "bg-rose-50 text-rose-600";
+
+  const iconClass = !selectedIsWorkday
+    ? "bg-neutral-100 text-neutral-500"
+    : lengkap
+      ? "bg-blue-50 text-blue-600"
+      : records.length > 0
+        ? "bg-amber-50 text-amber-600"
+        : "bg-rose-50 text-rose-500";
+
   return (
     <div className="overflow-hidden rounded-xl sm:rounded-2xl bg-white shadow-sm transition-all hover:shadow-md">
       <button
@@ -2408,11 +2791,7 @@ function KelasAbsensiCard({
       >
         <div className="flex items-center gap-2 sm:gap-3.5 min-w-0 flex-1">
           <div
-            className={`flex h-8 w-8 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-lg sm:rounded-xl text-[10px] sm:text-sm font-semibold ${
-              sudahAbsen
-                ? "bg-blue-50 text-blue-600"
-                : "bg-rose-50 text-rose-500"
-            }`}
+            className={`flex h-8 w-8 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-lg sm:rounded-xl text-[10px] sm:text-sm font-semibold ${iconClass}`}
           >
             {kelas.nama_kelas?.slice(0, 2).toUpperCase()}
           </div>
@@ -2421,7 +2800,7 @@ function KelasAbsensiCard({
               {kelas.nama_kelas}
             </p>
             <p className="text-[10px] sm:text-xs text-neutral-400">
-              {siswaKelas.length} siswa
+              {records.length}/{siswaKelas.length} siswa tercatat
             </p>
           </div>
         </div>
@@ -2440,13 +2819,9 @@ function KelasAbsensiCard({
             )}
           </div>
           <span
-            className={`rounded-full px-1.5 sm:px-2.5 py-0.5 sm:py-1 text-[9px] sm:text-xs font-medium whitespace-nowrap ${
-              sudahAbsen
-                ? "bg-blue-50 text-blue-700"
-                : "bg-rose-50 text-rose-600"
-            }`}
+            className={`rounded-full px-1.5 sm:px-2.5 py-0.5 sm:py-1 text-[9px] sm:text-xs font-medium whitespace-nowrap ${statusClass}`}
           >
-            {sudahAbsen ? "Sudah" : "Belum"}
+            {statusLabel}
           </span>
           <svg
             className={`h-3 w-3 sm:h-4 sm:w-4 shrink-0 text-neutral-400 transition-transform ${expanded ? "rotate-180" : ""}`}
@@ -2470,6 +2845,11 @@ function KelasAbsensiCard({
             <p className="py-3 sm:py-4 text-center text-xs sm:text-sm text-neutral-400">
               Belum ada data siswa di kelas ini.
             </p>
+          ) : !selectedIsWorkday ? (
+            <div className="rounded-lg bg-white px-3 py-3 text-center text-xs text-neutral-500">
+              Tanggal ini bukan hari kerja efektif. Tidak ada absensi untuk
+              dicatat.
+            </div>
           ) : (
             <>
               {belumTercatat > 0 && (

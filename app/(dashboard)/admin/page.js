@@ -37,6 +37,69 @@ function monthRange() {
   return { start: fmt(start), end: fmt(end) };
 }
 
+function pad(n) {
+  return String(n).padStart(2, "0");
+}
+function toISODate(d) {
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+// 7 hari terakhir
+function last7Days() {
+  const HARI = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
+  const days = [];
+  const now = new Date();
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+    const end = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+    const key = toISODate(d);
+    days.push({
+      key,
+      label: HARI[d.getDay()],
+      dateLabel: `${d.getDate()}/${d.getMonth() + 1}`,
+      start: `${key} 00:00:00`,
+      end: `${toISODate(end)} 00:00:00`,
+    });
+  }
+  return days;
+}
+
+// Tanggal 1 s/d akhir bulan berjalan
+function monthBuckets() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  const days = [];
+  const BULAN_SHORT = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "Mei",
+    "Jun",
+    "Jul",
+    "Agu",
+    "Sep",
+    "Okt",
+    "Nov",
+    "Des",
+  ];
+  for (let i = 1; i <= lastDay; i++) {
+    const d = new Date(year, month, i);
+    const next = new Date(year, month, i + 1);
+    const key = toISODate(d);
+    days.push({
+      key,
+      label: String(i),
+      dateLabel: BULAN_SHORT[month],
+      start: `${key} 00:00:00`,
+      end: `${toISODate(next)} 00:00:00`,
+    });
+  }
+  return days;
+}
+
 function hariIndo() {
   const hari = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
   const bulan = [
@@ -96,6 +159,173 @@ function StatusBadge({ ok }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Chart produktivitas dengan toggle minggu / bulan
+// Metrik utama: rata-rata kehadiran siswa (%)
+// Pembanding:   persentase kelas yang mengisi agenda (%)
+// ---------------------------------------------------------------------------
+function TrendBarChart({ weeklyData, monthlyData, viewMode, onViewChange }) {
+  const data = viewMode === "weekly" ? weeklyData : monthlyData;
+  const isMonthly = viewMode === "monthly";
+
+  if (!data || data.length === 0) {
+    return <p className="text-sm text-slate-400">Belum ada data.</p>;
+  }
+
+  const maxVal = Math.max(
+    1,
+    ...data.flatMap((d) => [d.kehadiranPersen, d.agendaPersen]),
+  );
+
+  // Ringkasan periode
+  const withData = data.filter((d) => d.totalAbsensi > 0);
+  const n = withData.length || 1;
+  const avgKehadiran = withData.reduce((s, d) => s + d.kehadiranPersen, 0) / n;
+  const withAgenda = data.filter((d) => d.totalKelas > 0);
+  const nAgenda = withAgenda.length || 1;
+  const avgAgenda =
+    withAgenda.reduce((s, d) => s + d.agendaPersen, 0) / nAgenda;
+
+  const barMinWidth = isMonthly ? 26 : 38;
+
+  return (
+    <div>
+      {/* Toggle + Legend */}
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-500">
+          <span className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-sm bg-indigo-500" />
+            Rata-rata Kehadiran Siswa (%)
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-sm bg-emerald-400" />
+            Kelas Sudah Isi Agenda (%)
+          </span>
+        </div>
+        <div className="inline-flex self-start rounded-lg border border-slate-200 bg-white p-0.5">
+          <button
+            type="button"
+            onClick={() => onViewChange("weekly")}
+            className={`rounded-md px-3 py-1 text-xs font-medium transition ${
+              viewMode === "weekly"
+                ? "bg-indigo-500 text-white"
+                : "text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            Minggu Ini
+          </button>
+          <button
+            type="button"
+            onClick={() => onViewChange("monthly")}
+            className={`rounded-md px-3 py-1 text-xs font-medium transition ${
+              viewMode === "monthly"
+                ? "bg-indigo-500 text-white"
+                : "text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            Bulan Ini
+          </button>
+        </div>
+      </div>
+
+      {/* Ringkasan — grid 2x2 di mobile, 4 kolom di desktop */}
+      <div className="mb-5 grid grid-cols-2 gap-x-3 gap-y-4 rounded-xl border border-slate-100 bg-slate-50/60 p-3 sm:grid-cols-4 sm:gap-3">
+        <div className="min-w-0">
+          <p className="truncate text-[11px] font-medium text-slate-500">
+            Kehadiran
+          </p>
+          <p className="mt-0.5 text-lg font-bold leading-tight text-indigo-600 sm:text-xl">
+            {avgKehadiran.toFixed(1)}%
+          </p>
+          <p className="text-[10px] text-slate-400">
+            {isMonthly ? "bulan ini" : "7 hari terakhir"}
+          </p>
+        </div>
+        <div className="min-w-0 sm:border-l sm:border-slate-200 sm:pl-3">
+          <p className="truncate text-[11px] font-medium text-slate-500">
+            Agenda Terisi
+          </p>
+          <p className="mt-0.5 text-lg font-bold leading-tight text-emerald-600 sm:text-xl">
+            {avgAgenda.toFixed(1)}%
+          </p>
+          <p className="text-[10px] text-slate-400">kelas / hari</p>
+        </div>
+        <div className="min-w-0 border-t border-slate-100 pt-3 sm:border-l sm:border-t-0 sm:border-slate-200 sm:pl-3 sm:pt-0">
+          <p className="truncate text-[11px] font-medium text-slate-500">
+            Hari Absensi
+          </p>
+          <p className="mt-0.5 text-lg font-bold leading-tight text-slate-700 sm:text-xl">
+            {withData.length}
+          </p>
+          <p className="text-[10px] text-slate-400">hari tercatat</p>
+        </div>
+        <div className="min-w-0 border-t border-slate-100 pt-3 sm:border-l sm:border-t-0 sm:border-slate-200 sm:pl-3 sm:pt-0">
+          <p className="truncate text-[11px] font-medium text-slate-500">
+            Hari Agenda
+          </p>
+          <p className="mt-0.5 text-lg font-bold leading-tight text-slate-700 sm:text-xl">
+            {withAgenda.length}
+          </p>
+          <p className="text-[10px] text-slate-400">hari tercatat</p>
+        </div>
+      </div>
+
+      {/* Chart — selalu bisa discroll horizontal */}
+      <div className="overflow-x-auto pb-2">
+        <div
+          className="flex items-end gap-1.5 sm:gap-3"
+          style={{ minWidth: `${data.length * barMinWidth}px` }}
+        >
+          {data.map((d) => (
+            <div
+              key={d.key}
+              className="flex flex-1 flex-col items-center gap-2"
+            >
+              <div className="flex h-40 w-full items-end justify-center gap-0.5">
+                <div
+                  className="w-1/2 max-w-[14px] rounded-t-md bg-indigo-500 transition-all"
+                  style={{
+                    height: `${Math.max(
+                      (d.kehadiranPersen / maxVal) * 100,
+                      d.kehadiranPersen > 0 ? 4 : 0,
+                    )}%`,
+                  }}
+                  title={
+                    d.totalAbsensi > 0
+                      ? `Kehadiran ${d.label}: ${d.kehadiranPersen}% (${d.hadir}/${d.totalAbsensi})`
+                      : `Kehadiran ${d.label}: belum ada data`
+                  }
+                />
+                <div
+                  className="w-1/2 max-w-[14px] rounded-t-md bg-emerald-400 transition-all"
+                  style={{
+                    height: `${Math.max(
+                      (d.agendaPersen / maxVal) * 100,
+                      d.agendaPersen > 0 ? 4 : 0,
+                    )}%`,
+                  }}
+                  title={
+                    d.totalKelas > 0
+                      ? `Agenda ${d.label}: ${d.agendaPersen}% (${d.kelasAgenda}/${d.totalKelas} kelas)`
+                      : `Agenda ${d.label}: belum ada data`
+                  }
+                />
+              </div>
+              <div className="text-center leading-tight">
+                <p className="text-[10px] font-medium text-slate-500">
+                  {d.label}
+                </p>
+                {!isMonthly && (
+                  <p className="text-[9px] text-slate-300">{d.dateLabel}</p>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 export default function OverviewAdminPage() {
   const router = useRouter();
 
@@ -109,9 +339,13 @@ export default function OverviewAdminPage() {
   const [totalSiswa, setTotalSiswa] = useState(0);
   const [totalKelas, setTotalKelas] = useState(0);
 
-  const [statusAbsensiPerKelas, setStatusAbsensiPerKelas] = useState([]); // [{kelas, sudah}]
-  const [statusAgendaPerKelas, setStatusAgendaPerKelas] = useState([]); // [{kelas, sudah}]
-  const [rankingKehadiran, setRankingKehadiran] = useState([]); // [{kelas, persen}]
+  const [statusAbsensiPerKelas, setStatusAbsensiPerKelas] = useState([]);
+  const [statusAgendaPerKelas, setStatusAgendaPerKelas] = useState([]);
+  const [rankingKehadiran, setRankingKehadiran] = useState([]);
+
+  const [weeklyTrend, setWeeklyTrend] = useState([]);
+  const [monthlyTrend, setMonthlyTrend] = useState([]);
+  const [trendView, setTrendView] = useState("weekly");
 
   // Cek autentikasi & role
   useEffect(() => {
@@ -133,7 +367,7 @@ export default function OverviewAdminPage() {
     setAuthChecked(true);
   }, [router]);
 
-  // Ambil data dashboard setelah auth lolos
+  // Ambil data dashboard
   useEffect(() => {
     if (!authChecked || unauthorized || !admin) return;
 
@@ -144,7 +378,7 @@ export default function OverviewAdminPage() {
         setLoading(true);
         setErrorMsg("");
 
-        // Data dasar: semua kelas & semua siswa
+        // Data dasar
         const semuaKelas = await pb.collection("kelas").getFullList();
         const semuaSiswa = await pb.collection("siswa").getFullList();
 
@@ -156,7 +390,7 @@ export default function OverviewAdminPage() {
         const { start: todayStart, end: todayEnd } = todayRange();
         const { start: monthStart, end: monthEnd } = monthRange();
 
-        // Absensi hari ini -> kelas mana yang sudah/belum diisi
+        // Absensi hari ini
         const absensiHariIni = await pb.collection("absensi").getFullList({
           filter: `tanggal>="${todayStart}" && tanggal<"${todayEnd}"`,
         });
@@ -170,7 +404,7 @@ export default function OverviewAdminPage() {
           .sort((a, b) => Number(a.sudah) - Number(b.sudah));
         if (isMounted) setStatusAbsensiPerKelas(statusAbsensi);
 
-        // Agenda mengajar hari ini -> kelas mana yang sudah/belum diisi
+        // Agenda hari ini
         const agendaHariIni = await pb
           .collection("agenda_mengajar")
           .getFullList({
@@ -186,7 +420,7 @@ export default function OverviewAdminPage() {
           .sort((a, b) => Number(a.sudah) - Number(b.sudah));
         if (isMounted) setStatusAgendaPerKelas(statusAgenda);
 
-        // Rekap kehadiran bulan ini per kelas -> ranking terbaik & terendah
+        // Rekap kehadiran bulan ini
         const absensiBulanIni = await pb.collection("absensi").getFullList({
           filter: `tanggal>="${monthStart}" && tanggal<"${monthEnd}"`,
         });
@@ -207,6 +441,80 @@ export default function OverviewAdminPage() {
           }))
           .sort((a, b) => b.persen - a.persen);
         if (isMounted) setRankingKehadiran(rankingHitung);
+
+        // === Trend: minggu ini & bulan ini ===
+        const weekly = last7Days();
+        const monthly = monthBuckets();
+        const totalKelasAktif = semuaKelas.length || 1;
+
+        // Rentang gabungan (supaya 1x query saja)
+        const rangeStart =
+          weekly[0].start < monthly[0].start
+            ? weekly[0].start
+            : monthly[0].start;
+        const rangeEnd =
+          weekly[weekly.length - 1].end > monthly[monthly.length - 1].end
+            ? weekly[weekly.length - 1].end
+            : monthly[monthly.length - 1].end;
+
+        const [absensiRange, agendaRange] = await Promise.all([
+          pb.collection("absensi").getFullList({
+            filter: `tanggal>="${rangeStart}" && tanggal<"${rangeEnd}"`,
+          }),
+          pb.collection("agenda_mengajar").getFullList({
+            filter: `date>="${rangeStart}" && date<"${rangeEnd}"`,
+          }),
+        ]);
+
+        // Bucket absensi per tanggal: { hadir, total }
+        const absensiByDate = {};
+        absensiRange.forEach((a) => {
+          const key = (a.tanggal || "").slice(0, 10);
+          if (!key) return;
+          if (!absensiByDate[key]) absensiByDate[key] = { hadir: 0, total: 0 };
+          absensiByDate[key].total += 1;
+          if (a.status === "hadir") absensiByDate[key].hadir += 1;
+        });
+
+        // Bucket agenda per tanggal: Set(kelas_id)
+        const agendaByDate = {};
+        agendaRange.forEach((a) => {
+          const key = (a.date || "").slice(0, 10);
+          const kid = Array.isArray(a.kelas_id) ? a.kelas_id[0] : a.kelas_id;
+          if (!key || !kid) return;
+          if (!agendaByDate[key]) agendaByDate[key] = new Set();
+          agendaByDate[key].add(kid);
+        });
+
+        function buildTrend(buckets) {
+          return buckets.map((b) => {
+            const abs = absensiByDate[b.key] || { hadir: 0, total: 0 };
+            const kehadiranPersen =
+              abs.total > 0 ? Math.round((abs.hadir / abs.total) * 100) : 0;
+
+            const agendaSet = agendaByDate[b.key] || new Set();
+            const agendaPersen = Math.round(
+              (agendaSet.size / totalKelasAktif) * 100,
+            );
+
+            return {
+              key: b.key,
+              label: b.label,
+              dateLabel: b.dateLabel,
+              hadir: abs.hadir,
+              totalAbsensi: abs.total,
+              kehadiranPersen,
+              kelasAgenda: agendaSet.size,
+              totalKelas: totalKelasAktif,
+              agendaPersen,
+            };
+          });
+        }
+
+        if (isMounted) {
+          setWeeklyTrend(buildTrend(weekly));
+          setMonthlyTrend(buildTrend(monthly));
+        }
 
         if (isMounted) setLoading(false);
       } catch (err) {
@@ -338,6 +646,23 @@ export default function OverviewAdminPage() {
             </p>
           </Card>
         </div>
+
+        {/* Statistik Produktivitas (Chart) */}
+        <Card
+          title="Statistik Produktivitas"
+          subtitle="Rata-rata kehadiran siswa dibandingkan kelas yang sudah mengisi agenda"
+        >
+          {weeklyTrend.length === 0 ? (
+            <p className="text-sm text-slate-400">Belum ada data.</p>
+          ) : (
+            <TrendBarChart
+              weeklyData={weeklyTrend}
+              monthlyData={monthlyTrend}
+              viewMode={trendView}
+              onViewChange={setTrendView}
+            />
+          )}
+        </Card>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
           {/* Status absensi per kelas */}
