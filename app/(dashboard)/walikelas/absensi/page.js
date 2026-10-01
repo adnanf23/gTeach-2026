@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import * as XLSX from "xlsx";
-// Sesuaikan path import berikut dengan lokasi file pocketbase client di project-mu
+import * as XLSX from "xlsx-js-style";
 import { pb, isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
 import { createSystemLog } from "@/lib/logger";
 
@@ -52,6 +51,15 @@ const HARI_PANJANG = [
   "Jumat",
   "Sabtu",
 ];
+const HARI_KEY = [
+  "minggu",
+  "senin",
+  "selasa",
+  "rabu",
+  "kamis",
+  "jumat",
+  "sabtu",
+];
 const BULAN = [
   "Januari",
   "Februari",
@@ -88,13 +96,44 @@ function formatLong(d) {
   return `${HARI_PANJANG[d.getDay()]}, ${d.getDate()} ${BULAN[d.getMonth()]} ${d.getFullYear()}`;
 }
 function formatShort(dateStr) {
-  // dateStr: 'YYYY-MM-DD'
   const [y, m, d] = dateStr.split("-").map(Number);
   return `${d} ${BULAN[m - 1]} ${y}`;
 }
+function isWeekend(date) {
+  const d = date.getDay();
+  return d === 0 || d === 6;
+}
+function isHoliday(date, hariLiburList) {
+  if (!hariLiburList || hariLiburList.length === 0) return false;
+  const dateStr = toISODate(date);
+  const dayKey = HARI_KEY[date.getDay()];
+  for (const h of hariLiburList) {
+    if (h.tanggal) {
+      const liburDateStr = toISODate(new Date(h.tanggal));
+      if (liburDateStr === dateStr) return true;
+    }
+    if (h.hari && h.hari === dayKey) return true;
+  }
+  return false;
+}
+function countEffectiveDays(startStr, endStr, hariLiburList) {
+  if (!startStr || !endStr) return 0;
+  const [sy, sm, sd] = startStr.split("-").map(Number);
+  const [ey, em, ed] = endStr.split("-").map(Number);
+  const start = new Date(sy, sm - 1, sd);
+  const end = new Date(ey, em - 1, ed);
+  if (end < start) return 0;
+  let count = 0;
+  const cur = new Date(start);
+  while (cur <= end) {
+    if (!isWeekend(cur) && !isHoliday(cur, hariLiburList)) count++;
+    cur.setDate(cur.getDate() + 1);
+  }
+  return count;
+}
 
 // =========================================================
-// Popup notifikasi (toast) untuk status berhasil / gagal
+// Toast
 // =========================================================
 function Toast({ toast, onClose }) {
   useEffect(() => {
@@ -153,15 +192,32 @@ export default function AbsensiPageWalas() {
     setCheckingAuth(false);
   }, [router]);
 
+  // ---------------- Hari libur ----------------
+  const [hariLiburList, setHariLiburList] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await pb.collection("hari_libur").getFullList({
+          requestKey: null,
+        });
+        if (!cancelled) setHariLiburList(list);
+      } catch (e) {
+        if (!cancelled) setHariLiburList([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // ---------------- Resolusi kelas ----------------
-  // Logika: kelas_id di absensi mengikuti kelas dimana user login
-  // tercatat sebagai walikelas_id ATAU pendamping_id.
-  // Untuk admin/ict/guru mapel, kelas dipilih manual dari dropdown.
   const [kelas, setKelas] = useState(null);
   const [kelasOptions, setKelasOptions] = useState([]);
   const [needsKelasPicker, setNeedsKelasPicker] = useState(false);
   const [noKelasAssigned, setNoKelasAssigned] = useState(false);
   const [resolvingKelas, setResolvingKelas] = useState(true);
+  const [message, setMessage] = useState(null);
 
   useEffect(() => {
     if (!user) return;
@@ -211,7 +267,7 @@ export default function AbsensiPageWalas() {
     };
   }, [user]);
 
-  // ---------------- Daftar siswa di kelas terpilih ----------------
+  // ---------------- Daftar siswa ----------------
   const [siswaList, setSiswaList] = useState([]);
   const [loadingSiswa, setLoadingSiswa] = useState(false);
 
@@ -245,16 +301,15 @@ export default function AbsensiPageWalas() {
     };
   }, [kelas]);
 
-  // ---------------- Tab aktif: Kalender / Rekap ----------------
-  const [activeTab, setActiveTab] = useState("kalender"); // "kalender" | "rekap"
+  // ---------------- Tab ----------------
+  const [activeTab, setActiveTab] = useState("kalender");
 
   // ---------------- Kalender ----------------
   const [viewDate, setViewDate] = useState(
     () => new Date(today.getFullYear(), today.getMonth(), 1),
   );
-  const [monthAbsensi, setMonthAbsensi] = useState({}); // { 'YYYY-MM-DD': [record,...] }
+  const [monthAbsensi, setMonthAbsensi] = useState({});
   const [loadingCalendar, setLoadingCalendar] = useState(false);
-  const [message, setMessage] = useState(null); // { type: 'success' | 'error', text }
 
   const loadMonth = useCallback(async () => {
     if (!kelas) return;
@@ -304,13 +359,11 @@ export default function AbsensiPageWalas() {
     return { total: records.length, counts };
   }
 
-  // ---------------- Detail / form absensi harian ----------------
+  // ---------------- Detail harian ----------------
   const [selectedDate, setSelectedDate] = useState(null);
   const [detailRows, setDetailRows] = useState([]);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [saving, setSaving] = useState(false);
-  // isEditingDay: false berarti panel tampil read-only (karena hari itu SUDAH diabsen)
-  // dan harus klik "Edit Absensi" dulu sebelum bisa diubah. true berarti bisa diisi/diedit.
   const [isEditingDay, setIsEditingDay] = useState(false);
 
   const openDetail = useCallback(
@@ -336,8 +389,6 @@ export default function AbsensiPageWalas() {
           status: byStudent[s.id]?.status || "hadir",
         }));
         setDetailRows(rows);
-        // Kalau belum ada satupun record untuk tanggal ini -> langsung mode isi.
-        // Kalau sudah ada (sebagian/semua) -> tampilkan read-only dulu, wajib klik Edit.
         const hasAny = rows.some((r) => r.recordId);
         setIsEditingDay(!hasAny);
       } finally {
@@ -352,17 +403,13 @@ export default function AbsensiPageWalas() {
       prev.map((r) => (r.siswaId === siswaId ? { ...r, status } : r)),
     );
   }
-
   function markAllHadir() {
     setDetailRows((prev) => prev.map((r) => ({ ...r, status: "hadir" })));
   }
-
   function startEditDay() {
     setIsEditingDay(true);
   }
-
   function cancelEditDay() {
-    // Batalkan perubahan yang belum disimpan dengan memuat ulang data asli
     if (selectedDate) openDetail(selectedDate);
   }
 
@@ -370,15 +417,11 @@ export default function AbsensiPageWalas() {
     if (!kelas || !selectedDate) return;
     setSaving(true);
     setMessage(null);
+    const dateStr = toISODate(selectedDate);
     try {
-      const dateStr = toISODate(selectedDate);
       const startStr = `${dateStr} 00:00:00`;
       const endStr = `${dateStr} 23:59:59`;
 
-      // Validasi ulang langsung ke server tepat sebelum menyimpan: cek apakah
-      // sudah ada record absensi untuk tanggal ini. Kalau sudah ada, WAJIB
-      // update record tsb (bukan bikin baru) -- ini mencegah data absensi ganda
-      // untuk siswa & tanggal yang sama, walaupun ada perubahan dari sesi/perangkat lain.
       const existingNow = await pb.collection("absensi").getFullList({
         filter: `kelas_id="${kelas.id}" && tanggal >= "${startStr}" && tanggal <= "${endStr}"`,
         requestKey: null,
@@ -386,15 +429,10 @@ export default function AbsensiPageWalas() {
       const existingByStudent = {};
       for (const r of existingNow) existingByStudent[r.siswa_id] = r;
 
-      // PENTING: requestKey: null wajib dipakai di sini. Tanpa ini, PocketBase SDK
-      // otomatis meng-cancel request yang dianggap "duplikat" (create/update ke
-      // collection yang sama secara bersamaan), sehingga sebagian data siswa
-      // gagal tersimpan (contoh: 21 dari 27 siswa) meskipun tidak ada error nyata.
       await Promise.all(
         detailRows.map(async (row) => {
           const existing = existingByStudent[row.siswaId];
           if (existing) {
-            // Sudah pernah diabsen untuk tanggal ini -> update, BUKAN tambah data baru
             await pb
               .collection("absensi")
               .update(
@@ -453,12 +491,7 @@ export default function AbsensiPageWalas() {
         msg: `User '${user.nama_lengkap} (${user.role})' gagal melakukan absensi.`,
         endpoint: `/walikelas/absensi`,
         statusCode: 200,
-        payload: {
-          kelas_id: kelas.id,
-          siswa_id: row.siswaId,
-          tanggal: dateStr,
-          status: row.status,
-        },
+        payload: { kelas_id: kelas.id, tanggal: dateStr },
       });
     } finally {
       setSaving(false);
@@ -466,13 +499,13 @@ export default function AbsensiPageWalas() {
     }
   }
 
-  // ---------------- Bangun grid kalender ----------------
+  // ---------------- Grid kalender ----------------
   const cells = useMemo(() => {
     const year = viewDate.getFullYear();
     const month = viewDate.getMonth();
     const firstOfMonth = new Date(year, month, 1);
     const daysInMonth = new Date(year, month + 1, 0).getDate();
-    const leading = (firstOfMonth.getDay() + 6) % 7; // Senin = index 0
+    const leading = (firstOfMonth.getDay() + 6) % 7;
 
     const arr = [];
     for (let i = 0; i < leading; i++) arr.push(null);
@@ -486,14 +519,34 @@ export default function AbsensiPageWalas() {
       (prev) => new Date(prev.getFullYear(), prev.getMonth() + offset, 1),
     );
   }
-
   function goToToday() {
     setViewDate(new Date(today.getFullYear(), today.getMonth(), 1));
     openDetail(today);
   }
 
+  const totalSiswa = siswaList.length;
+
+  // ---------------- Hari kerja yang belum lengkap di bulan terlihat ----------------
+  const incompleteDaysThisMonth = useMemo(() => {
+    if (totalSiswa === 0) return [];
+    const arr = [];
+    for (const date of cells) {
+      if (!date) continue;
+      if (date > today) continue;
+      if (isWeekend(date)) continue;
+      if (isHoliday(date, hariLiburList)) continue;
+      const key = toISODate(date);
+      const records = monthAbsensi[key] || [];
+      const filled = records.length;
+      if (filled < totalSiswa) {
+        arr.push({ date, filled });
+      }
+    }
+    return arr;
+  }, [cells, monthAbsensi, totalSiswa, today, hariLiburList]);
+
   // =========================================================
-  // ---------------- Tab Rekap ----------------
+  // Tab Rekap
   // =========================================================
   const [rekapStart, setRekapStart] = useState(() =>
     toISODate(new Date(today.getFullYear(), today.getMonth(), 1)),
@@ -502,6 +555,7 @@ export default function AbsensiPageWalas() {
   const [rekapRecords, setRekapRecords] = useState([]);
   const [loadingRekap, setLoadingRekap] = useState(false);
   const [rekapError, setRekapError] = useState(null);
+  const [rekapPreset, setRekapPreset] = useState("bulan_ini");
 
   const loadRekap = useCallback(async () => {
     if (!kelas) return;
@@ -527,7 +581,78 @@ export default function AbsensiPageWalas() {
     if (activeTab === "rekap") loadRekap();
   }, [activeTab, loadRekap]);
 
-  // Rekap per siswa: akumulasi hadir/izin/sakit/alpha + persentase
+  function applyPreset(preset) {
+    setRekapPreset(preset);
+    const t = today;
+    if (preset === "minggu") {
+      const start = new Date(t);
+      start.setDate(start.getDate() - 6);
+      setRekapStart(toISODate(start));
+      setRekapEnd(toISODate(t));
+    } else if (preset === "bulan") {
+      const start = new Date(t);
+      start.setDate(start.getDate() - 29);
+      setRekapStart(toISODate(start));
+      setRekapEnd(toISODate(t));
+    } else if (preset === "bulan_ini") {
+      setRekapStart(toISODate(new Date(t.getFullYear(), t.getMonth(), 1)));
+      setRekapEnd(toISODate(t));
+    } else if (preset === "bulan_lalu") {
+      const start = new Date(t.getFullYear(), t.getMonth() - 1, 1);
+      const end = new Date(t.getFullYear(), t.getMonth(), 0);
+      setRekapStart(toISODate(start));
+      setRekapEnd(toISODate(end));
+    }
+  }
+
+  const rekapTotalHariKerja = useMemo(() => {
+    if (!rekapStart || !rekapEnd) return 0;
+    const [sy, sm, sd] = rekapStart.split("-").map(Number);
+    const [ey, em, ed] = rekapEnd.split("-").map(Number);
+    const start = new Date(sy, sm - 1, sd);
+    const end = new Date(ey, em - 1, ed);
+    if (end < start) return 0;
+    let count = 0;
+    const cur = new Date(start);
+    while (cur <= end) {
+      if (!isWeekend(cur) && !isHoliday(cur, hariLiburList) && cur <= today)
+        count++;
+      cur.setDate(cur.getDate() + 1);
+    }
+    return count;
+  }, [rekapStart, rekapEnd, hariLiburList, today]);
+
+  const incompleteDaysRekap = useMemo(() => {
+    if (totalSiswa === 0) return [];
+    if (!rekapStart || !rekapEnd) return [];
+    const [sy, sm, sd] = rekapStart.split("-").map(Number);
+    const [ey, em, ed] = rekapEnd.split("-").map(Number);
+    const start = new Date(sy, sm - 1, sd);
+    const end = new Date(ey, em - 1, ed);
+    if (end < start) return [];
+
+    const byDate = {};
+    for (const r of rekapRecords) {
+      const key = toISODate(new Date(r.tanggal));
+      byDate[key] = (byDate[key] || 0) + 1;
+    }
+
+    const arr = [];
+    const cur = new Date(start);
+    while (cur <= end) {
+      const isOff = isWeekend(cur) || isHoliday(cur, hariLiburList);
+      const isFuture = cur > today;
+      if (!isOff && !isFuture) {
+        const filled = byDate[toISODate(cur)] || 0;
+        if (filled < totalSiswa) {
+          arr.push({ date: new Date(cur), filled });
+        }
+      }
+      cur.setDate(cur.getDate() + 1);
+    }
+    return arr;
+  }, [rekapRecords, rekapStart, rekapEnd, totalSiswa, hariLiburList, today]);
+
   const rekapPerSiswa = useMemo(() => {
     const bySiswa = {};
     for (const s of siswaList) {
@@ -547,11 +672,10 @@ export default function AbsensiPageWalas() {
       }
     }
 
-    // Jumlah hari efektif = jumlah tanggal unik yang sudah pernah diabsen dalam rentang ini
-    const uniqueDates = new Set(
-      rekapRecords.map((r) => toISODate(new Date(r.tanggal))),
-    );
-    const totalHariEfektif = uniqueDates.size;
+    const totalHariEfektif =
+      rekapTotalHariKerja > 0
+        ? rekapTotalHariKerja
+        : countEffectiveDays(rekapStart, rekapEnd, hariLiburList);
 
     const list = Object.values(bySiswa).map((s) => {
       const totalTercatat =
@@ -559,24 +683,24 @@ export default function AbsensiPageWalas() {
       const denom = totalHariEfektif > 0 ? totalHariEfektif : totalTercatat;
       const persenHadir = denom > 0 ? (s.counts.hadir / denom) * 100 : 0;
       const persenTidakHadir = denom > 0 ? 100 - persenHadir : 0;
-      return {
-        ...s,
-        totalTercatat,
-        persenHadir,
-        persenTidakHadir,
-      };
+      return { ...s, totalTercatat, persenHadir, persenTidakHadir };
     });
 
-    // Urutkan berdasar % hadir tertinggi -> "paling rajin"
     list.sort(
       (a, b) =>
         b.persenHadir - a.persenHadir || b.counts.hadir - a.counts.hadir,
     );
 
     return { list, totalHariEfektif };
-  }, [rekapRecords, siswaList]);
+  }, [
+    rekapRecords,
+    siswaList,
+    rekapStart,
+    rekapEnd,
+    hariLiburList,
+    rekapTotalHariKerja,
+  ]);
 
-  // Total akumulasi seluruh kelas
   const rekapTotals = useMemo(() => {
     const totals = { hadir: 0, izin: 0, sakit: 0, alpha: 0 };
     for (const s of rekapPerSiswa.list) {
@@ -596,60 +720,222 @@ export default function AbsensiPageWalas() {
     [rekapPerSiswa],
   );
 
+  // =========================================================
+  // Export Excel dengan styling
+  // =========================================================
   function exportRekapToExcel() {
     if (!kelas) return;
 
-    const rows = rekapPerSiswa.list.map((s, i) => ({
-      No: i + 1,
-      "Nama Siswa": s.nama,
-      NIS: s.nis || "-",
-      Hadir: s.counts.hadir,
-      Izin: s.counts.izin,
-      Sakit: s.counts.sakit,
-      Alpha: s.counts.alpha,
-      "Total Hari Tercatat": s.totalTercatat,
-      "% Hadir": Number(s.persenHadir.toFixed(1)),
-      "% Tidak Hadir": Number(s.persenTidakHadir.toFixed(1)),
-    }));
+    // ----- Palet warna (format ARGB -> dipotong jadi RGB untuk xlsx-js-style) -----
+    const GREEN = "FFD9EAD3";
+    const YELLOW = "FFFFFF00";
+    const CYAN = "FFE0FFFF";
+    const rgb = (argb) => argb.slice(-6);
 
-    // Baris ringkasan di paling bawah
-    rows.push({});
-    rows.push({
-      No: "",
-      "Nama Siswa": "TOTAL KELAS",
-      NIS: "",
-      Hadir: rekapTotals.hadir,
-      Izin: rekapTotals.izin,
-      Sakit: rekapTotals.sakit,
-      Alpha: rekapTotals.alpha,
-      "Total Hari Tercatat": rekapPerSiswa.totalHariEfektif,
-      "% Hadir": Number(rekapTotals.persenHadir.toFixed(1)),
-      "% Tidak Hadir": Number(rekapTotals.persenTidakHadir.toFixed(1)),
+    const namaKelas = kelas.nama_kelas || "kelas";
+    const periodeStr = `${formatShort(rekapStart)} – ${formatShort(rekapEnd)}`;
+    const totalHariEfektif = rekapPerSiswa.totalHariEfektif;
+    const incompleteCount = incompleteDaysRekap.length;
+    const isComplete = incompleteCount === 0;
+
+    // ----- Build array-of-arrays -----
+    const N = 10; // jumlah kolom
+    const blank = () => Array(N).fill("");
+    const titleRow = (text) => [text, ...Array(N - 1).fill("")];
+
+    const aoa = [];
+    aoa.push(titleRow(`Rekapitulasi Absensi ${namaKelas}`)); // r0
+    aoa.push(titleRow(`Periode: ${periodeStr}`)); // r1
+    aoa.push(
+      titleRow(
+        `Total Hari Efektif: ${totalHariEfektif} hari (Senin–Jumat, di luar hari libur)`,
+      ),
+    ); // r2
+    aoa.push(
+      titleRow(
+        isComplete
+          ? `✓ Semua ${rekapTotalHariKerja} hari kerja sudah diabsen lengkap`
+          : `⚠ PERINGATAN: ${incompleteCount} dari ${rekapTotalHariKerja} hari kerja belum diabsen lengkap`,
+      ),
+    ); // r3
+    aoa.push(blank()); // r4
+    aoa.push([
+      "No",
+      "Nama Siswa",
+      "NIS",
+      "Hadir",
+      "Izin",
+      "Sakit",
+      "Alpha",
+      "Total Hari",
+      "% Hadir",
+      "% Tidak Hadir",
+    ]); // r5
+
+    rekapPerSiswa.list.forEach((s, i) => {
+      aoa.push([
+        i + 1,
+        s.nama,
+        s.nis || "-",
+        s.counts.hadir,
+        s.counts.izin,
+        s.counts.sakit,
+        s.counts.alpha,
+        s.totalTercatat,
+        Number(s.persenHadir.toFixed(1)),
+        Number(s.persenTidakHadir.toFixed(1)),
+      ]);
     });
 
-    const ws = XLSX.utils.json_to_sheet(rows);
-    ws["!cols"] = [
-      { wch: 4 },
-      { wch: 24 },
-      { wch: 12 },
-      { wch: 8 },
-      { wch: 8 },
-      { wch: 8 },
-      { wch: 8 },
-      { wch: 18 },
-      { wch: 10 },
-      { wch: 14 },
-    ];
+    aoa.push(blank());
+    aoa.push([
+      "",
+      "TOTAL KELAS",
+      "",
+      rekapTotals.hadir,
+      rekapTotals.izin,
+      rekapTotals.sakit,
+      rekapTotals.alpha,
+      rekapPerSiswa.totalHariEfektif,
+      Number(rekapTotals.persenHadir.toFixed(1)),
+      Number(rekapTotals.persenTidakHadir.toFixed(1)),
+    ]);
 
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+    // ----- Lebar kolom, tinggi baris, merge -----
+    ws["!cols"] = [
+      { wch: 5 },
+      { wch: 28 },
+      { wch: 14 },
+      { wch: 8 },
+      { wch: 8 },
+      { wch: 8 },
+      { wch: 8 },
+      { wch: 12 },
+      { wch: 11 },
+      { wch: 15 },
+    ];
+    ws["!rows"] = [{ hpt: 28 }, { hpt: 20 }, { hpt: 20 }, { hpt: 22 }];
+    ws["!merges"] = [0, 1, 2, 3].map((r) => ({
+      s: { r, c: 0 },
+      e: { r, c: N - 1 },
+    }));
+
+    // ----- Style helpers -----
+    const black = { rgb: "000000" };
+    const thinBlack = { style: "thin", color: black };
+    const allBorders = {
+      top: thinBlack,
+      bottom: thinBlack,
+      left: thinBlack,
+      right: thinBlack,
+    };
+    const fill = (argb) => ({
+      patternType: "solid",
+      fgColor: { rgb: rgb(argb) },
+    });
+    const font = (o = {}) => ({ name: "Calibri", sz: 11, ...o });
+    const center = { horizontal: "center", vertical: "center", wrapText: true };
+    const left = { horizontal: "left", vertical: "center" };
+
+    const applyStyle = (r, c, style) => {
+      const addr = XLSX.utils.encode_cell({ r, c });
+      if (!ws[addr]) ws[addr] = { t: "s", v: "" };
+      ws[addr].s = style;
+    };
+    // Merge: style harus dipasang di SEMUA sel agar fill terlihat penuh
+    const applyRow = (r, style) => {
+      for (let c = 0; c < N; c++) applyStyle(r, c, style);
+    };
+
+    // ----- Peta warna -----
+    // Judul        : tanpa fill, tebal
+    // Periode/info : CYAN
+    // Status absen : lengkap = GREEN, belum lengkap = YELLOW (teks merah)
+    // Header tabel : GREEN
+    // Kolom persen : CYAN
+    // Total kelas  : YELLOW
+    applyRow(0, {
+      font: font({ bold: true, sz: 16 }),
+      alignment: center,
+    });
+    applyRow(1, {
+      font: font({ sz: 12 }),
+      fill: fill(CYAN),
+      alignment: center,
+      border: allBorders,
+    });
+    applyRow(2, {
+      font: font({ italic: true }),
+      fill: fill(CYAN),
+      alignment: center,
+      border: allBorders,
+    });
+    applyRow(3, {
+      font: font({
+        bold: true,
+        sz: 12,
+        color: { rgb: isComplete ? "047857" : "DC2626" },
+      }),
+      fill: fill(isComplete ? GREEN : YELLOW),
+      alignment: center,
+      border: allBorders,
+    });
+
+    // Header tabel
+    applyRow(5, {
+      font: font({ bold: true }),
+      fill: fill(GREEN),
+      alignment: center,
+      border: allBorders,
+    });
+
+    // Data siswa
+    const dataStart = 6;
+    const dataEnd = dataStart + rekapPerSiswa.list.length - 1;
+    for (let r = dataStart; r <= dataEnd; r++) {
+      for (let c = 0; c < N; c++) {
+        const isText = c === 1 || c === 2;
+        const isPercent = c >= 8;
+        applyStyle(r, c, {
+          font: font(),
+          alignment: isText ? left : center,
+          border: allBorders,
+          ...(isPercent ? { fill: fill(CYAN) } : {}),
+        });
+      }
+    }
+
+    // Total kelas
+    const totalRow = dataEnd + 2;
+    for (let c = 0; c < N; c++) {
+      applyStyle(totalRow, c, {
+        font: font({ bold: true }),
+        fill: fill(YELLOW),
+        alignment: c === 1 ? left : center,
+        border: allBorders,
+      });
+    }
+
+    // Freeze sampai header tabel
+    ws["!freeze"] = {
+      xSplit: 0,
+      ySplit: 6,
+      topLeftCell: "A7",
+      activePane: "bottomLeft",
+      state: "frozen",
+    };
+
+    // ----- Write -----
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Rekap Absensi");
 
-    const namaKelas = (kelas.nama_kelas || "kelas").replace(
-      /[^a-z0-9]+/gi,
-      "-",
+    const safeNamaKelas = namaKelas.replace(/[^a-z0-9]+/gi, "-");
+    XLSX.writeFile(
+      wb,
+      `Rekap-Absensi-${safeNamaKelas}_${rekapStart}_sd_${rekapEnd}.xlsx`,
     );
-    const fileName = `Rekap-Absensi-${namaKelas}_${rekapStart}_sd_${rekapEnd}.xlsx`;
-    XLSX.writeFile(wb, fileName);
   }
 
   // =========================================================
@@ -679,8 +965,6 @@ export default function AbsensiPageWalas() {
     );
   }
 
-  const totalSiswa = siswaList.length;
-
   return (
     <div className="min-h-screen bg-slate-50 pb-16">
       <style>{`
@@ -688,11 +972,14 @@ export default function AbsensiPageWalas() {
           from { opacity: 0; transform: translateY(-8px); }
           to { opacity: 1; transform: translateY(0); }
         }
+        @keyframes bubble-pop {
+          0% { transform: scale(0.8); opacity: 0; }
+          100% { transform: scale(1); opacity: 1; }
+        }
       `}</style>
       <Toast toast={message} onClose={() => setMessage(null)} />
 
       <div className="mx-auto max-w-5xl px-4 py-6">
-        {/* Pemilih kelas (admin / ict / guru mapel) */}
         {needsKelasPicker && (
           <div className="mb-6 rounded-xl border border-slate-200 bg-white p-4">
             <label className="mb-1 block text-sm font-medium text-slate-700">
@@ -722,7 +1009,7 @@ export default function AbsensiPageWalas() {
 
         {kelas && (
           <>
-            {/* Navigasi tab */}
+            {/* Tab navigation */}
             <div className="mb-4 flex gap-2 rounded-xl border border-slate-200 bg-white p-1">
               <button
                 onClick={() => setActiveTab("kalender")}
@@ -749,9 +1036,48 @@ export default function AbsensiPageWalas() {
             {/* ================= TAB KALENDER ================= */}
             {activeTab === "kalender" && (
               <>
+                {!loadingCalendar &&
+                  totalSiswa > 0 &&
+                  incompleteDaysThisMonth.length > 0 && (
+                    <div
+                      className="mb-4 flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 p-3 sm:p-4"
+                      style={{ animation: "bubble-pop 0.25s ease-out" }}
+                    >
+                      <span className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-rose-500 text-xs font-bold text-white">
+                        !
+                      </span>
+                      <div className="flex-1">
+                        <p className="text-sm font-semibold text-rose-800">
+                          {incompleteDaysThisMonth.length} hari belum diabsen
+                          lengkap
+                        </p>
+                        <p className="mt-0.5 text-xs text-rose-700">
+                          Bulan {BULAN[viewDate.getMonth()]}{" "}
+                          {viewDate.getFullYear()}. Klik tanggal berikut untuk
+                          melengkapi:
+                        </p>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {incompleteDaysThisMonth.map((d) => (
+                            <button
+                              key={toISODate(d.date)}
+                              onClick={() => openDetail(d.date)}
+                              className="rounded-md border border-rose-300 bg-white px-2 py-0.5 text-[11px] font-medium text-rose-800 hover:bg-rose-100"
+                              title={`Terisi ${d.filled} dari ${totalSiswa} siswa`}
+                            >
+                              {d.date.getDate()}{" "}
+                              {BULAN[d.date.getMonth()].slice(0, 3)}
+                              <span className="ml-1 text-[10px] text-rose-600">
+                                ({d.filled}/{totalSiswa})
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                 {/* Kartu kalender */}
                 <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
-                  {/* Navigasi bulan */}
                   <div className="mb-4 flex flex-wrap items-center justify-center gap-2 sm:justify-between">
                     <div className="order-1 flex w-full items-center justify-center gap-2 sm:order-none sm:w-auto">
                       <span className="text-base font-semibold text-slate-900 sm:text-sm md:text-base">
@@ -780,7 +1106,6 @@ export default function AbsensiPageWalas() {
                     </button>
                   </div>
 
-                  {/* Header hari */}
                   <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-medium text-slate-500 sm:gap-1.5 sm:text-xs">
                     {HARI_PENDEK.map((h) => (
                       <div key={h} className="py-1">
@@ -789,7 +1114,6 @@ export default function AbsensiPageWalas() {
                     ))}
                   </div>
 
-                  {/* Grid tanggal */}
                   <div className="mt-1 grid grid-cols-7 gap-1 sm:gap-1.5">
                     {loadingCalendar &&
                       Array.from({ length: 35 }).map((_, i) => (
@@ -809,8 +1133,12 @@ export default function AbsensiPageWalas() {
                         const isSelected =
                           selectedDate && isSameDate(date, selectedDate);
                         const summary = daySummary(date);
+                        const weekend = isWeekend(date);
+                        const holiday = isHoliday(date, hariLiburList);
+                        const isOff = weekend || holiday;
                         const isUnfilled =
                           !isFuture &&
+                          !isOff &&
                           (!summary || summary.total < totalSiswa) &&
                           totalSiswa > 0;
 
@@ -821,6 +1149,7 @@ export default function AbsensiPageWalas() {
                             onClick={() => openDetail(date)}
                             className={`relative flex aspect-square min-w-0 flex-col items-center justify-start overflow-hidden rounded-md border p-0.5 text-left transition sm:rounded-lg sm:p-1
                               ${isFuture ? "cursor-not-allowed border-transparent text-slate-300" : "cursor-pointer border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/40"}
+                              ${isOff && !isFuture ? "bg-slate-50" : ""}
                               ${isSelected ? "border-indigo-500 bg-indigo-50 ring-1 ring-indigo-500" : ""}
                             `}
                           >
@@ -828,13 +1157,14 @@ export default function AbsensiPageWalas() {
                               className={`mt-0.5 text-[10px] font-medium sm:text-xs ${
                                 isToday
                                   ? "flex h-4 w-4 items-center justify-center rounded-full bg-indigo-600 text-white sm:h-5 sm:w-5"
-                                  : "text-slate-700"
+                                  : isOff
+                                    ? "text-slate-400"
+                                    : "text-slate-700"
                               }`}
                             >
                               {date.getDate()}
                             </span>
 
-                            {/* Badge status */}
                             {summary && (
                               <div className="mt-0.5 flex flex-wrap justify-center gap-0.5 sm:mt-1">
                                 {STATUS_ORDER.filter(
@@ -848,11 +1178,12 @@ export default function AbsensiPageWalas() {
                                 ))}
                               </div>
                             )}
+
                             {isUnfilled && !summary && (
-                              <span className="mt-0.5 h-1 w-1 rounded-full border border-slate-300 sm:mt-1 sm:h-1.5 sm:w-1.5" />
+                              <span className="absolute right-0.5 top-0.5 flex h-2 w-2 items-center justify-center rounded-full bg-rose-400 ring-2 ring-white sm:h-2.5 sm:w-2.5" />
                             )}
                             {isUnfilled && summary && (
-                              <span className="mt-0.5 text-[8px] font-medium text-amber-600 sm:text-[9px]">
+                              <span className="mt-0.5 rounded-full bg-rose-100 px-1 text-[8px] font-semibold text-rose-700 sm:text-[9px]">
                                 {summary.total}/{totalSiswa}
                               </span>
                             )}
@@ -861,7 +1192,6 @@ export default function AbsensiPageWalas() {
                       })}
                   </div>
 
-                  {/* Legenda */}
                   <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3 text-[11px] text-slate-500 sm:gap-3 sm:text-xs">
                     {STATUS_ORDER.map((s) => (
                       <span key={s} className="flex items-center gap-1">
@@ -872,13 +1202,21 @@ export default function AbsensiPageWalas() {
                       </span>
                     ))}
                     <span className="flex items-center gap-1">
+                      <span className="h-2 w-2 rounded-full bg-rose-400" />
+                      Belum lengkap
+                    </span>
+                    <span className="flex items-center gap-1">
                       <span className="h-2 w-2 rounded-full border border-slate-300" />
                       Belum diabsen
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span className="h-2 w-2 rounded-full bg-slate-200" />
+                      Libur / akhir pekan
                     </span>
                   </div>
                 </div>
 
-                {/* Panel detail absensi harian */}
+                {/* Panel detail harian */}
                 {selectedDate && (
                   <div className="mt-6 rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
                     <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
@@ -888,6 +1226,17 @@ export default function AbsensiPageWalas() {
                         </h2>
                         <p className="text-sm text-slate-500">
                           {formatLong(selectedDate)}
+                          {isHoliday(selectedDate, hariLiburList) && (
+                            <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">
+                              Libur
+                            </span>
+                          )}
+                          {isWeekend(selectedDate) &&
+                            !isHoliday(selectedDate, hariLiburList) && (
+                              <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">
+                                Akhir pekan
+                              </span>
+                            )}
                         </p>
                       </div>
                       {!loadingDetail && totalSiswa > 0 && (
@@ -930,7 +1279,6 @@ export default function AbsensiPageWalas() {
                         Belum ada siswa terdaftar di kelas ini.
                       </p>
                     ) : !isEditingDay ? (
-                      // ---------- MODE LIHAT (read-only): tanggal ini sudah pernah diabsen ----------
                       <>
                         <div className="mb-3 flex items-center gap-2 rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-xs text-indigo-700">
                           <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-indigo-600 text-white">
@@ -984,7 +1332,6 @@ export default function AbsensiPageWalas() {
                         </div>
                       </>
                     ) : (
-                      // ---------- MODE EDIT/ISI ----------
                       <>
                         <div className="divide-y divide-slate-100">
                           {detailRows.map((row) => (
@@ -1058,8 +1405,116 @@ export default function AbsensiPageWalas() {
             {/* ================= TAB REKAP ================= */}
             {activeTab === "rekap" && (
               <div className="space-y-6">
-                {/* Filter rentang tanggal + export */}
+                {/* Bubble notif: hari belum lengkap (MERAH) atau lengkap (HIJAU) */}
+                {!loadingRekap &&
+                  totalSiswa > 0 &&
+                  rekapTotalHariKerja > 0 &&
+                  incompleteDaysRekap.length > 0 && (
+                    <div
+                      className="flex items-start gap-3 rounded-xl border border-rose-200 bg-rose-50 p-3 sm:p-4"
+                      style={{ animation: "bubble-pop 0.25s ease-out" }}
+                    >
+                      <span className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-rose-500 text-xs font-bold text-white">
+                        !
+                      </span>
+                      <div className="flex-1">
+                        <p className="text-sm font-semibold text-rose-800">
+                          {incompleteDaysRekap.length} dari{" "}
+                          {rekapTotalHariKerja} hari kerja belum diabsen lengkap
+                        </p>
+                        <p className="mt-0.5 text-xs text-rose-700">
+                          Rentang {formatShort(rekapStart)} –{" "}
+                          {formatShort(rekapEnd)}. Persentase di bawah memakai
+                          total hari kerja, jadi nilai bisa tampak lebih rendah
+                          sampai absensi dilengkapi.
+                        </p>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {incompleteDaysRekap.slice(0, 20).map((d) => (
+                            <button
+                              key={toISODate(d.date)}
+                              onClick={() => {
+                                setActiveTab("kalender");
+                                setViewDate(
+                                  new Date(
+                                    d.date.getFullYear(),
+                                    d.date.getMonth(),
+                                    1,
+                                  ),
+                                );
+                                setTimeout(() => openDetail(d.date), 0);
+                              }}
+                              className="rounded-md border border-rose-300 bg-white px-2 py-0.5 text-[11px] font-medium text-rose-800 hover:bg-rose-100"
+                              title={`Terisi ${d.filled} dari ${totalSiswa} siswa · klik untuk isi`}
+                            >
+                              {d.date.getDate()}{" "}
+                              {BULAN[d.date.getMonth()].slice(0, 3)}
+                              <span className="ml-1 text-[10px] text-rose-600">
+                                ({d.filled}/{totalSiswa})
+                              </span>
+                            </button>
+                          ))}
+                          {incompleteDaysRekap.length > 20 && (
+                            <span className="rounded-md border border-rose-200 bg-white px-2 py-0.5 text-[11px] text-rose-700">
+                              +{incompleteDaysRekap.length - 20} hari lain
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                {!loadingRekap &&
+                  totalSiswa > 0 &&
+                  rekapTotalHariKerja > 0 &&
+                  incompleteDaysRekap.length === 0 && (
+                    <div
+                      className="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 sm:p-4"
+                      style={{ animation: "bubble-pop 0.25s ease-out" }}
+                    >
+                      <span className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-emerald-500 text-xs font-bold text-white">
+                        ✓
+                      </span>
+                      <div className="flex-1">
+                        <p className="text-sm font-semibold text-emerald-800">
+                          Semua {rekapTotalHariKerja} hari kerja sudah diabsen
+                          lengkap 🎉
+                        </p>
+                        <p className="mt-0.5 text-xs text-emerald-700">
+                          Rentang {formatShort(rekapStart)} –{" "}
+                          {formatShort(rekapEnd)}.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                {/* Filter rentang tanggal + shortcut + export */}
                 <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
+                  <div className="mb-4">
+                    <p className="mb-2 text-xs font-medium text-slate-500">
+                      Shortcut periode
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { id: "minggu", label: "7 Hari Terakhir" },
+                        { id: "bulan", label: "30 Hari Terakhir" },
+                        { id: "bulan_ini", label: "Bulan Ini" },
+                        { id: "bulan_lalu", label: "Bulan Lalu" },
+                      ].map((p) => (
+                        <button
+                          key={p.id}
+                          onClick={() => applyPreset(p.id)}
+                          className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
+                            rekapPreset === p.id
+                              ? "bg-indigo-600 text-white"
+                              : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                          }`}
+                        >
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                   <div className="flex flex-wrap items-end gap-3">
                     <div>
                       <label className="mb-1 block text-xs font-medium text-slate-600">
@@ -1069,7 +1524,10 @@ export default function AbsensiPageWalas() {
                         type="date"
                         value={rekapStart}
                         max={rekapEnd}
-                        onChange={(e) => setRekapStart(e.target.value)}
+                        onChange={(e) => {
+                          setRekapStart(e.target.value);
+                          setRekapPreset("custom");
+                        }}
                         className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                       />
                     </div>
@@ -1082,7 +1540,10 @@ export default function AbsensiPageWalas() {
                         value={rekapEnd}
                         min={rekapStart}
                         max={toISODate(today)}
-                        onChange={(e) => setRekapEnd(e.target.value)}
+                        onChange={(e) => {
+                          setRekapEnd(e.target.value);
+                          setRekapPreset("custom");
+                        }}
                         className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                       />
                     </div>
@@ -1100,6 +1561,10 @@ export default function AbsensiPageWalas() {
                       Export ke Excel
                     </button>
                   </div>
+                  <p className="mt-2 text-xs text-slate-400">
+                    Hari efektif dihitung dari Senin–Jumat, tidak termasuk
+                    Sabtu, Minggu, dan hari libur yang ditetapkan admin.
+                  </p>
                   {rekapError && (
                     <p className="mt-2 text-xs text-rose-600">{rekapError}</p>
                   )}
@@ -1115,7 +1580,6 @@ export default function AbsensiPageWalas() {
                   </div>
                 ) : (
                   <>
-                    {/* Kartu ringkasan akumulasi */}
                     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                       {STATUS_ORDER.map((s) => (
                         <div
@@ -1137,7 +1601,6 @@ export default function AbsensiPageWalas() {
                       ))}
                     </div>
 
-                    {/* Persentase kehadiran vs ketidakhadiran */}
                     <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
                       <h3 className="mb-3 text-sm font-semibold text-slate-900">
                         Persentase Kehadiran Kelas
@@ -1162,11 +1625,10 @@ export default function AbsensiPageWalas() {
                       <p className="mt-2 text-xs text-slate-400">
                         Periode {formatShort(rekapStart)} –{" "}
                         {formatShort(rekapEnd)} ·{" "}
-                        {rekapPerSiswa.totalHariEfektif} hari tercatat
+                        {rekapPerSiswa.totalHariEfektif} hari efektif
                       </p>
                     </div>
 
-                    {/* Ranking paling rajin */}
                     <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
                       <h3 className="mb-3 text-sm font-semibold text-slate-900">
                         🏆 Siswa Paling Rajin
@@ -1214,7 +1676,6 @@ export default function AbsensiPageWalas() {
                       )}
                     </div>
 
-                    {/* Tabel rekap per siswa */}
                     <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
                       <h3 className="mb-3 text-sm font-semibold text-slate-900">
                         Rekap per Siswa
