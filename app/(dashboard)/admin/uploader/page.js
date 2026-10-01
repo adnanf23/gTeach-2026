@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 import { pb } from "@/lib/pocketbase"; // sesuaikan path file pocketbase kamu
+import { Verified } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
 /* Helper                                                              */
@@ -11,6 +12,7 @@ import { pb } from "@/lib/pocketbase"; // sesuaikan path file pocketbase kamu
 
 const KOMPONEN = ["k1", "k2", "k3", "k4"];
 const NAVY = "FF1E3A5F";
+const DEFAULT_PASSWORD_WALI = "12345678";
 const DEFAULT_TP = [
   "TP 1",
   "TP 2",
@@ -84,7 +86,7 @@ function styleHeader(row) {
   });
 }
 
-const validasi = {
+const validasiNilai = {
   type: "decimal",
   operator: "between",
   formulae: [0, 100],
@@ -99,7 +101,7 @@ const validasi = {
 /* ------------------------------------------------------------------ */
 
 export default function UploadNilaiPage() {
-  const [mode, setMode] = useState("tp"); // "tp" | "lp"
+  const [mode, setMode] = useState("tp"); // "tp" | "lp" | "wali" | "siswa"
 
   const [tahunList, setTahunList] = useState([]);
   const [mapelAll, setMapelAll] = useState([]);
@@ -112,6 +114,7 @@ export default function UploadNilaiPage() {
   const [siswaList, setSiswaList] = useState([]);
   const [tpList, setTpList] = useState([]);
   const [lpList, setLpList] = useState([]);
+  const [waliList, setWaliList] = useState([]);
 
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
@@ -157,7 +160,7 @@ export default function UploadNilaiPage() {
     [plot, mapelAll],
   );
 
-  /* ---------- siswa, kelas, TP, LP ---------- */
+  /* ---------- load data per mode ---------- */
   useEffect(() => {
     setFile(null);
     setPreview(null);
@@ -165,6 +168,43 @@ export default function UploadNilaiPage() {
     setSiswaList([]);
     setTpList([]);
     setLpList([]);
+    setWaliList([]);
+
+    /* --- Mode wali / siswa --- */
+    if (mode === "wali" || mode === "siswa") {
+      let batal = false;
+      (async () => {
+        try {
+          const [siswa, kelas, wali] = await Promise.all([
+            pb.collection("siswa").getFullList({ sort: "nama_siswa" }),
+            pb.collection("kelas").getFullList({ sort: "tingkat,nama_kelas" }),
+            pb.collection("wali_murid").getFullList(),
+          ]);
+          if (batal) return;
+          const kelasOrder = new Map(kelas.map((k, i) => [k.id, i]));
+          const siswaSorted = [...siswa].sort((a, b) => {
+            const ka = kelasOrder.get(unwrapRel(a.kelas_id)) ?? 999;
+            const kb = kelasOrder.get(unwrapRel(b.kelas_id)) ?? 999;
+            if (ka !== kb) return ka - kb;
+            return (a.nama_siswa || "").localeCompare(b.nama_siswa || "", "id");
+          });
+          setSiswaList(siswaSorted);
+          setKelasList(kelas);
+          setWaliList(wali);
+        } catch (e) {
+          if (!batal)
+            setPesan({
+              tipe: "error",
+              teks: "Gagal memuat data: " + e.message,
+            });
+        }
+      })();
+      return () => {
+        batal = true;
+      };
+    }
+
+    /* --- Mode TP/LP --- */
     if (!mapelId || mapelAll.length === 0) return;
 
     const mapelRec = mapelAll.find((m) => m.id === mapelId);
@@ -276,7 +316,7 @@ export default function UploadNilaiPage() {
     return () => {
       batal = true;
     };
-  }, [mapelId, plot, mapelAll]);
+  }, [mapelId, plot, mapelAll, mode]);
 
   const kelasById = useMemo(
     () => Object.fromEntries(kelasList.map((k) => [k.id, k])),
@@ -333,8 +373,6 @@ export default function UploadNilaiPage() {
     return Array.from(groups.values());
   }, [lpList]);
 
-  // Daftar header LP: kalau sudah ada LM pakai header LM, kalau belum ada
-  // sediakan slot "LP 1..10" yang bisa diganti nama saat diisi.
   const lpHeaderList = useMemo(() => {
     if (lpGroups.length > 0) return lpGroups.map((g) => g.header);
     return DEFAULT_LP;
@@ -346,8 +384,15 @@ export default function UploadNilaiPage() {
   const siapTemplate =
     siswaList.length > 0 && (mode === "tp" ? tpHeaders.length > 0 : true);
 
+  function gantiMode(m) {
+    setMode(m);
+    setFile(null);
+    setPreview(null);
+    setPesan(null);
+  }
+
   /* ---------------------------------------------------------------- */
-  /* Template                                                          */
+  /* Template TP / LP                                                  */
   /* ---------------------------------------------------------------- */
 
   async function unduhTemplate() {
@@ -380,7 +425,7 @@ export default function UploadNilaiPage() {
       const row = ws.addRow([s.nis || "", s.nama_siswa, kelasNama]);
       row.getCell(1).numFmt = "@";
       for (let c = 4; c <= headers.length; c++) {
-        row.getCell(c).dataValidation = validasi;
+        row.getCell(c).dataValidation = validasiNilai;
         row.getCell(c).alignment = { horizontal: "center" };
       }
       if (idx % 2 === 1) {
@@ -413,15 +458,9 @@ export default function UploadNilaiPage() {
             "",
             "1. Isi nilai pada kolom TP - K1 sampai K4 (angka 0-100). Kolom boleh dikosongkan.",
             "2. Sel yang dikosongkan tidak akan menimpa nilai yang sudah ada di sistem.",
-            "3. Hanya TP yang diisi nilainya yang akan dibuat. Kolom TP yang dibiarkan kosong tidak akan membuat TP baru.",
-            "4. TP yang dibuat akan otomatis terhubung ke kelas siswa yang nilainya diisi.",
-            "5. Untuk TP yang baru dibuat, komponen K1-K4 yang dikosongkan otomatis diisi -1.",
-            "6. Jangan mengubah nama kolom dan jangan menambah/menghapus kolom.",
-            "7. Jangan mengubah isi kolom NIS / Nama Siswa / Kelas, karena dipakai untuk mencocokkan siswa.",
-            "8. Siswa dicocokkan lewat NIS. Jika NIS kosong, dicocokkan lewat Nama + Kelas.",
-            "9. Gunakan titik atau koma untuk desimal (contoh 85,5).",
-            "",
-            "Satu file bisa berisi nilai untuk semua kelas dalam cakupan mapel ini sekaligus.",
+            "3. Hanya TP yang diisi nilainya yang akan dibuat.",
+            "4. Jangan mengubah isi kolom NIS / Nama Siswa / Kelas.",
+            "5. Gunakan titik atau koma untuk desimal (contoh 85,5).",
           ]
         : [
             "PETUNJUK UPLOAD NILAI SUMATIF (LP)",
@@ -430,14 +469,8 @@ export default function UploadNilaiPage() {
             "",
             "1. Isi nilai pada kolom LP (angka 0-100). Kolom boleh dikosongkan.",
             "2. Sel yang dikosongkan tidak akan menimpa nilai yang sudah ada di sistem.",
-            "3. Kolom LP di sebelah kanan 'Kelas' adalah slot. Ganti namanya sesuai nama LP yang diinginkan (contoh: 'Bab 1 Aljabar').",
-            "4. Hanya LP yang diisi nilainya yang akan dibuat. Kolom LP yang dibiarkan kosong tidak akan membuat LP baru.",
-            "5. LP yang baru akan otomatis terhubung ke mapel ini dan kelas siswa yang nilainya diisi.",
-            "6. Jangan mengubah isi kolom NIS / Nama Siswa / Kelas, karena dipakai untuk mencocokkan siswa.",
-            "7. Siswa dicocokkan lewat NIS. Jika NIS kosong, dicocokkan lewat Nama + Kelas.",
-            "8. Gunakan titik atau koma untuk desimal (contoh 85,5).",
-            "",
-            "Satu file bisa berisi nilai untuk semua kelas dalam cakupan mapel ini sekaligus.",
+            "3. Ganti nama kolom 'LP 1..' sesuai nama LP yang diinginkan.",
+            "4. Jangan mengubah isi kolom NIS / Nama Siswa / Kelas.",
           ];
     baris.forEach((t, i) => {
       const r = info.addRow([t]);
@@ -454,7 +487,133 @@ export default function UploadNilaiPage() {
   }
 
   /* ---------------------------------------------------------------- */
-  /* Baca file                                                         */
+  /* Template WALI MURID (kosong, isi manual)                          */
+  /* ---------------------------------------------------------------- */
+
+  async function unduhTemplateWali() {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Wali Murid");
+
+    const headers = ["Nama Siswa", "Username", "Password"];
+    ws.addRow(headers);
+    styleHeader(ws.getRow(1));
+
+    for (let i = 0; i < 25; i++) {
+      const row = ws.addRow(["", "", ""]);
+      if (i % 2 === 1) {
+        row.eachCell((cell) => {
+          cell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FFF1F5F9" },
+          };
+        });
+      }
+    }
+
+    ws.getColumn(1).width = 30;
+    ws.getColumn(2).width = 22;
+    ws.getColumn(3).width = 20;
+    ws.views = [{ state: "frozen", ySplit: 1 }];
+
+    const info = wb.addWorksheet("Petunjuk");
+    info.getColumn(1).width = 115;
+    [
+      "PETUNJUK UPLOAD AKUN WALI MURID (isi manual)",
+      "",
+      "1. Isi kolom Nama Siswa PERSIS sesuai nama siswa yang ada di sistem.",
+      "   (Sistem akan otomatis mencocokkan ke data siswa sebagai relasi.)",
+      "2. Isi kolom Username untuk akun wali murid.",
+      "   - Username harus unik (tidak boleh sama dengan akun wali lain).",
+      "3. Kolom Password boleh dikosongkan, otomatis diisi '12345678'.",
+      "   - Jika diisi, minimal 8 karakter.",
+      "4. Jika siswa sudah punya akun wali, data akun akan DIPERBARUI.",
+      "5. Jika siswa belum punya akun wali, akun BARU akan dibuat.",
+      "6. Baris yang dikosongkan seluruhnya akan dilewati.",
+      "7. Hapus baris siswa yang tidak ingin dibuatkan/diperbarui akunnya.",
+      "8. Nama siswa yang tidak ditemukan di sistem akan ditolak (baris merah).",
+    ].forEach((t, i) => {
+      const r = info.addRow([t]);
+      if (i === 0) r.font = { bold: true, size: 13 };
+    });
+
+    const buf = await wb.xlsx.writeBuffer();
+    saveAs(
+      new Blob([buf], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      }),
+      `template_WALI_MURID.xlsx`,
+    );
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Template SISWA (kosong, isi manual) — KUNCI: NIS                  */
+  /* ---------------------------------------------------------------- */
+
+  async function unduhTemplateSiswa() {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Siswa");
+
+    const headers = ["NIS", "Nama Siswa", "NISN", "Kelas"];
+    ws.addRow(headers);
+    styleHeader(ws.getRow(1));
+
+    for (let i = 0; i < 25; i++) {
+      const row = ws.addRow(["", "", "", ""]);
+      row.getCell(1).numFmt = "@";
+      row.getCell(3).numFmt = "@";
+      if (i % 2 === 1) {
+        row.eachCell((cell) => {
+          cell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FFF1F5F9" },
+          };
+        });
+      }
+    }
+
+    ws.getColumn(1).width = 16;
+    ws.getColumn(2).width = 32;
+    ws.getColumn(3).width = 18;
+    ws.getColumn(4).width = 16;
+    ws.views = [{ state: "frozen", ySplit: 1 }];
+
+    const info = wb.addWorksheet("Petunjuk");
+    info.getColumn(1).width = 115;
+    [
+      "PETUNJUK UPLOAD DATA SISWA (isi manual)",
+      "",
+      "1. Kolom NIS WAJIB diisi dan jadi KUNCI utama pencocokan siswa.",
+      "2. Kolom Nama Siswa WAJIB diisi.",
+      "3. Kolom NISN boleh dikosongkan.",
+      "4. Kolom Kelas harus persis sama dengan nama kelas yang ada di sistem.",
+      `   Contoh: ${
+        kelasList
+          .slice(0, 5)
+          .map((k) => k.nama_kelas)
+          .join(", ") || "7A, 7B, 8A, ..."
+      }`,
+      "5. Jika NIS sudah terdaftar → data siswa akan DIPERBARUI.",
+      "6. Jika NIS belum terdaftar → siswa BARU akan dibuat.",
+      "7. Baris yang dikosongkan seluruhnya akan dilewati.",
+      "8. Hapus baris yang tidak ingin diproses.",
+    ].forEach((t, i) => {
+      const r = info.addRow([t]);
+      if (i === 0) r.font = { bold: true, size: 13 };
+    });
+
+    const buf = await wb.xlsx.writeBuffer();
+    saveAs(
+      new Blob([buf], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      }),
+      `template_SISWA.xlsx`,
+    );
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Baca file TP / LP                                                 */
   /* ---------------------------------------------------------------- */
 
   async function bacaFile(f) {
@@ -496,18 +655,15 @@ export default function UploadNilaiPage() {
           if (target) peta[col] = { type: "tp", ...target };
           else peringatan.push(`Kolom "${teks}" tidak dikenali dan diabaikan.`);
         } else {
-          // LP: semua kolom di luar NIS/Nama/Kelas dianggap kolom LM
           peta[col] = { type: "lp", lmNama: teks };
         }
       });
 
       if (!kolomNis && !kolomNama)
-        throw new Error(
-          "Kolom NIS / Nama Siswa tidak ditemukan. Gunakan template dari halaman ini.",
-        );
+        throw new Error("Kolom NIS / Nama Siswa tidak ditemukan.");
       if (Object.keys(peta).length === 0)
         throw new Error(
-          `Tidak ada kolom nilai ${mode.toUpperCase()} yang cocok. Pastikan file berasal dari template ${mode.toUpperCase()} untuk mapel ini.`,
+          `Tidak ada kolom nilai ${mode.toUpperCase()} yang cocok.`,
         );
 
       const perNis = new Map(
@@ -594,7 +750,6 @@ export default function UploadNilaiPage() {
             };
             item.jumlah++;
           } else {
-            // LP: key = `normNama(lmNama)|kelasId`
             if (!siswa) return;
             const key = `${normNama(target.lmNama)}|${siswaKelasId}`;
             item.data[key] = { nilai: p.nilai, lmNama: target.lmNama };
@@ -611,6 +766,7 @@ export default function UploadNilaiPage() {
         valid,
         peringatan,
         totalNilai: valid.reduce((a, r) => a + r.jumlah, 0),
+        tipe: mode,
       });
     } catch (e) {
       setPreview(null);
@@ -619,7 +775,301 @@ export default function UploadNilaiPage() {
   }
 
   /* ---------------------------------------------------------------- */
-  /* Simpan                                                            */
+  /* Baca file WALI MURID (manual)                                     */
+  /* ---------------------------------------------------------------- */
+
+  async function bacaFileWali(f) {
+    setFile(f);
+    setPreview(null);
+    setPesan(null);
+    if (!f) return;
+
+    try {
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(await f.arrayBuffer());
+      const ws = wb.worksheets[0];
+      if (!ws) throw new Error("File Excel kosong.");
+
+      let cNama = 0,
+        cUser = 0,
+        cPass = 0;
+
+      ws.getRow(1).eachCell((cell, col) => {
+        const n = normKey(cellToValue(cell.value));
+        if (n === "NAMASISWA" || n === "NAMA") return void (cNama = col);
+        if (n === "USERNAME") return void (cUser = col);
+        if (n === "PASSWORD") return void (cPass = col);
+      });
+
+      if (!cNama)
+        throw new Error("Kolom Nama Siswa tidak ditemukan di header.");
+      if (!cUser) throw new Error("Kolom Username tidak ditemukan di header.");
+
+      const perNama = new Map();
+      siswaList.forEach((s) => {
+        const k = normNama(s.nama_siswa);
+        if (!perNama.has(k)) perNama.set(k, []);
+        perNama.get(k).push(s);
+      });
+
+      const waliBySiswa = new Map(
+        waliList.map((w) => [unwrapRel(w.siswa_id), w]),
+      );
+      const waliByUsername = new Map(
+        waliList
+          .filter((w) => w.username)
+          .map((w) => [w.username.toLowerCase(), w]),
+      );
+
+      const rows = [];
+      const seenNama = new Set();
+      const seenUsername = new Set();
+
+      ws.eachRow((row, rowNum) => {
+        if (rowNum === 1) return;
+        const namaSiswa = cNama
+          ? String(cellToValue(row.getCell(cNama).value) ?? "").trim()
+          : "";
+        const username = cUser
+          ? String(cellToValue(row.getCell(cUser).value) ?? "").trim()
+          : "";
+        const password = cPass
+          ? String(cellToValue(row.getCell(cPass).value) ?? "").trim()
+          : "";
+
+        if (!namaSiswa && !username && !password) return;
+
+        const item = {
+          rowNum,
+          namaSiswa,
+          username,
+          password: password || DEFAULT_PASSWORD_WALI,
+          siswa: null,
+          existing: null,
+          aksi: null,
+          errors: [],
+        };
+
+        if (!namaSiswa) {
+          item.errors.push("Nama Siswa wajib diisi");
+        } else {
+          const arr = perNama.get(normNama(namaSiswa)) || [];
+          if (arr.length === 0) {
+            item.errors.push(`Siswa "${namaSiswa}" tidak ditemukan`);
+          } else if (arr.length > 1) {
+            item.errors.push(
+              `Ada ${arr.length} siswa bernama sama. Tambahkan pembeda (mis. kelas) di data siswa.`,
+            );
+          } else {
+            item.siswa = arr[0];
+          }
+        }
+
+        if (!username) {
+          item.errors.push("Username wajib diisi");
+        } else if (!/^[a-z0-9._-]+$/i.test(username)) {
+          item.errors.push(
+            "Username hanya boleh huruf, angka, titik, underscore, dan dash",
+          );
+        }
+
+        const usernameKey = username.toLowerCase();
+
+        if (password && password.length < 8) {
+          item.errors.push("Password minimal 8 karakter");
+        }
+
+        const namaKey = normNama(namaSiswa);
+        if (namaKey && seenNama.has(namaKey))
+          item.errors.push("Nama Siswa duplikat di file");
+        if (namaKey) seenNama.add(namaKey);
+
+        if (usernameKey && seenUsername.has(usernameKey))
+          item.errors.push("Username duplikat di file");
+        if (usernameKey) seenUsername.add(usernameKey);
+
+        if (item.siswa && item.errors.length === 0) {
+          const existing = waliBySiswa.get(item.siswa.id);
+          if (existing) {
+            const userOwner = waliByUsername.get(usernameKey);
+            if (userOwner && userOwner.id !== existing.id)
+              item.errors.push(
+                `Username sudah dipakai akun wali lain (${userOwner.username})`,
+              );
+            if (item.errors.length === 0) {
+              item.existing = existing;
+              item.aksi = "update";
+            }
+          } else {
+            const userOwner = waliByUsername.get(usernameKey);
+            if (userOwner)
+              item.errors.push(
+                `Username sudah dipakai akun wali lain (${userOwner.username})`,
+              );
+            if (item.errors.length === 0) item.aksi = "create";
+          }
+        }
+
+        rows.push(item);
+      });
+
+      const valid = rows.filter(
+        (r) => r.errors.length === 0 && r.aksi && r.siswa,
+      );
+
+      setPreview({
+        rows,
+        valid,
+        peringatan: [],
+        totalNilai: valid.length,
+        tipe: "wali",
+      });
+    } catch (e) {
+      setPreview(null);
+      setPesan({ tipe: "error", teks: e.message });
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Baca file SISWA (manual) — KUNCI: NIS                             */
+  /* ---------------------------------------------------------------- */
+
+  async function bacaFileSiswa(f) {
+    setFile(f);
+    setPreview(null);
+    setPesan(null);
+    if (!f) return;
+
+    try {
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(await f.arrayBuffer());
+      const ws = wb.worksheets[0];
+      if (!ws) throw new Error("File Excel kosong.");
+
+      let cNis = 0,
+        cNama = 0,
+        cNisn = 0,
+        cKelas = 0;
+
+      ws.getRow(1).eachCell((cell, col) => {
+        const n = normKey(cellToValue(cell.value));
+        if (n === "NIS") return void (cNis = col);
+        if (n === "NAMASISWA" || n === "NAMA") return void (cNama = col);
+        if (n === "NISN") return void (cNisn = col);
+        if (n === "KELAS") return void (cKelas = col);
+      });
+
+      if (!cNis) throw new Error("Kolom NIS tidak ditemukan di header.");
+      if (!cNama)
+        throw new Error("Kolom Nama Siswa tidak ditemukan di header.");
+      if (!cKelas) throw new Error("Kolom Kelas tidak ditemukan di header.");
+
+      const perNis = new Map();
+      siswaList.forEach((s) => {
+        if (s.nis) perNis.set(String(s.nis).trim(), s);
+      });
+
+      const kelasByName = new Map(
+        kelasList.map((k) => [normNama(k.nama_kelas), k]),
+      );
+
+      const rows = [];
+      const seenNis = new Set();
+
+      ws.eachRow((row, rowNum) => {
+        if (rowNum === 1) return;
+        const nis = cNis
+          ? String(cellToValue(row.getCell(cNis).value) ?? "").trim()
+          : "";
+        const nama = cNama
+          ? String(cellToValue(row.getCell(cNama).value) ?? "").trim()
+          : "";
+        const nisn = cNisn
+          ? String(cellToValue(row.getCell(cNisn).value) ?? "").trim()
+          : "";
+        const kelasNama = cKelas
+          ? String(cellToValue(row.getCell(cKelas).value) ?? "").trim()
+          : "";
+
+        if (!nis && !nama && !nisn && !kelasNama) return;
+
+        const item = {
+          rowNum,
+          nis,
+          nama,
+          nisn,
+          kelasNama,
+          kelasId: null,
+          existing: null,
+          aksi: null,
+          perubahan: {},
+          errors: [],
+        };
+
+        if (!nis) item.errors.push("NIS wajib diisi");
+        if (!nama) item.errors.push("Nama Siswa wajib diisi");
+        if (!kelasNama) {
+          item.errors.push("Kelas wajib diisi");
+        } else {
+          const k = kelasByName.get(normNama(kelasNama));
+          if (!k) item.errors.push(`Kelas "${kelasNama}" tidak ditemukan`);
+          else item.kelasId = k.id;
+        }
+
+        if (nis) {
+          if (seenNis.has(nis)) item.errors.push("NIS duplikat di file");
+          seenNis.add(nis);
+        }
+
+        if (item.errors.length === 0 && nis) {
+          const existing = perNis.get(nis) || null;
+          item.existing = existing;
+          if (existing) {
+            item.aksi = "update";
+            const diff = {};
+            if (nama && String(existing.nama_siswa || "").trim() !== nama)
+              diff.nama_siswa = nama;
+            if (String(existing.nisn || "").trim() !== nisn) diff.nisn = nisn;
+            if (unwrapRel(existing.kelas_id) !== item.kelasId)
+              diff.kelas_id = [item.kelasId];
+            item.perubahan = diff;
+            if (Object.keys(diff).length === 0) {
+              item.aksi = "nochange";
+            }
+          } else {
+            item.aksi = "create";
+            item.perubahan = {
+              nis,
+              nama_siswa: nama,
+              nisn,
+              kelas_id: [item.kelasId],
+            };
+          }
+        }
+
+        rows.push(item);
+      });
+
+      const valid = rows.filter(
+        (r) =>
+          r.errors.length === 0 && (r.aksi === "create" || r.aksi === "update"),
+      );
+
+      setPreview({
+        rows,
+        valid,
+        peringatan: [],
+        totalNilai: valid.length,
+        tipe: "siswa",
+      });
+    } catch (e) {
+      setPreview(null);
+      setPesan({ tipe: "error", teks: e.message });
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Simpan TP / LP                                                    */
   /* ---------------------------------------------------------------- */
 
   async function simpan() {
@@ -633,7 +1083,6 @@ export default function UploadNilaiPage() {
       const koleksi = isTP ? "nilai_formatif" : "nilai_sumatif";
       const fk = isTP ? "tp_id" : "lm_id";
 
-      /* ---- Cache TP (hanya dipakai untuk mode TP) ---- */
       const tpCache = new Map();
       if (isTP) {
         tpList.forEach((t) => {
@@ -642,11 +1091,9 @@ export default function UploadNilaiPage() {
             : t.kelas_id
               ? [t.kelas_id]
               : [];
-          if (tKelasIds.length === 0) {
-            tpCache.set(`${t.no_tp}|*`, t.id);
-          } else {
+          if (tKelasIds.length === 0) tpCache.set(`${t.no_tp}|*`, t.id);
+          else
             tKelasIds.forEach((kid) => tpCache.set(`${t.no_tp}|${kid}`, t.id));
-          }
         });
       }
 
@@ -664,8 +1111,7 @@ export default function UploadNilaiPage() {
         return rec.id;
       }
 
-      /* ---- Cache LM (hanya dipakai untuk mode LP) ---- */
-      const lmCache = new Map(); // `normNama(nama)|kelasId` -> lmId
+      const lmCache = new Map();
       if (!isTP) {
         lpList.forEach((lm) => {
           const nama = normNama(lm.nama);
@@ -679,7 +1125,6 @@ export default function UploadNilaiPage() {
         });
       }
 
-      /* ---- Kumpulkan nilai dari preview ---- */
       const valuesToSave = [];
       preview.valid.forEach((r) => {
         Object.entries(r.data).forEach(([key, val]) => {
@@ -692,7 +1137,6 @@ export default function UploadNilaiPage() {
         });
       });
 
-      /* ---- Resolve TP ---- */
       if (isTP) {
         const resolusi = new Set();
         valuesToSave.forEach((v) => resolusi.add(v.key));
@@ -702,18 +1146,12 @@ export default function UploadNilaiPage() {
         }
       }
 
-      /* ---- Resolve LM: cari yang ada, kalau belum ada buat baru ---- */
       if (!isTP) {
         const needed = new Map();
         valuesToSave.forEach((v) => {
           const [nama, kelasId] = v.key.split("|");
-          if (!needed.has(v.key)) {
-            needed.set(v.key, {
-              nama,
-              kelasId,
-              asli: v.val.lmNama,
-            });
-          }
+          if (!needed.has(v.key))
+            needed.set(v.key, { nama, kelasId, asli: v.val.lmNama });
         });
         for (const [key, info] of needed) {
           if (lmCache.has(key)) continue;
@@ -726,15 +1164,10 @@ export default function UploadNilaiPage() {
         }
       }
 
-      /* ---- Target ids untuk lookup existing ---- */
       let targetIds = [];
-      if (isTP) {
-        targetIds = Array.from(new Set(tpCache.values()));
-      } else {
-        targetIds = Array.from(new Set(lmCache.values()));
-      }
+      if (isTP) targetIds = Array.from(new Set(tpCache.values()));
+      else targetIds = Array.from(new Set(lmCache.values()));
 
-      /* ---- Ambil nilai yang sudah ada ---- */
       const existing = [];
       const CHUNK = 20;
       for (let i = 0; i < targetIds.length; i += CHUNK) {
@@ -759,7 +1192,6 @@ export default function UploadNilaiPage() {
         ]),
       );
 
-      /* ---- Susun operasi create/update ---- */
       const ops = [];
       valuesToSave.forEach(({ siswa, siswaKelasId, key, val }) => {
         let targetId;
@@ -844,10 +1276,8 @@ export default function UploadNilaiPage() {
           }
         });
         selesai += hasil.length;
-        if (ops.length > 0) {
+        if (ops.length > 0)
           setProgress(Math.round((selesai / ops.length) * 100));
-        }
-        // Jeda kecil biar server tidak kewalahan
         await new Promise((r) => setTimeout(r, 80));
       }
 
@@ -872,6 +1302,150 @@ export default function UploadNilaiPage() {
   }
 
   /* ---------------------------------------------------------------- */
+  /* Simpan WALI MURID                                                 */
+  /* ---------------------------------------------------------------- */
+
+  async function simpanWali() {
+    if (!preview || preview.valid.length === 0) return;
+    setSaving(true);
+    setProgress(0);
+    setPesan(null);
+
+    try {
+      const ops = preview.valid.map((r) => {
+        const body = {
+          username: r.username,
+          password: r.password,
+          passwordConfirm: r.password,
+          siswa_id: [r.siswa.id],
+          verified: true,
+          role: "wali murid",
+        };
+        if (r.aksi === "update" && r.existing) {
+          return () =>
+            pb
+              .collection("wali_murid")
+              .update(r.existing.id, body, { requestKey: null });
+        }
+        return () =>
+          pb.collection("wali_murid").create(body, { requestKey: null });
+      });
+
+      let selesai = 0;
+      let gagal = 0;
+      const errDetails = [];
+      const UKURAN = 3;
+      for (let i = 0; i < ops.length; i += UKURAN) {
+        const hasil = await Promise.allSettled(
+          ops.slice(i, i + UKURAN).map((fn) => fn()),
+        );
+        hasil.forEach((h) => {
+          if (h.status === "rejected") {
+            gagal++;
+            if (errDetails.length < 3) {
+              const msg =
+                h.reason?.data?.message ||
+                h.reason?.message ||
+                String(h.reason);
+              errDetails.push(msg);
+            }
+          }
+        });
+        selesai += hasil.length;
+        if (ops.length > 0)
+          setProgress(Math.round((selesai / ops.length) * 100));
+        await new Promise((r) => setTimeout(r, 100));
+      }
+
+      if (gagal === 0) {
+        setPesan({
+          tipe: "ok",
+          teks: `Berhasil menyimpan ${ops.length} akun wali murid.`,
+        });
+        setFile(null);
+        setPreview(null);
+      } else {
+        setPesan({
+          tipe: "error",
+          teks: `${ops.length - gagal} akun berhasil, ${gagal} gagal. Contoh error: ${errDetails.join(" | ")}`,
+        });
+      }
+    } catch (e) {
+      setPesan({ tipe: "error", teks: "Gagal menyimpan: " + e.message });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Simpan SISWA                                                      */
+  /* ---------------------------------------------------------------- */
+
+  async function simpanSiswa() {
+    if (!preview || preview.valid.length === 0) return;
+    setSaving(true);
+    setProgress(0);
+    setPesan(null);
+
+    try {
+      const ops = preview.valid.map((r) => {
+        if (r.aksi === "update" && r.existing) {
+          return () =>
+            pb
+              .collection("siswa")
+              .update(r.existing.id, r.perubahan, { requestKey: null });
+        }
+        return () =>
+          pb.collection("siswa").create(r.perubahan, { requestKey: null });
+      });
+
+      let selesai = 0;
+      let gagal = 0;
+      const errDetails = [];
+      const UKURAN = 3;
+      for (let i = 0; i < ops.length; i += UKURAN) {
+        const hasil = await Promise.allSettled(
+          ops.slice(i, i + UKURAN).map((fn) => fn()),
+        );
+        hasil.forEach((h) => {
+          if (h.status === "rejected") {
+            gagal++;
+            if (errDetails.length < 3) {
+              const msg =
+                h.reason?.data?.message ||
+                h.reason?.message ||
+                String(h.reason);
+              errDetails.push(msg);
+            }
+          }
+        });
+        selesai += hasil.length;
+        if (ops.length > 0)
+          setProgress(Math.round((selesai / ops.length) * 100));
+        await new Promise((r) => setTimeout(r, 100));
+      }
+
+      if (gagal === 0) {
+        setPesan({
+          tipe: "ok",
+          teks: `Berhasil menyimpan ${ops.length} data siswa.`,
+        });
+        setFile(null);
+        setPreview(null);
+      } else {
+        setPesan({
+          tipe: "error",
+          teks: `${ops.length - gagal} data berhasil, ${gagal} gagal. Contoh error: ${errDetails.join(" | ")}`,
+        });
+      }
+    } catch (e) {
+      setPesan({ tipe: "error", teks: "Gagal menyimpan: " + e.message });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
   /* UI                                                                */
   /* ---------------------------------------------------------------- */
 
@@ -880,75 +1454,387 @@ export default function UploadNilaiPage() {
       aktif ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"
     }`;
 
+  const modeTPLP = mode === "tp" || mode === "lp";
+
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-4 md:p-8">
       <header>
         <h1 className="text-2xl font-semibold text-slate-900">
-          Upload nilai siswa
+          Upload nilai & data
         </h1>
         <p className="mt-1 text-sm text-slate-500">
-          Unduh satu template untuk semua kelas, isi nilainya, lalu upload
-          kembali. Formatif (TP) dan sumatif (LP) diupload terpisah.
+          Unduh template, isi manual, lalu upload kembali. Formatif (TP),
+          sumatif (LP), akun wali murid, dan data siswa diupload terpisah.
         </p>
       </header>
 
-      <div className="inline-flex gap-1 rounded-xl border border-slate-200 bg-white p-1">
+      <div className="inline-flex flex-wrap gap-1 rounded-xl border border-slate-200 bg-white p-1">
         <button
           className={tabCls(mode === "tp")}
-          onClick={() => {
-            setMode("tp");
-            setFile(null);
-            setPreview(null);
-            setPesan(null);
-          }}
+          onClick={() => gantiMode("tp")}
         >
           Formatif (TP)
         </button>
         <button
           className={tabCls(mode === "lp")}
-          onClick={() => {
-            setMode("lp");
-            setFile(null);
-            setPreview(null);
-            setPesan(null);
-          }}
+          onClick={() => gantiMode("lp")}
         >
           Sumatif (LP)
         </button>
+        <button
+          className={tabCls(mode === "wali")}
+          onClick={() => gantiMode("wali")}
+        >
+          Wali Murid
+        </button>
+        <button
+          className={tabCls(mode === "siswa")}
+          onClick={() => gantiMode("siswa")}
+        >
+          Siswa
+        </button>
       </div>
 
-      <section className="grid gap-4 rounded-xl border border-slate-200 bg-white p-5 md:grid-cols-2">
-        <Field label="Tahun ajaran">
-          <select
-            className={selectCls}
-            value={tahunId}
-            onChange={(e) => setTahunId(e.target.value)}
-          >
-            {tahunList.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.tahun} - Semester {t.semester}
-                {t.is_aktif ? " (aktif)" : ""}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label="Mata pelajaran">
-          <select
-            className={selectCls}
-            value={mapelId}
-            onChange={(e) => setMapelId(e.target.value)}
-          >
-            <option value="">Pilih mapel</option>
-            {mapelOptions.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.nama_mapel}
-              </option>
-            ))}
-          </select>
-        </Field>
-      </section>
+      {/* ---------------- Filter mapel (khusus TP/LP) ---------------- */}
+      {modeTPLP && (
+        <section className="grid gap-4 rounded-xl border border-slate-200 bg-white p-5 md:grid-cols-2">
+          <Field label="Tahun ajaran">
+            <select
+              className={selectCls}
+              value={tahunId}
+              onChange={(e) => setTahunId(e.target.value)}
+            >
+              {tahunList.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.tahun} - Semester {t.semester}
+                  {t.is_aktif ? " (aktif)" : ""}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Mata pelajaran">
+            <select
+              className={selectCls}
+              value={mapelId}
+              onChange={(e) => setMapelId(e.target.value)}
+            >
+              <option value="">Pilih mapel</option>
+              {mapelOptions.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.nama_mapel}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </section>
+      )}
 
-      {mapelId && tahunId && (
+      {/* ================= MODE WALI MURID ================= */}
+      {mode === "wali" && (
+        <section className="space-y-5 rounded-xl border border-slate-200 bg-white p-5">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm text-slate-600">
+            <span>
+              <b className="text-slate-900">{siswaList.length}</b> siswa
+              terdaftar
+            </span>
+            <span>
+              <b className="text-slate-900">{waliList.length}</b> akun wali
+              murid
+            </span>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-5">
+            <div>
+              <p className="font-medium text-slate-900">
+                1. Unduh template WALI MURID
+              </p>
+              <p className="text-sm text-slate-500">
+                Template kosong — isi manual: Nama Siswa, Username, Password.
+              </p>
+            </div>
+            <button
+              onClick={unduhTemplateWali}
+              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
+            >
+              Unduh template WALI MURID
+            </button>
+          </div>
+
+          <div>
+            <p className="font-medium text-slate-900">
+              2. Upload file yang sudah diisi
+            </p>
+            <label
+              className={`mt-3 flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed px-4 py-8 text-center text-sm border-slate-300 hover:border-slate-400 hover:bg-slate-50`}
+            >
+              <span className="text-slate-700">
+                {file ? file.name : "Klik untuk memilih file .xlsx"}
+              </span>
+              <input
+                type="file"
+                accept=".xlsx"
+                className="hidden"
+                disabled={saving}
+                onChange={(e) => bacaFileWali(e.target.files?.[0] || null)}
+                onClick={(e) => (e.target.value = "")}
+              />
+            </label>
+          </div>
+
+          {preview && preview.tipe === "wali" && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                <Stat label="Baris terbaca" nilai={preview.rows.length} />
+                <Stat
+                  label="Siap disimpan"
+                  nilai={preview.valid.length}
+                  warna="text-emerald-700"
+                />
+                <Stat
+                  label="Bermasalah"
+                  nilai={preview.rows.filter((r) => r.errors.length).length}
+                  warna="text-red-700"
+                />
+                <Stat
+                  label="Akun baru"
+                  nilai={
+                    preview.valid.filter((r) => r.aksi === "create").length
+                  }
+                />
+              </div>
+
+              <div className="max-h-80 overflow-auto rounded-lg border border-slate-200">
+                <table className="w-full text-left text-sm">
+                  <thead className="sticky top-0 bg-slate-50 text-slate-600">
+                    <tr>
+                      <th className="px-3 py-2 font-medium">Baris</th>
+                      <th className="px-3 py-2 font-medium">Nama Siswa</th>
+                      <th className="px-3 py-2 font-medium">Username</th>
+                      <th className="px-3 py-2 font-medium">Aksi</th>
+                      <th className="px-3 py-2 font-medium">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {preview.rows.map((r) => (
+                      <tr
+                        key={r.rowNum}
+                        className={r.errors.length ? "bg-red-50/60" : ""}
+                      >
+                        <td className="px-3 py-2 text-slate-500">{r.rowNum}</td>
+                        <td className="px-3 py-2">{r.namaSiswa || "-"}</td>
+                        <td className="px-3 py-2">{r.username || "-"}</td>
+                        <td className="px-3 py-2">
+                          {r.aksi === "update" ? (
+                            <span className="text-blue-700">Update</span>
+                          ) : r.aksi === "create" ? (
+                            <span className="text-emerald-700">Buat baru</span>
+                          ) : (
+                            "-"
+                          )}
+                        </td>
+                        <td className="px-3 py-2">
+                          {r.errors.length ? (
+                            <span className="text-red-700">
+                              {r.errors.join("; ")}
+                            </span>
+                          ) : (
+                            <span className="text-emerald-700">Siap</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <p className="text-xs text-slate-500">
+                Nama Siswa dicocokkan ke data siswa sebagai relasi. Password
+                kosong otomatis diisi <b>{DEFAULT_PASSWORD_WALI}</b>.
+              </p>
+
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={simpanWali}
+                  disabled={saving || preview.valid.length === 0}
+                  className="rounded-lg bg-emerald-700 px-5 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-40"
+                >
+                  {saving
+                    ? `Menyimpan... ${progress}%`
+                    : `Simpan ${preview.valid.length} akun`}
+                </button>
+                {saving && (
+                  <div className="h-2 w-40 overflow-hidden rounded-full bg-slate-200">
+                    <div
+                      className="h-full bg-emerald-600 transition-all"
+                      style={{ width: `${progress}%` }}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* ================= MODE SISWA ================= */}
+      {mode === "siswa" && (
+        <section className="space-y-5 rounded-xl border border-slate-200 bg-white p-5">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm text-slate-600">
+            <span>
+              <b className="text-slate-900">{siswaList.length}</b> siswa
+              terdaftar
+            </span>
+            <span>
+              <b className="text-slate-900">{kelasList.length}</b> kelas
+              tersedia
+            </span>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-5">
+            <div>
+              <p className="font-medium text-slate-900">
+                1. Unduh template SISWA
+              </p>
+              <p className="text-sm text-slate-500">
+                Template kosong — isi manual: NIS, Nama Siswa, NISN, Kelas.
+              </p>
+            </div>
+            <button
+              onClick={unduhTemplateSiswa}
+              className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50"
+            >
+              Unduh template SISWA
+            </button>
+          </div>
+
+          <div>
+            <p className="font-medium text-slate-900">
+              2. Upload file yang sudah diisi
+            </p>
+            <label
+              className={`mt-3 flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed px-4 py-8 text-center text-sm border-slate-300 hover:border-slate-400 hover:bg-slate-50`}
+            >
+              <span className="text-slate-700">
+                {file ? file.name : "Klik untuk memilih file .xlsx"}
+              </span>
+              <input
+                type="file"
+                accept=".xlsx"
+                className="hidden"
+                disabled={saving}
+                onChange={(e) => bacaFileSiswa(e.target.files?.[0] || null)}
+                onClick={(e) => (e.target.value = "")}
+              />
+            </label>
+          </div>
+
+          {preview && preview.tipe === "siswa" && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                <Stat label="Baris terbaca" nilai={preview.rows.length} />
+                <Stat
+                  label="Siap disimpan"
+                  nilai={preview.valid.length}
+                  warna="text-emerald-700"
+                />
+                <Stat
+                  label="Bermasalah"
+                  nilai={preview.rows.filter((r) => r.errors.length).length}
+                  warna="text-red-700"
+                />
+                <Stat
+                  label="Siswa baru"
+                  nilai={
+                    preview.valid.filter((r) => r.aksi === "create").length
+                  }
+                />
+              </div>
+
+              <div className="max-h-80 overflow-auto rounded-lg border border-slate-200">
+                <table className="w-full text-left text-sm">
+                  <thead className="sticky top-0 bg-slate-50 text-slate-600">
+                    <tr>
+                      <th className="px-3 py-2 font-medium">Baris</th>
+                      <th className="px-3 py-2 font-medium">NIS</th>
+                      <th className="px-3 py-2 font-medium">Nama Siswa</th>
+                      <th className="px-3 py-2 font-medium">NISN</th>
+                      <th className="px-3 py-2 font-medium">Kelas</th>
+                      <th className="px-3 py-2 font-medium">Aksi</th>
+                      <th className="px-3 py-2 font-medium">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {preview.rows.map((r) => (
+                      <tr
+                        key={r.rowNum}
+                        className={r.errors.length ? "bg-red-50/60" : ""}
+                      >
+                        <td className="px-3 py-2 text-slate-500">{r.rowNum}</td>
+                        <td className="px-3 py-2">{r.nis || "-"}</td>
+                        <td className="px-3 py-2">{r.nama || "-"}</td>
+                        <td className="px-3 py-2">{r.nisn || "-"}</td>
+                        <td className="px-3 py-2">{r.kelasNama || "-"}</td>
+                        <td className="px-3 py-2">
+                          {r.aksi === "update" ? (
+                            <span className="text-blue-700">Update</span>
+                          ) : r.aksi === "create" ? (
+                            <span className="text-emerald-700">Siswa baru</span>
+                          ) : r.aksi === "nochange" ? (
+                            <span className="text-slate-400">
+                              Tidak ada perubahan
+                            </span>
+                          ) : (
+                            "-"
+                          )}
+                        </td>
+                        <td className="px-3 py-2">
+                          {r.errors.length ? (
+                            <span className="text-red-700">
+                              {r.errors.join("; ")}
+                            </span>
+                          ) : r.aksi === "nochange" ? (
+                            <span className="text-slate-400">Dilewati</span>
+                          ) : (
+                            <span className="text-emerald-700">Siap</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <p className="text-xs text-slate-500">
+                NIS jadi kunci: kalau sudah ada → data siswa diperbarui, kalau
+                belum → siswa baru dibuat. Baris tanpa perubahan dilewati.
+              </p>
+
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={simpanSiswa}
+                  disabled={saving || preview.valid.length === 0}
+                  className="rounded-lg bg-emerald-700 px-5 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-40"
+                >
+                  {saving
+                    ? `Menyimpan... ${progress}%`
+                    : `Simpan ${preview.valid.length} data siswa`}
+                </button>
+                {saving && (
+                  <div className="h-2 w-40 overflow-hidden rounded-full bg-slate-200">
+                    <div
+                      className="h-full bg-emerald-600 transition-all"
+                      style={{ width: `${progress}%` }}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* ================= MODE TP / LP ================= */}
+      {modeTPLP && mapelId && tahunId && (
         <section className="space-y-5 rounded-xl border border-slate-200 bg-white p-5">
           <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm text-slate-600">
             <span>
@@ -960,23 +1846,12 @@ export default function UploadNilaiPage() {
             {mode === "tp" ? (
               <span>
                 <b className="text-slate-900">{noTpList.length}</b> slot TP
-                tersedia
-                {tpList.length === 0 && (
-                  <span className="ml-1 text-amber-700">
-                    (hanya TP yang diisi nilainya yang akan dibuat)
-                  </span>
-                )}
-                , masing-masing K1-K4
+                tersedia, masing-masing K1-K4
               </span>
             ) : (
               <span>
                 <b className="text-slate-900">{lpHeaderList.length}</b> slot LP
                 tersedia
-                {lpGroups.length === 0 && (
-                  <span className="ml-1 text-amber-700">
-                    (ganti nama kolom "LP 1.." sesuai nama LP yang diinginkan)
-                  </span>
-                )}
               </span>
             )}
           </div>
@@ -984,7 +1859,7 @@ export default function UploadNilaiPage() {
           {!siapTemplate && (
             <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
               {kelasList.length === 0
-                ? "Mapel ini belum punya cakupan kelas. Isi Target Tingkat atau Spesifik Kelas di data mata pelajaran."
+                ? "Mapel ini belum punya cakupan kelas."
                 : siswaList.length === 0
                   ? "Belum ada siswa di kelas-kelas dalam cakupan."
                   : "Template belum siap."}
@@ -997,8 +1872,7 @@ export default function UploadNilaiPage() {
                 1. Unduh template {mode.toUpperCase()}
               </p>
               <p className="text-sm text-slate-500">
-                Semua siswa dari {kelasList.length} kelas sudah terisi. Tinggal
-                isi kolom nilai.
+                Nama siswa otomatis terisi — kamu isi kolom nilainya saja.
               </p>
             </div>
             <button
@@ -1035,7 +1909,7 @@ export default function UploadNilaiPage() {
             </label>
           </div>
 
-          {preview && (
+          {preview && preview.tipe !== "wali" && preview.tipe !== "siswa" && (
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
                 <Stat label="Baris terbaca" nilai={preview.rows.length} />
@@ -1108,13 +1982,6 @@ export default function UploadNilaiPage() {
                   </tbody>
                 </table>
               </div>
-
-              <p className="text-xs text-slate-500">
-                Baris bermasalah tidak disimpan. Nilai yang sudah ada
-                diperbarui, sel kosong tidak menimpa nilai lama. TP/LP yang
-                diisi di file tapi belum ada di sistem akan dibuat otomatis, dan
-                komponen K1–K4 yang dikosongkan diisi -1.
-              </p>
 
               <div className="flex items-center gap-4">
                 <button

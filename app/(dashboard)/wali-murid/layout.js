@@ -25,58 +25,61 @@ const Icon = ({ d, size = 14, strokeWidth = 1.4 }) => (
 const icons = {
   overview: "M2 2h5v5H2V2zM9 2h5v5H9V2zM2 9h5v5H2V9zM9 9h5v5H9V9z",
   kelas: "M2 3h12v10H2V3zM6 3v10M2 7h4",
-  absensi: "M2 3h12v10H2V3zM2 7h12M6 3V1M10 3V1",
-  nilai: "M2 12h2V8H2v4zM7 12h2V5H7v7zM12 12h2V2h-2v10z",
+  guru: "M8 2a3 3 0 100 6 3 3 0 000-6zM2 14c0-3 2.7-5 6-5s6 2 6 5",
+  siswa:
+    "M5 2a3 3 0 100 6 3 3 0 000-6zM1 14c0-2.5 1.8-4 4-4M11 8a2 2 0 100-4 2 2 0 000 4M14 14c0-2-1.3-3-3-3",
   pengajaran: "M2 2h12v3H2zM4 5v9M8 5v9M12 5v9",
-  profile: "M8 2a3 3 0 100 6 3 3 0 000-6zM2 14c0-3 2.7-5 6-5s6 2 6 5",
+  pembelajaran:
+    "M3 2h10a1 1 0 011 1v10a1 1 0 01-1 1H3a1 1 0 01-1-1V3a1 1 0 011-1zm0 3h10M6 8h4M6 11h4",
+  nilai: "M2 12h2V8H2v4zM7 12h2V5H7v7zM12 12h2V2h-2v10z",
+  absensi: "M2 3h12v10H2V3zM2 7h12M6 3V1M10 3V1",
+  settings: "M8 5a3 3 0 100 6 3 3 0 000-6zM8 1v2M8 13v2M1 8h2M13 8h2",
   logout: "M10 8H2M7 5l-3 3 3 3M12 2h2v12h-2",
   menu: "M2 4h12M2 8h12M2 12h12",
   close: "M3 3l10 10M13 3L3 13",
+  mapel:
+    "M2 4.5A2.5 2.5 0 014.5 2H14v10.5a1 1 0 01-1 1H4.5A2.5 2.5 0 012 11V4.5z M2 11h12 M6 2v10",
+  pengaturan: "M8 5a3 3 0 100 6 3 3 0 000-6zM8 1v2M8 13v2M1 8h2M13 8h2",
+  log: "M2 2h12v12H2V2zM5 6h6M5 9h6M5 12h3",
+  profile: "M8 2a3 3 0 100 6 3 3 0 000-6zM2 14c0-3 2.7-5 6-5s6 2 6 5",
+  leger: "M2 4h12v10H2V4z M4 8h8 M4 12h6",
+  catatan: "M3 2h7l3 3v9H3V2z M10 2v3h3 M5 8h6 M5 11h4",
   bell: "M8 2a4 4 0 00-4 4c0 4-2 5-2 5h12s-2-1-2-5a4 4 0 00-4-4zM6.5 14a1.5 1.5 0 003 0",
   shield:
     "M8 1.5l5 2v4c0 3-2 5.5-5 7-3-1.5-5-4-5-7v-4l5-2zM6 8l1.5 1.5L10.5 6.5",
 };
 
-// Array NAV utama untuk Guru Mapel
+// Portal Wali Murid — hanya Overview, Absensi, dan Rapor
 const NAV = [
   {
     key: "overview",
     label: "Overview",
-    href: "/guru-mapel",
+    href: "/wali-murid/",
     icon: "overview",
   },
   {
     key: "absensi",
-    label: "Absensi Kelas",
-    href: "/guru-mapel/absensi",
+    label: "Absensi",
+    href: "/wali-murid/absensi",
     icon: "absensi",
   },
+  { key: "rapor", label: "Rapor", href: "/wali-murid/rapor", icon: "nilai" },
+];
+
+const ICT_NAV = [
   {
-    key: "kelas",
-    label: "Daftar Kelas",
-    href: "/guru-mapel/daftar-kelas",
-    icon: "kelas",
-  },
-  {
-    key: "nilai",
-    label: "Penilaian",
-    href: "/guru-mapel/penilaian",
-    icon: "nilai",
-  },
-  {
-    key: "agenda",
-    label: "Agenda Mengajar",
-    href: "/guru-mapel/agenda",
-    icon: "pengajaran",
+    key: "system_logs",
+    label: "System Logs",
+    href: "/walikelas/system-logs",
+    icon: "log",
   },
 ];
 
-// Menu profil
 const PROFILE_NAV = [
   {
     key: "profile",
     label: "Profil Saya",
-    href: "/guru-mapel/profile",
+    href: "/walikelas/profile",
     icon: "profile",
   },
 ];
@@ -140,7 +143,7 @@ const SidebarContent = ({
               className={navClass(isActive)}
             >
               <span className={navIconClass(isActive)}>
-                <Icon d={icons[icon || "overview"]} size={16} />
+                <Icon d={icons[icon]} size={16} />
               </span>
               <span className="flex-1">{label}</span>
             </button>
@@ -159,7 +162,7 @@ const SidebarContent = ({
               className={navClass(isActive)}
             >
               <span className={navIconClass(isActive)}>
-                <Icon d={icons[icon || "profile"]} size={16} />
+                <Icon d={icons[icon]} size={16} />
               </span>
               <span className="flex-1">{label}</span>
             </button>
@@ -174,9 +177,9 @@ const SidebarContent = ({
         <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center">
           <Icon d={icons.shield} size={16} strokeWidth={1.5} />
         </div>
-        <p className="text-[13px] font-semibold mt-3">Portal Guru Mapel</p>
+        <p className="text-[13px] font-semibold mt-3">Portal Wali Murid</p>
         <p className="text-[11px] text-white/60 mt-1 leading-snug">
-          Kelola absensi, penilaian, dan agenda mengajar Anda.
+          Pantau absensi dan rapor anak Anda dengan mudah.
         </p>
         <button
           onClick={onLogout}
@@ -190,7 +193,7 @@ const SidebarContent = ({
   </>
 );
 
-export default function GuruMapelLayout({ children }) {
+export default function WaliMuridLayout({ children }) {
   const router = useRouter();
   const pathname = usePathname();
   const [navOpen, setNavOpen] = useState(false);
@@ -249,8 +252,7 @@ export default function GuruMapelLayout({ children }) {
 
     const currentUser = pb.authStore.model;
 
-    // Guard role: halaman /guru-mapel/* hanya untuk guru mapel (dan ICT bila perlu).
-    const allowedRoles = ["guru mapel", "guru pendamping", "ict"];
+    const allowedRoles = ["wali murid"];
     if (!currentUser || !allowedRoles.includes(currentUser.role)) {
       router.replace("/login");
       return;
@@ -285,7 +287,7 @@ export default function GuruMapelLayout({ children }) {
       console.error("Gagal proses logout:", logError);
     } finally {
       if (typeof window !== "undefined") {
-        window.location.replace("/login");
+        window.location.replace("/login-wali-murid");
       }
     }
   };
@@ -295,40 +297,30 @@ export default function GuruMapelLayout({ children }) {
     setNavOpen(false);
   };
 
-  const currentNavList = NAV;
+  const currentNavList = user?.role === "ict" ? [...NAV, ...ICT_NAV] : NAV;
 
   const activeKey =
     currentNavList.find((n) => pathname === n.href)?.key ||
-    (pathname === "/guru-mapel/profile" ? "profile" : null) ||
     currentNavList.find(
-      (n) =>
-        n.href !== "/guru-mapel" &&
-        n.href !== "/guru-mapel/" &&
-        pathname.startsWith(n.href),
+      (n) => n.href !== "/admin" && pathname.startsWith(n.href),
     )?.key ||
     "overview";
 
   const activeNav =
     currentNavList.find((n) => n.key === activeKey) || currentNavList[0];
 
-  const isProfileActive = pathname === "/guru-mapel/profile";
+  const isProfileActive =
+    pathname === "/walikelas/profile" || pathname === "/walikelas/settings";
   const activeProfileNav = PROFILE_NAV.find((n) => pathname === n.href);
 
   const pageTitle =
     isProfileActive && activeProfileNav
       ? activeProfileNav.label
-      : (activeNav?.label ?? "Overview");
+      : (activeNav?.label ?? "");
 
   const fullName = user?.nama_lengkap || user?.name || user?.username || "";
-  const shortName = shortenName(fullName) || "Guru Mapel";
-  const avatarLetter = (fullName || "G")[0].toUpperCase();
-
-  const roleLabel =
-    user?.role === "guru mapel"
-      ? "Guru Mapel"
-      : user?.role === "guru pendamping"
-        ? "Pendamping"
-        : user?.role?.toUpperCase() || "USER";
+  const shortName = shortenName(fullName) || "Wali Murid";
+  const avatarLetter = (fullName || "W")[0].toUpperCase();
 
   const today = new Date().toLocaleDateString("id-ID", {
     weekday: "long",
@@ -422,7 +414,7 @@ export default function GuruMapelLayout({ children }) {
             </button>
 
             <button
-              onClick={() => router.push("/guru-mapel/profile")}
+              onClick={() => router.push("/walikelas/profile")}
               className="flex items-center gap-2.5 pl-1 pr-3 py-1 rounded-full bg-white shadow-[0_4px_14px_rgba(99,120,200,0.12)] hover:shadow-[0_6px_18px_rgba(99,120,200,0.2)] transition-shadow text-left"
             >
               <span className="w-8 h-8 rounded-full bg-gradient-to-br from-[#7aa5ff] to-[#3b6ef5] text-white flex items-center justify-center text-[12px] font-bold flex-shrink-0">
@@ -433,7 +425,7 @@ export default function GuruMapelLayout({ children }) {
                   {shortName}
                 </span>
                 <span className="block text-[10.5px] text-gray-400 capitalize leading-tight">
-                  {roleLabel}
+                  {user?.role ?? ""}
                 </span>
               </span>
             </button>
@@ -462,7 +454,7 @@ export default function GuruMapelLayout({ children }) {
 
             <button
               aria-label="Profil saya"
-              onClick={() => router.push("/guru-mapel/profile")}
+              onClick={() => router.push("/walikelas/profile")}
               className="w-10 h-10 rounded-full bg-gradient-to-br from-[#7aa5ff] to-[#4d8bff] text-white flex items-center justify-center text-[13px] font-bold ring-2 ring-white shadow-[0_4px_14px_rgba(77,139,255,0.3)] active:scale-95 transition-transform flex-shrink-0"
             >
               {avatarLetter}

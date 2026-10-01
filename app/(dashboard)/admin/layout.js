@@ -1,20 +1,20 @@
 "use client";
 
 import Cookies from "js-cookie";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { pb } from "@/lib/pocketbase";
 import { createSystemLog } from "@/lib/logger";
 import "@/app/globals.css";
 
-const Icon = ({ d, size = 14 }) => (
+const Icon = ({ d, size = 14, strokeWidth = 1.4 }) => (
   <svg
     width={size}
     height={size}
     viewBox="0 0 16 16"
     fill="none"
     stroke="currentColor"
-    strokeWidth="1.4"
+    strokeWidth={strokeWidth}
     strokeLinecap="round"
     strokeLinejoin="round"
   >
@@ -40,15 +40,16 @@ const icons = {
   mapel:
     "M2 4.5A2.5 2.5 0 014.5 2H14v10.5a1 1 0 01-1 1H4.5A2.5 2.5 0 012 11V4.5z M2 11h12 M6 2v10",
   pengaturan: "M8 5a3 3 0 100 6 3 3 0 000-6zM8 1v2M8 13v2M1 8h2M13 8h2",
-  // Tambahan ikon baru untuk System Logs ICT
   log: "M2 2h12v12H2V2zM5 6h6M5 9h6M5 12h3",
-  // Ikon untuk menu Atur Nilai
   aturNilai: "M2 2h12v12H2V2zM4 5h8M4 8h8M4 11h5",
-  // ✨ Ikon untuk Catatan Khusus (dokumen + garis)
   catatan: "M3 2h7l3 3v9H3V2z M10 2v3h3 M5 8h6 M5 11h4",
+  profile: "M8 2a3 3 0 100 6 3 3 0 000-6zM2 14c0-3 2.7-5 6-5s6 2 6 5",
+  bell: "M8 2a4 4 0 00-4 4c0 4-2 5-2 5h12s-2-1-2-5a4 4 0 00-4-4zM6.5 14a1.5 1.5 0 003 0",
+  shield:
+    "M8 1.5l5 2v4c0 3-2 5.5-5 7-3-1.5-5-4-5-7v-4l5-2zM6 8l1.5 1.5L10.5 6.5",
 };
 
-// Array NAV utama untuk Administrator Sekolah
+// NAV utama untuk Administrator Sekolah
 const NAV = [
   { key: "overview", label: "Overview", href: "/admin/", icon: "overview" },
   { key: "guru", label: "Data Guru", href: "/admin/data-guru", icon: "guru" },
@@ -95,10 +96,9 @@ const NAV = [
     href: "/admin/manajemen-ujian",
     icon: "pembelajaran",
   },
-  // ✨ Tambahan menu Catatan Khusus di paling bawah
   {
     key: "catatan-kasus",
-    label: "Catatan kasus",
+    label: "Catatan Kasus",
     href: "/admin/catatan-kasus",
     icon: "catatan",
   },
@@ -107,17 +107,185 @@ const NAV = [
 // Menu tambahan khusus role ICT (silakan isi jika diperlukan)
 const ICT_NAV = [];
 
+const PROFILE_NAV = [
+  {
+    key: "settings",
+    label: "Pengaturan",
+    href: "/admin/settings",
+    icon: "settings",
+  },
+];
+
+const shortenName = (full) => {
+  if (!full) return "";
+  const parts = full.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0];
+  return `${parts[0]} ${parts[1][0].toUpperCase()}.`;
+};
+
+const navClass = (isActive) =>
+  `w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-left text-[13px] transition-all ${
+    isActive
+      ? "bg-[#3b6ef5] text-white font-medium shadow-[0_8px_18px_rgba(59,110,245,0.35)]"
+      : "text-gray-600 hover:bg-gray-50 hover:text-gray-800"
+  }`;
+
+const navIconClass = (isActive) =>
+  `flex-shrink-0 ${isActive ? "text-white" : "text-gray-400"}`;
+
+const SectionLabel = ({ children }) => (
+  <p className="px-3.5 pt-4 pb-2 text-[10px] font-medium text-gray-400 uppercase tracking-wider">
+    {children}
+  </p>
+);
+
+// Konten sidebar — dipakai bersama oleh desktop & drawer mobile
+const SidebarContent = ({
+  user,
+  currentNavList,
+  activeKey,
+  isProfileActive,
+  pathname,
+  onNavigate,
+  onLogout,
+}) => (
+  <>
+    {/* Logo */}
+    <div className="flex items-center gap-2.5 px-5 pt-5 pb-2">
+      <div className="min-w-0">
+        <h1 className="text-[16px] font-bold text-gray-800 leading-tight truncate">
+          gTech Academic
+        </h1>
+        <p className="text-[10.5px] text-gray-400">
+          {user?.role === "ict" ? "ICT Technical Server" : "Administrator"}
+        </p>
+      </div>
+    </div>
+
+    {/* Menu */}
+    <nav className="px-3 flex-1">
+      <SectionLabel>Menu</SectionLabel>
+      <div className="flex flex-col gap-1">
+        {currentNavList.map(({ key, label, icon, href }) => {
+          const isActive = activeKey === key && !isProfileActive;
+          return (
+            <button
+              key={key}
+              onClick={() => onNavigate(href)}
+              className={navClass(isActive)}
+            >
+              <span className={navIconClass(isActive)}>
+                <Icon d={icons[icon]} size={16} />
+              </span>
+              <span className="flex-1">{label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      <SectionLabel>Akun</SectionLabel>
+      <div className="flex flex-col gap-1">
+        {PROFILE_NAV.map(({ key, label, icon, href }) => {
+          const isActive = pathname === href;
+          return (
+            <button
+              key={key}
+              onClick={() => onNavigate(href)}
+              className={navClass(isActive)}
+            >
+              <span className={navIconClass(isActive)}>
+                <Icon d={icons[icon]} size={16} />
+              </span>
+              <span className="flex-1">{label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </nav>
+
+    {/* Kartu bawah */}
+    <div className="p-3">
+      <div className="rounded-2xl bg-[#1c2033] text-white p-4">
+        <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center">
+          <Icon d={icons.shield} size={16} strokeWidth={1.5} />
+        </div>
+        <p className="text-[13px] font-semibold mt-3">
+          {user?.role === "ict" ? "ICT Panel" : "Panel Administrator"}
+        </p>
+        <p className="text-[11px] text-white/60 mt-1 leading-snug">
+          {user?.role === "ict"
+            ? "Kelola server & sistem akademik sekolah."
+            : "Kelola data akademik sekolah dengan mudah."}
+        </p>
+        <button
+          onClick={onLogout}
+          className="mt-3 w-full flex items-center justify-center gap-2 rounded-lg bg-[#4d8bff] hover:bg-[#3b6ef5] py-2 text-[12px] font-medium transition-colors"
+        >
+          <Icon d={icons.logout} size={13} strokeWidth={1.6} />
+          Keluar
+        </button>
+      </div>
+    </div>
+  </>
+);
+
 export default function AdminLayout({ children }) {
   const router = useRouter();
   const pathname = usePathname();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
   const [user, setUser] = useState(null);
+  const [checked, setChecked] = useState(false);
+
+  // Gesture swipe untuk drawer mobile
+  const touchStartX = useRef(null);
+  const touchStartY = useRef(null);
+
+  const handleTouchStart = (e) => {
+    const t = e.touches[0];
+    touchStartX.current = t.clientX;
+    touchStartY.current = t.clientY;
+  };
+
+  const handleTouchEnd = (e) => {
+    if (touchStartX.current === null) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - touchStartX.current;
+    const dy = t.clientY - touchStartY.current;
+    // abaikan kalau gerakannya lebih vertikal (biar scroll tetap jalan)
+    if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 50) {
+      if (dx > 0 && touchStartX.current < 60 && !navOpen) {
+        setNavOpen(true);
+      } else if (dx < 0 && navOpen) {
+        setNavOpen(false);
+      }
+    }
+    touchStartX.current = null;
+    touchStartY.current = null;
+  };
+
+  // Tutup drawer setiap pindah halaman
+  useEffect(() => {
+    setNavOpen(false);
+  }, [pathname]);
+
+  // Lock scroll body saat drawer mobile terbuka
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    if (navOpen) {
+      const prev = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = prev;
+      };
+    }
+  }, [navOpen]);
 
   useEffect(() => {
     if (pb.authStore.isValid) {
       setUser(pb.authStore.model);
+      setChecked(true);
     } else {
-      router.push("/login");
+      router.replace("/login");
     }
   }, [router]);
 
@@ -130,7 +298,7 @@ export default function AdminLayout({ children }) {
 
       createSystemLog({
         type: "succes",
-        msg: `User '${targetUser?.nama_lengkap || "User"}( ${targetUser?.role} )' berhasil logout dari sistem.`,
+        msg: `User '${targetUser?.nama_lengkap || "User"} ( ${targetUser?.role ?? "-"} )' berhasil logout dari sistem.`,
         endpoint: currentEndpoint,
         statusCode: 200,
         payload: {
@@ -142,13 +310,18 @@ export default function AdminLayout({ children }) {
       pb.authStore.clear();
       Cookies.remove("pb_auth", { path: "/" });
       setUser(null);
-      router.replace("/login");
     } catch (logError) {
       console.error("Gagal proses logout:", logError);
-      router.replace("/login");
     } finally {
-      location.reload();
+      if (typeof window !== "undefined") {
+        window.location.replace("/login");
+      }
     }
+  };
+
+  const handleNavigate = (href) => {
+    router.push(href);
+    setNavOpen(false);
   };
 
   const currentNavList = user?.role === "ict" ? [...NAV, ...ICT_NAV] : NAV;
@@ -156,134 +329,167 @@ export default function AdminLayout({ children }) {
   const activeKey =
     currentNavList.find((n) => pathname === n.href)?.key ||
     currentNavList.find(
-      (n) => n.href !== "/admin" && pathname.startsWith(n.href),
+      (n) => n.href !== "/admin/" && pathname.startsWith(n.href),
     )?.key ||
     "overview";
 
   const activeNav =
     currentNavList.find((n) => n.key === activeKey) || currentNavList[0];
 
-  const initials = user?.name
-    ? user.name
-        .split(" ")
-        .map((w) => w[0])
-        .join("")
-        .slice(0, 2)
-        .toUpperCase()
-    : user?.username?.slice(0, 2).toUpperCase() || "AD";
+  const isProfileActive = pathname === "/admin/settings";
+  const activeProfileNav = PROFILE_NAV.find((n) => pathname === n.href);
+
+  const pageTitle =
+    isProfileActive && activeProfileNav
+      ? activeProfileNav.label
+      : (activeNav?.label ?? "");
+
+  const fullName = user?.nama_lengkap || user?.name || user?.username || "";
+  const shortName = shortenName(fullName) || "Admin";
+  const avatarLetter = (fullName || "A")[0].toUpperCase();
+
+  const today = new Date().toLocaleDateString("id-ID", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+
+  if (!checked) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-50 text-gray-400 text-[13px]">
+        <div className="flex items-center gap-2">
+          <div className="w-4 h-4 border-2 border-gray-300 border-t-transparent rounded-full animate-spin" />
+          <span>Memuat…</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className=" flex h-screen min-h-[600px] bg-gray-50 text-[13px] font-sans overflow-hidden text-black">
-      {/* Overlay mobile */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/20 z-20 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
+    <div
+      className="flex h-screen min-h-[600px] bg-gray-50 text-[13px] font-sans overflow-hidden text-black"
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+    >
+      {/* ── SIDEBAR DESKTOP (kartu melayang) ── */}
+      <aside className="hidden lg:flex relative flex-col w-[240px] min-w-[240px] bg-white overflow-y-auto no-scrollbar my-4 ml-4 rounded-3xl shadow-[0_8px_30px_rgba(99,120,200,0.10)]">
+        <SidebarContent
+          user={user}
+          currentNavList={currentNavList}
+          activeKey={activeKey}
+          isProfileActive={isProfileActive}
+          pathname={pathname}
+          onNavigate={handleNavigate}
+          onLogout={handleLogout}
         />
-      )}
-
-      {/* ── SIDEBAR ── */}
-      <aside
-        className={`fixed lg:relative inset-y-0 left-0 z-30 w-[220px] min-w-[220px] bg-white border-r border-gray-100 flex flex-col overflow-y-auto transition-transform duration-200 ease-in-out ${sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}
-      >
-        <div className="flex items-center gap-2.5 px-4 py-3.5 border-b border-gray-100">
-          <div className="min-w-0">
-            <h1 className="text-lg font-semibold text-gray-800 leading-tight truncate">
-              gTeach Space
-            </h1>
-            <p className="text-[10.5px] text-gray-400">
-              {user?.role === "ict" ? "ICT Technical Server" : "Administrator"}
-            </p>
-          </div>
-          <button
-            className="ml-auto lg:hidden text-gray-400 hover:text-gray-600"
-            onClick={() => setSidebarOpen(false)}
-          >
-            <Icon d={icons.close} size={14} />
-          </button>
-        </div>
-
-        {/* List Menu Navigasi */}
-        <div className="pt-2 pb-2 flex-1">
-          {currentNavList.map(({ key, label, icon, href }) => {
-            const isActive = activeKey === key;
-            return (
-              <button
-                key={key}
-                onClick={() => {
-                  router.push(href);
-                  setSidebarOpen(false);
-                }}
-                className={`w-full flex items-center gap-2 px-3 py-[6px] rounded-lg text-left text-[12.5px] transition-colors mx-1 mb-0.5 ${isActive ? "bg-[#4d8bff] text-white font-medium" : "text-gray-500 hover:bg-gray-50 hover:text-gray-700"}`}
-                style={{ width: "calc(100% - 8px)" }}
-              >
-                <span
-                  className={`flex-shrink-0 ${isActive ? "text-blue-200" : "opacity-50"}`}
-                >
-                  <Icon d={icons[icon]} />
-                </span>
-                <span className="flex-1">{label}</span>
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="border-t border-gray-100 p-3 flex flex-col gap-1">
-          <button
-            onClick={() => router.push("/admin/settings")}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg text-[12px] text-gray-500 hover:bg-gray-50 transition-colors w-full"
-          >
-            <span className="opacity-50">
-              <Icon d={icons.settings} />
-            </span>
-            Pengaturan
-          </button>
-          <button
-            onClick={handleLogout}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg text-[12px] text-red-400 hover:bg-red-50 transition-colors w-full"
-          >
-            <span className="opacity-50 text-red-400">
-              <Icon d={icons.logout} />
-            </span>
-            Keluar
-          </button>
-        </div>
       </aside>
+
+      {/* ── DRAWER MOBILE ── */}
+      <div
+        className={`lg:hidden fixed inset-0 z-50 ${
+          navOpen ? "pointer-events-auto" : "pointer-events-none"
+        }`}
+        aria-hidden={!navOpen}
+      >
+        {/* Overlay */}
+        <div
+          className={`absolute inset-0 bg-black/40 transition-opacity duration-300 ${
+            navOpen ? "opacity-100" : "opacity-0"
+          }`}
+          onClick={() => setNavOpen(false)}
+        />
+
+        {/* Panel drawer */}
+        <aside
+          className={`absolute left-0 top-0 h-full w-[260px] max-w-[82vw] bg-white rounded-r-3xl flex flex-col overflow-y-auto no-scrollbar shadow-[0_10px_40px_rgba(99,120,200,0.25)] transition-transform duration-300 ease-out ${
+            navOpen ? "translate-x-0" : "-translate-x-full"
+          }`}
+          style={{ paddingTop: "env(safe-area-inset-top)" }}
+        >
+          <SidebarContent
+            user={user}
+            currentNavList={currentNavList}
+            activeKey={activeKey}
+            isProfileActive={isProfileActive}
+            pathname={pathname}
+            onNavigate={handleNavigate}
+            onLogout={handleLogout}
+          />
+        </aside>
+      </div>
 
       {/* ── MAIN CONTENT ── */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* Topbar */}
-        <header className="no-print bg-white border-b border-gray-100 h-12 flex items-center px-4 sm:px-6 gap-3 flex-shrink-0">
-          <button
-            className="lg:hidden text-gray-500 hover:text-gray-700 flex-shrink-0"
-            onClick={() => setSidebarOpen(true)}
-          >
-            <Icon d={icons.menu} size={16} />
-          </button>
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="text-[12px] text-gray-400 hidden sm:block">
-              {user?.role === "ict" ? "ICT" : "Admin"}
-            </span>
-            <span className="text-gray-300 text-[11px] hidden sm:block">/</span>
-            <span className="text-[12px] font-semibold text-gray-700 truncate">
-              {activeNav.label}
-            </span>
+        {/* Topbar DESKTOP */}
+        <header className="no-print hidden lg:flex items-center gap-4 px-6 pt-5 pb-3 flex-shrink-0">
+          <div className="min-w-0">
+            <h2 className="text-[22px] font-bold text-gray-900 leading-tight truncate">
+              {pageTitle}
+            </h2>
+            <p className="text-[12px] text-gray-400 mt-0.5">{today}</p>
           </div>
+
           <div className="ml-auto flex items-center gap-3">
-            <span className="hidden sm:inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-100">
-              {user?.role?.toUpperCase() || "ADMIN"}
-            </span>
-            <div className="w-7 h-7 rounded-full bg-blue-500 text-white flex items-center justify-center text-[10px] font-bold flex-shrink-0">
-              {initials}
+            <button
+              aria-label="Notifikasi"
+              className="relative w-10 h-10 rounded-full bg-white text-gray-500 hover:text-gray-700 flex items-center justify-center shadow-[0_4px_14px_rgba(99,120,200,0.12)] transition-colors"
+            >
+              <Icon d={icons.bell} size={16} strokeWidth={1.5} />
+              <span className="absolute top-2.5 right-3 w-2 h-2 rounded-full bg-red-400 ring-2 ring-white" />
+            </button>
+
+            <button
+              onClick={() => router.push("/admin/settings")}
+              className="flex items-center gap-2.5 pl-1 pr-3 py-1 rounded-full bg-white shadow-[0_4px_14px_rgba(99,120,200,0.12)] hover:shadow-[0_6px_18px_rgba(99,120,200,0.2)] transition-shadow text-left"
+            >
+              <span className="w-8 h-8 rounded-full bg-gradient-to-br from-[#7aa5ff] to-[#3b6ef5] text-white flex items-center justify-center text-[12px] font-bold flex-shrink-0">
+                {avatarLetter}
+              </span>
+              <span className="min-w-0 max-w-[140px]">
+                <span className="block text-[12px] font-semibold text-gray-800 truncate leading-tight">
+                  {shortName}
+                </span>
+                <span className="block text-[10.5px] text-gray-400 capitalize leading-tight">
+                  {user?.role ?? ""}
+                </span>
+              </span>
+            </button>
+          </div>
+        </header>
+
+        {/* Topbar MOBILE */}
+        <header className="no-print lg:hidden sticky top-0 z-30 bg-[#eef1fc] flex-shrink-0 pt-[env(safe-area-inset-top)]">
+          <div className="flex items-center gap-3 px-4 pt-3 pb-3">
+            <button
+              onClick={() => setNavOpen(true)}
+              aria-label="Buka menu"
+              className="w-10 h-10 rounded-xl bg-white text-slate-700 flex items-center justify-center shadow-[0_4px_14px_rgba(99,120,200,0.12)] active:scale-95 transition-transform flex-shrink-0"
+            >
+              <Icon d={icons.menu} size={18} strokeWidth={1.8} />
+            </button>
+
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] text-slate-400 truncate">
+                Halo, {shortName}
+              </p>
+              <h2 className="text-[18px] font-bold text-slate-800 leading-tight truncate">
+                {pageTitle}
+              </h2>
             </div>
+
+            <button
+              aria-label="Pengaturan"
+              onClick={() => router.push("/admin/settings")}
+              className="w-10 h-10 rounded-full bg-gradient-to-br from-[#7aa5ff] to-[#4d8bff] text-white flex items-center justify-center text-[13px] font-bold ring-2 ring-white shadow-[0_4px_14px_rgba(77,139,255,0.3)] active:scale-95 transition-transform flex-shrink-0"
+            >
+              {avatarLetter}
+            </button>
           </div>
         </header>
 
         {/* Page content */}
-        <div className="flex-1 overflow-y-auto no-scrollbar p-4 sm:p-5 lg:p-6">
-          <h1 className="text-[20px] sm:text-[22px] font-semibold text-gray-900 mb-5 no-print">
-            {activeNav.label}
-          </h1>
+        <div className="flex-1 no-scrollbar overflow-y-auto p-4 sm:p-5 lg:px-6 lg:pt-2 lg:pb-6">
           {children}
         </div>
       </div>
