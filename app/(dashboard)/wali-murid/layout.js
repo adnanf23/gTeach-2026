@@ -57,12 +57,12 @@ const NAV = [
     href: "/wali-murid/",
     icon: "overview",
   },
-  {
-    key: "absensi",
-    label: "Absensi",
-    href: "/wali-murid/absensi",
-    icon: "absensi",
-  },
+  // {
+  //   key: "absensi",
+  //   label: "Absensi",
+  //   href: "/wali-murid/absensi",
+  //   icon: "absensi",
+  // },
   { key: "rapor", label: "Rapor", href: "/wali-murid/rapor", icon: "nilai" },
 ];
 

@@ -7,16 +7,8 @@ import * as ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 
 // ================================================================
-// KONFIGURASI BOBOT PENILAIAN
+// KONFIGURASI
 // ================================================================
-const NAMA_BOBOT = {
-  formatif: "Formatif",
-  sumatif: "Sumatif",
-  uts: "Ujian Tengah Semester",
-  uas: "Ujian Akhir Semester",
-  kehadiran: "Kehadiran",
-};
-
 const JENIS_UTS = "ahb";
 const JENIS_UAS = "asas";
 
@@ -117,62 +109,6 @@ export default function PenilaianMapelPage() {
   const [selectedNoTp, setSelectedNoTp] = useState("");
   const [savingTp, setSavingTp] = useState(false);
 
-  // =========================================================
-  // FITUR BARU: KRITERIA AKTIF PER TP
-  // Struktur: { [tpId]: { k1: bool, k2: bool, k3: bool, k4: bool } }
-  // =========================================================
-  const [activeKriteriaMap, setActiveKriteriaMap] = useState({});
-
-  // Load pengaturan dari localStorage per mapel
-  useEffect(() => {
-    if (!mapelId) return;
-    try {
-      const saved = localStorage.getItem(`kriteria_tp_mapel_${mapelId}`);
-      if (saved) {
-        setActiveKriteriaMap(JSON.parse(saved));
-      }
-    } catch (e) {
-      console.warn("Gagal load pengaturan kriteria:", e);
-    }
-  }, [mapelId]);
-
-  // Helper: ambil daftar K yang aktif untuk 1 TP
-  function getActiveKForTp(tpId) {
-    const setting = activeKriteriaMap[tpId];
-    if (!setting) return SEMUA_KRITERIA; // default semua aktif
-    const active = SEMUA_KRITERIA.filter((k) => setting[k]);
-    return active.length > 0 ? active : [SEMUA_KRITERIA[0]];
-  }
-
-  // Helper: cek apakah 1 K aktif untuk 1 TP
-  function isKActive(tpId, k) {
-    return getActiveKForTp(tpId).includes(k);
-  }
-
-  // Toggle 1 K untuk 1 TP
-  function toggleKriteriaForTp(tpId, k) {
-    const current = activeKriteriaMap[tpId] || {
-      k1: true,
-      k2: true,
-      k3: true,
-      k4: true,
-    };
-    const next = { ...current, [k]: !current[k] };
-
-    // Minimal 1 K harus aktif per TP
-    if (!SEMUA_KRITERIA.some((key) => next[key])) return;
-
-    const newMap = { ...activeKriteriaMap, [tpId]: next };
-    setActiveKriteriaMap(newMap);
-
-    if (mapelId) {
-      localStorage.setItem(
-        `kriteria_tp_mapel_${mapelId}`,
-        JSON.stringify(newMap),
-      );
-    }
-  }
-
   // SUMATIF
   const [lpList, setLpList] = useState([]);
   const [nilaiSumatif, setNilaiSumatif] = useState({});
@@ -185,11 +121,8 @@ export default function PenilaianMapelPage() {
   const [selectedUjianId, setSelectedUjianId] = useState(null);
   const [nilaiUjian, setNilaiUjian] = useState({});
 
-  // ABSENSI
+  // ABSENSI (hanya untuk ditampilkan, tidak dihitung)
   const [absensiList, setAbsensiList] = useState([]);
-
-  // BOBOT
-  const [presentaseList, setPresentaseList] = useState([]);
 
   // STATUS CELL
   const [cellStatus, setCellStatus] = useState({});
@@ -222,44 +155,34 @@ export default function PenilaianMapelPage() {
           .getOne(mapelId, { requestKey: null });
         setMapel(mapelData);
 
-        const [
-          siswaData,
-          tpData,
-          lpData,
-          presentaseData,
-          ujianData,
-          absensiData,
-        ] = await Promise.all([
-          pb.collection("siswa").getFullList({
-            filter: `kelas_id = "${kelasData.id}"`,
-            sort: "nama_siswa",
-            requestKey: null,
-          }),
-          pb.collection("tujuan_pembelajaran").getFullList({
-            filter: `mapel_id ~ "${mapelId}" && kelas_id ~ "${kelasData.id}"`,
-            requestKey: null,
-          }),
-          pb.collection("lingkup_materi").getFullList({
-            filter: `mapel_id ~ "${mapelId}" && kelas_id ~ "${kelasData.id}"`,
-            requestKey: null,
-          }),
-          pb.collection("presentase_penilaian").getFullList({
-            requestKey: null,
-          }),
-          pb.collection("pengaturan_ujian").getFullList({
-            filter: `status_akses = "buka" && (target_kelas_id ~ "${kelasData.id}" || target_tingkat ~ "${String(kelasData.tingkat)}")`,
-            requestKey: null,
-          }),
-          pb.collection("absensi").getFullList({
-            filter: `kelas_id ~ "${kelasData.id}"`,
-            requestKey: null,
-          }),
-        ]);
+        const [siswaData, tpData, lpData, ujianData, absensiData] =
+          await Promise.all([
+            pb.collection("siswa").getFullList({
+              filter: `kelas_id = "${kelasData.id}"`,
+              sort: "nama_siswa",
+              requestKey: null,
+            }),
+            pb.collection("tujuan_pembelajaran").getFullList({
+              filter: `mapel_id ~ "${mapelId}" && kelas_id ~ "${kelasData.id}"`,
+              requestKey: null,
+            }),
+            pb.collection("lingkup_materi").getFullList({
+              filter: `mapel_id ~ "${mapelId}" && kelas_id ~ "${kelasData.id}"`,
+              requestKey: null,
+            }),
+            pb.collection("pengaturan_ujian").getFullList({
+              filter: `status_akses = "buka" && (target_kelas_id ~ "${kelasData.id}" || target_tingkat ~ "${String(kelasData.tingkat)}")`,
+              requestKey: null,
+            }),
+            pb.collection("absensi").getFullList({
+              filter: `kelas_id ~ "${kelasData.id}"`,
+              requestKey: null,
+            }),
+          ]);
 
         setSiswaList(siswaData);
         setTpList(tpData.sort((a, b) => tpNumber(a) - tpNumber(b)));
         setLpList(lpData);
-        setPresentaseList(presentaseData);
         setUjianAktif(ujianData);
         setAbsensiList(absensiData);
 
@@ -339,79 +262,43 @@ export default function PenilaianMapelPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapelId]);
 
-  // ================= BOBOT =================
-  function getBobot(nama) {
-    const found = presentaseList.find(
-      (p) =>
-        (p.nama_presentase || "").trim().toLowerCase() === nama.toLowerCase(),
-    );
-    return found ? Number(found.angka_presentase) || 0 : 0;
-  }
-  const bobotFormatif = getBobot(NAMA_BOBOT.formatif);
-  const bobotSumatif = getBobot(NAMA_BOBOT.sumatif);
-  const bobotUts = getBobot(NAMA_BOBOT.uts);
-  const bobotUas = getBobot(NAMA_BOBOT.uas);
-  const bobotKehadiran = getBobot(NAMA_BOBOT.kehadiran);
-
   // ================= RATA-RATA =================
-  // Formatif: Total perolehan dibagi total slot maksimal.
-  // Total slot = Σ (jumlah K aktif untuk setiap TP).
+  // Formatif: rata-rata dari semua nilai K1-K4 yang terisi (bukan -1)
   const formatifAvgMap = useMemo(() => {
     const result = {};
-
-    const totalSlotMaksimal = tpList.reduce(
-      (sum, tp) => sum + getActiveKForTp(tp.id).length,
-      0,
-    );
-
     siswaList.forEach((s) => {
       const perTp = nilaiFormatif[s.id] || {};
-      let totalNilai = 0;
-
+      const semuaNilai = [];
       tpList.forEach((tp) => {
         const rec = perTp[tp.id];
         if (!rec) return;
-        const activeK = getActiveKForTp(tp.id);
-        activeK.forEach((k) => {
+        SEMUA_KRITERIA.forEach((k) => {
           const val = rec[k];
           if (typeof val === "number" && !isNaN(val) && val !== -1) {
-            totalNilai += val;
+            semuaNilai.push(val);
           }
         });
       });
-
-      if (totalSlotMaksimal > 0) {
-        result[s.id] = totalNilai / totalSlotMaksimal;
-      } else {
-        result[s.id] = null;
-      }
+      result[s.id] = average(semuaNilai);
     });
     return result;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nilaiFormatif, siswaList, tpList, activeKriteriaMap]);
+  }, [nilaiFormatif, siswaList, tpList]);
 
+  // Sumatif: rata-rata dari semua nilai LP yang terisi
   const sumatifAvgMap = useMemo(() => {
     const result = {};
-    const totalLpMaksimal = lpList.length;
-
     siswaList.forEach((s) => {
       const perLp = nilaiSumatif[s.id] || {};
-      let totalNilai = 0;
-
+      const semuaNilai = [];
       Object.values(perLp).forEach((r) => {
         if (typeof r.nilai === "number" && !isNaN(r.nilai) && r.nilai !== -1) {
-          totalNilai += r.nilai;
+          semuaNilai.push(r.nilai);
         }
       });
-
-      if (totalLpMaksimal > 0) {
-        result[s.id] = totalNilai / totalLpMaksimal;
-      } else {
-        result[s.id] = null;
-      }
+      result[s.id] = average(semuaNilai);
     });
     return result;
-  }, [nilaiSumatif, siswaList, lpList]);
+  }, [nilaiSumatif, siswaList]);
 
   const utsIds = useMemo(
     () =>
@@ -434,81 +321,34 @@ export default function PenilaianMapelPage() {
     const result = {};
     siswaList.forEach((s) => (result[s.id] = avgUjian(utsIds, s.id)));
     return result;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nilaiUjian, utsIds, siswaList]);
   const uasAvgMap = useMemo(() => {
     const result = {};
     siswaList.forEach((s) => (result[s.id] = avgUjian(uasIds, s.id)));
     return result;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nilaiUjian, uasIds, siswaList]);
 
-  const kehadiranMap = useMemo(() => {
-    const result = {};
-    siswaList.forEach((s) => {
-      const records = absensiList.filter((a) => a.siswa_id === s.id);
-      if (records.length === 0) {
-        result[s.id] = null;
-        return;
-      }
-      const hadir = records.filter((a) => a.status === "hadir").length;
-      result[s.id] = (hadir / records.length) * 100;
-    });
-    return result;
-  }, [absensiList, siswaList]);
-
-  // ================= RAPOR MAP =================
+  // ================= RAPOR MAP (RATA-RATA SEDERHANA) =================
   const raporMap = useMemo(() => {
     const result = {};
     siswaList.forEach((s) => {
-      const formatifVal = formatifAvgMap[s.id];
-      const sumatifVal = sumatifAvgMap[s.id];
-
-      const formatifKosong =
-        formatifVal === null || formatifVal === undefined || isNaN(formatifVal);
-      const sumatifKosong =
-        sumatifVal === null || sumatifVal === undefined || isNaN(sumatifVal);
-
-      if (formatifKosong && sumatifKosong) {
-        result[s.id] = 0;
-        return;
-      }
-
       const komponen = [
-        { value: formatifAvgMap[s.id], bobot: bobotFormatif },
-        { value: sumatifAvgMap[s.id], bobot: bobotSumatif },
-        { value: utsAvgMap[s.id], bobot: bobotUts },
-        { value: uasAvgMap[s.id], bobot: bobotUas },
-        { value: kehadiranMap[s.id], bobot: bobotKehadiran },
-      ].filter(
-        (k) =>
-          k.value !== null &&
-          k.value !== undefined &&
-          !isNaN(k.value) &&
-          k.value !== -1 &&
-          k.bobot > 0,
-      );
+        formatifAvgMap[s.id],
+        sumatifAvgMap[s.id],
+        utsAvgMap[s.id],
+        uasAvgMap[s.id],
+      ].filter((v) => v !== null && v !== undefined && !isNaN(v) && v !== -1);
 
-      const totalBobot = komponen.reduce((a, k) => a + k.bobot, 0);
-      if (totalBobot === 0) {
+      if (komponen.length === 0) {
         result[s.id] = null;
         return;
       }
-      const weightedSum = komponen.reduce((a, k) => a + k.value * k.bobot, 0);
-      result[s.id] = weightedSum / totalBobot;
+      result[s.id] = komponen.reduce((a, b) => a + b, 0) / komponen.length;
     });
     return result;
-  }, [
-    formatifAvgMap,
-    sumatifAvgMap,
-    utsAvgMap,
-    uasAvgMap,
-    kehadiranMap,
-    bobotFormatif,
-    bobotSumatif,
-    bobotUts,
-    bobotUas,
-    bobotKehadiran,
-    siswaList,
-  ]);
+  }, [formatifAvgMap, sumatifAvgMap, utsAvgMap, uasAvgMap, siswaList]);
 
   // ================= TAMBAH TP =================
   async function handleAddTp() {
@@ -569,19 +409,6 @@ export default function PenilaianMapelPage() {
         });
         return next;
       });
-
-      // Hapus pengaturan kriteria TP ini dari localStorage
-      if (activeKriteriaMap[tp.id]) {
-        const newMap = { ...activeKriteriaMap };
-        delete newMap[tp.id];
-        setActiveKriteriaMap(newMap);
-        if (mapelId) {
-          localStorage.setItem(
-            `kriteria_tp_mapel_${mapelId}`,
-            JSON.stringify(newMap),
-          );
-        }
-      }
 
       setConfirmDialog(null);
     } catch (error) {
@@ -988,24 +815,22 @@ export default function PenilaianMapelPage() {
       });
       setAutoWidth(sheetKelas);
 
-      // 2. SHEET FORMATIF (kolom menyesuaikan K aktif per TP)
+      // 2. SHEET FORMATIF
       const sheetFormatif = workbook.addWorksheet("FORMATIF", {
         properties: { tabColor: { argb: GREEN } },
       });
 
-      // Hitung layout kolom: setiap TP bisa punya jumlah K berbeda
       const tpColLayout = [];
-      let colCursor = 5; // setelah NOMOR(1), NAMA(2), L/P(3), NIS(4)
+      let colCursor = 5;
       tpList.forEach((tp) => {
-        const activeK = getActiveKForTp(tp.id);
         tpColLayout.push({
           tpId: tp.id,
           tpNo: tp.no_tp,
           startCol: colCursor,
-          count: activeK.length,
-          activeK,
+          count: SEMUA_KRITERIA.length,
+          activeK: SEMUA_KRITERIA,
         });
-        colCursor += activeK.length;
+        colCursor += SEMUA_KRITERIA.length;
       });
       const colRata = colCursor;
       const totalCols = colCursor;
@@ -1050,7 +875,6 @@ export default function PenilaianMapelPage() {
       styleRow(headerRow2, styleHeader);
       styleResult(headerRow1.getCell(colRata));
 
-      // Merge baris 4-5 untuk kolom base + kolom rata
       [1, 2, 3, 4, colRata].forEach((col) => {
         sheetFormatif.mergeCells(4, col, 5, col);
       });
@@ -1081,7 +905,6 @@ export default function PenilaianMapelPage() {
         const horizMap = { 2: "left" };
         styleRow(row, styleBody, horizMap);
 
-        // Warnai setiap sel K dengan CYAN
         tpColLayout.forEach((layout) => {
           for (let i = 0; i < layout.count; i++) {
             styleNilai(row.getCell(layout.startCol + i));
@@ -1156,83 +979,7 @@ export default function PenilaianMapelPage() {
       setAutoWidth(sheetSumatif);
       setFixedWidth(sheetSumatif, 4, 5);
 
-      // 4. SHEET KEHADIRAN
-      const sheetKehadiran = workbook.addWorksheet("KEHADIRAN", {
-        properties: { tabColor: { argb: GREEN } },
-      });
-
-      const colCountKehadiran = 12;
-      const colPersenKehadiran = 12;
-
-      addHeading(
-        sheetKehadiran,
-        "DAFTAR HADIR PESERTA DIDIK",
-        colCountKehadiran,
-        1,
-      );
-      sheetKehadiran.addRow([]);
-
-      const headerKehadiran = [
-        "NO",
-        "NIS",
-        "NAMA",
-        "L/P",
-        "KELAS",
-        "KETIDAKHADIRAN",
-        "Jumlah",
-        "Hadir",
-        "Sakit",
-        "Izin",
-        "Alpa",
-        "% Kehadiran",
-      ];
-      const headerRowKehadiran = sheetKehadiran.addRow(headerKehadiran);
-      const horizMapKehadiran = { 3: "left" };
-      styleRow(headerRowKehadiran, styleHeader, horizMapKehadiran);
-      styleResult(headerRowKehadiran.getCell(colPersenKehadiran));
-      headerRowKehadiran.height = 25;
-
-      siswaList.forEach((siswa, idx) => {
-        const absensiSiswa = absensiList.filter((a) => a.siswa_id === siswa.id);
-        const total = absensiSiswa.length;
-        const sakit = absensiSiswa.filter((a) => a.status === "sakit").length;
-        const izin = absensiSiswa.filter((a) => a.status === "izin").length;
-        const alpa = absensiSiswa.filter((a) => a.status === "alpha").length;
-        const hadir = absensiSiswa.filter((a) => a.status === "hadir").length;
-        const ketidakhadiran = total - hadir;
-        const persenKehadiran = total > 0 ? (hadir / total) * 100 : null;
-
-        const row = sheetKehadiran.addRow([
-          idx + 1,
-          siswa.nis || "-",
-          siswa.nama_siswa,
-          siswa.jenis_kelamin || "-",
-          kelas.nama_kelas,
-          ketidakhadiran,
-          total,
-          hadir,
-          sakit,
-          izin,
-          alpa,
-          persenKehadiran !== null ? Number(persenKehadiran.toFixed(2)) : null,
-        ]);
-        const horizMap = { 3: "left" };
-        styleRow(row, styleBody, horizMap);
-        styleResult(row.getCell(colPersenKehadiran));
-      });
-
-      setAutoWidth(sheetKehadiran);
-      setFixedWidth(sheetKehadiran, 1, 5);
-      setFixedWidth(sheetKehadiran, 4, 5);
-      setFixedWidth(sheetKehadiran, 6, 10);
-      setFixedWidth(sheetKehadiran, 7, 10);
-      setFixedWidth(sheetKehadiran, 8, 10);
-      setFixedWidth(sheetKehadiran, 9, 10);
-      setFixedWidth(sheetKehadiran, 10, 10);
-      setFixedWidth(sheetKehadiran, 11, 10);
-      setFixedWidth(sheetKehadiran, 12, 17);
-
-      // 5. SHEET NILAI AKHIR
+      // 4. SHEET NILAI AKHIR (tanpa kehadiran)
       const sheetAkhir = workbook.addWorksheet("NILAI AKHIR", {
         properties: { tabColor: { argb: GREEN } },
       });
@@ -1240,11 +987,10 @@ export default function PenilaianMapelPage() {
       const headerAkhir = [
         "NO",
         "Nama Siswa",
-        `Formatif (${bobotFormatif}%)`,
-        `Sumatif (${bobotSumatif}%)`,
-        `UTS (${bobotUts}%)`,
-        `UAS (${bobotUas}%)`,
-        `Kehadiran (${bobotKehadiran}%)`,
+        "Formatif",
+        "Sumatif",
+        "UTS",
+        "UAS",
         "Nilai Akhir Rapor",
       ];
       const colCountAkhir = headerAkhir.length;
@@ -1275,9 +1021,6 @@ export default function PenilaianMapelPage() {
           uasAvgMap[siswa.id] !== null
             ? Number(uasAvgMap[siswa.id].toFixed(2))
             : null,
-          kehadiranMap[siswa.id] !== null
-            ? Number(kehadiranMap[siswa.id].toFixed(2))
-            : null,
           raporMap[siswa.id] !== null
             ? Number(raporMap[siswa.id].toFixed(2))
             : null,
@@ -1285,7 +1028,7 @@ export default function PenilaianMapelPage() {
         const horizMap = { 2: "left" };
         styleRow(row, styleBody, horizMap);
 
-        for (let i = 3; i <= 7; i++) {
+        for (let i = 3; i <= 6; i++) {
           styleNilai(row.getCell(i));
         }
         styleResult(row.getCell(colNilaiAkhir));
@@ -1401,9 +1144,8 @@ export default function PenilaianMapelPage() {
                 Tujuan Pembelajaran (TP)
               </h2>
               <p className="text-xs text-gray-400 mt-1">
-                Setiap TP bisa punya kriteria berbeda. Klik badge{" "}
-                <span className="font-bold">K1–K4</span> di header TP untuk
-                mengaktifkan / menonaktifkan kriteria. Nilai kosong dianggap 0.
+                Setiap TP dinilai dengan 4 kriteria (K1–K4). Nilai akhir adalah
+                rata-rata dari kriteria yang terisi.
               </p>
             </div>
             {!addingTp ? (
@@ -1466,56 +1208,24 @@ export default function PenilaianMapelPage() {
                     >
                       Siswa
                     </th>
-                    {tpList.map((tp) => {
-                      const activeK = getActiveKForTp(tp.id);
-                      return (
-                        <th
-                          key={tp.id}
-                          colSpan={activeK.length}
-                          className="text-center px-2 py-2 font-bold border-l border-gray-200 min-w-[80px]"
-                        >
-                          <div className="flex flex-col items-center justify-center gap-1">
-                            <span>{tp.no_tp}</span>
-                            {/* Toggle K per TP */}
-                            <div className="flex gap-1">
-                              {SEMUA_KRITERIA.map((k) => {
-                                const isActive = activeK.includes(k);
-                                return (
-                                  <button
-                                    key={k}
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.preventDefault();
-                                      toggleKriteriaForTp(tp.id, k);
-                                    }}
-                                    title={
-                                      isActive
-                                        ? `${k.toUpperCase()} aktif – klik nonaktifkan`
-                                        : `${k.toUpperCase()} nonaktif – klik aktifkan`
-                                    }
-                                    className={`text-[11px] font-bold px-2.5 py-1 rounded-md border-2 transition-all ${
-                                      isActive
-                                        ? "bg-emerald-600 text-white border-emerald-700 shadow-sm"
-                                        : "bg-white text-slate-400 border-slate-300 hover:border-slate-400 hover:text-slate-600"
-                                    }`}
-                                  >
-                                    {k.toUpperCase()}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteTp(tp)}
-                              title={`Hapus ${tp.no_tp}`}
-                              className="text-[10px] font-bold text-red-600 hover:text-white hover:bg-red-600 border border-red-300 hover:border-red-600 rounded-md px-2 py-0.5 transition-colors"
-                            >
-                              Hapus
-                            </button>
-                          </div>
-                        </th>
-                      );
-                    })}
+                    {tpList.map((tp) => (
+                      <th
+                        key={tp.id}
+                        colSpan={SEMUA_KRITERIA.length}
+                        className="text-center px-2 py-2 font-bold border-l border-gray-200 min-w-[80px]"
+                      >
+                        <div className="flex flex-col items-center justify-center gap-1">
+                          <span>{tp.no_tp}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteTp(tp)}
+                            className="text-[10px] font-bold text-red-600 hover:text-white hover:bg-red-600 border border-red-300 hover:border-red-600 rounded-md px-2 py-0.5 transition-colors"
+                          >
+                            Hapus
+                          </button>
+                        </div>
+                      </th>
+                    ))}
                     <th
                       rowSpan={2}
                       className="text-center px-4 py-3 font-bold min-w-[110px] bg-blue-50 text-blue-700 align-bottom whitespace-nowrap"
@@ -1524,9 +1234,8 @@ export default function PenilaianMapelPage() {
                     </th>
                   </tr>
                   <tr className="bg-gray-50 text-gray-400 text-[10px] uppercase tracking-wider">
-                    {tpList.map((tp) => {
-                      const activeK = getActiveKForTp(tp.id);
-                      return activeK.map((k, i) => (
+                    {tpList.map((tp) =>
+                      SEMUA_KRITERIA.map((k, i) => (
                         <th
                           key={`${tp.id}-${k}`}
                           className={`text-center px-1 py-1.5 font-semibold min-w-[50px] ${
@@ -1535,8 +1244,8 @@ export default function PenilaianMapelPage() {
                         >
                           {k.toUpperCase()}
                         </th>
-                      ));
-                    })}
+                      )),
+                    )}
                   </tr>
                 </thead>
                 <tbody>
@@ -1552,8 +1261,7 @@ export default function PenilaianMapelPage() {
                         </td>
                         {tpList.map((tp) => {
                           const rec = nilaiFormatif[siswa.id]?.[tp.id];
-                          const activeK = getActiveKForTp(tp.id);
-                          return activeK.map((kField, i) => {
+                          return SEMUA_KRITERIA.map((kField, i) => {
                             const cellKey = `f-${siswa.id}-${tp.id}-${kField}`;
                             return (
                               <td
@@ -1563,7 +1271,7 @@ export default function PenilaianMapelPage() {
                                 }`}
                               >
                                 <NilaiInput
-                                  key={`${siswa.id}-${tp.id}-${kField}-${isKActive(tp.id, kField)}`}
+                                  key={cellKey}
                                   value={rec?.[kField]}
                                   status={cellStatus[cellKey]}
                                   onSave={(v) =>
@@ -1607,8 +1315,7 @@ export default function PenilaianMapelPage() {
                   Lingkup Materi (LP)
                 </h2>
                 <p className="text-xs text-gray-400 mt-1">
-                  Nilai akhir sumatif dihitung dari total perolehan dibagi total
-                  LP. Nilai kosong dianggap 0.
+                  Nilai sumatif dihitung dari rata-rata nilai LP yang terisi.
                 </p>
               </div>
               <button
@@ -1671,7 +1378,6 @@ export default function PenilaianMapelPage() {
                           <button
                             type="button"
                             onClick={() => handleDeleteLp(lp)}
-                            title={`Hapus ${lp.nama}`}
                             className="text-[10px] font-bold text-red-600 hover:text-white hover:bg-red-600 border border-red-300 hover:border-red-600 rounded-md px-2 py-0.5 transition-colors"
                           >
                             Hapus
@@ -1824,9 +1530,8 @@ export default function PenilaianMapelPage() {
                 Rekap Nilai Rapor
               </h2>
               <p className="text-xs text-gray-400 mt-1">
-                Nilai akhir dihitung berdasarkan bobot dari Admin: Formatif{" "}
-                {bobotFormatif}%, Sumatif {bobotSumatif}%, UTS {bobotUts}%, UAS{" "}
-                {bobotUas}%, Kehadiran {bobotKehadiran}%.
+                Nilai akhir dihitung dari rata-rata komponen Formatif, Sumatif,
+                UTS, dan UAS yang tersedia.
               </p>
             </div>
             <button
@@ -1856,9 +1561,6 @@ export default function PenilaianMapelPage() {
                   </th>
                   <th className="text-center px-3 py-3 font-bold min-w-[90px]">
                     UAS
-                  </th>
-                  <th className="text-center px-3 py-3 font-bold min-w-[100px]">
-                    Kehadiran
                   </th>
                   <th className="text-center px-4 py-3 font-bold min-w-[120px] bg-blue-50 text-blue-700 whitespace-nowrap">
                     Nilai Akhir
@@ -1902,11 +1604,6 @@ export default function PenilaianMapelPage() {
                         )} whitespace-nowrap`}
                       >
                         {formatGrade(uasAvgMap[siswa.id])}
-                      </td>
-                      <td className="px-3 py-2.5 text-center font-semibold text-slate-600 whitespace-nowrap">
-                        {kehadiranMap[siswa.id] !== null
-                          ? `${kehadiranMap[siswa.id].toFixed(1)}%`
-                          : "-"}
                       </td>
                       <td
                         className={`px-4 py-2.5 text-center font-extrabold font-mono ${getGradeColor(

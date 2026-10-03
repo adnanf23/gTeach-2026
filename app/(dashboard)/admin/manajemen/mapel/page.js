@@ -16,6 +16,7 @@ const TEMPLATE_HEADERS = [
   "target_tingkat",
   "kategori",
   "kelas",
+  "Label",
 ];
 
 function todayStr() {
@@ -31,6 +32,7 @@ function emptyForm() {
     target_tingkat: [],
     kategori: "",
     spesifik_kelas_id: [],
+    Label: "",
   };
 }
 
@@ -76,6 +78,7 @@ function parseImportRows(rawRows, kelasList, existingCodes) {
     const kelasRaw = String(
       row.kelas ?? row["Kelas"] ?? row["Kelas Terkait"] ?? "",
     ).trim();
+    const Label = String(row.Label ?? row["Label"] ?? "").trim();
 
     // baris komentar / benar-benar kosong → di-skip (bukan error)
     if (nama_mapel.startsWith("#")) {
@@ -150,6 +153,7 @@ function parseImportRows(rawRows, kelasList, existingCodes) {
       kode_mapel,
       target_tingkat,
       kategori,
+      Label,
       kelasNames,
       payload: {
         nama_mapel,
@@ -157,6 +161,7 @@ function parseImportRows(rawRows, kelasList, existingCodes) {
         target_tingkat,
         kategori,
         spesifik_kelas_id: kelasIds,
+        Label,
       },
     });
   });
@@ -284,6 +289,7 @@ export default function MataPelajaranPage() {
         : m.spesifik_kelas_id
           ? [m.spesifik_kelas_id]
           : [],
+      Label: m.Label || "",
     });
     setFormError("");
     setKelasSearch("");
@@ -368,6 +374,7 @@ export default function MataPelajaranPage() {
         target_tingkat: form.target_tingkat,
         kategori: form.kategori || "",
         spesifik_kelas_id: form.spesifik_kelas_id,
+        Label: form.Label?.trim() || "",
       };
 
       if (isEditing) {
@@ -426,15 +433,16 @@ export default function MataPelajaranPage() {
     const XLSX = await import("xlsx");
     const wsData = [
       TEMPLATE_HEADERS,
-      ["Matematika", "MTK", "1,2,3", "umum", ""],
-      ["Bahasa Indonesia", "BIN", "4,5,6", "", ""],
-      ["Tahfizh Juz 30", "THF-30", "1,2,3", "tahfizh", ""],
+      ["Matematika", "MTK", "1,2,3", "umum", "", "Wajib"],
+      ["Bahasa Indonesia", "BIN", "4,5,6", "", "", ""],
+      ["Tahfizh Juz 30", "THF-30", "1,2,3", "tahfizh", "", "Muatan Lokal"],
       [
         "English (Internasional)",
         "ENG-INT",
         "1,2,3",
         "vocab",
         "Kelas 1 Internasional, Kelas 2 Internasional",
+        "Pilihan",
       ],
       [
         "# Kosongkan kolom kelas jika mapel berlaku untuk SEMUA kelas di tingkat tsb.",
@@ -442,9 +450,19 @@ export default function MataPelajaranPage() {
         "",
         "",
         "",
+        "",
       ],
       [
         "# Kolom kategori: umum | tahfizh | vocab. Kosongkan jika tidak ada kategori.",
+        "",
+        "",
+        "",
+        "",
+        "",
+      ],
+      [
+        "# Kolom Label bersifat bebas (opsional), mis. Wajib / Pilihan / Muatan Lokal.",
+        "",
         "",
         "",
         "",
@@ -458,6 +476,7 @@ export default function MataPelajaranPage() {
       { wch: 18 },
       { wch: 14 },
       { wch: 32 },
+      { wch: 18 },
     ];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Template");
@@ -483,6 +502,7 @@ export default function MataPelajaranPage() {
         no: i + 1,
         kode: m.kode_mapel || "",
         nama: m.nama_mapel || "",
+        label: m.Label || "-",
         kategori: kategoriLabel(m.kategori) || "-",
         tingkat: (m.target_tingkat || [])
           .slice()
@@ -500,6 +520,7 @@ export default function MataPelajaranPage() {
       "No",
       "Kode Mapel",
       "Nama Mapel",
+      "Label",
       "Kategori",
       "Target Tingkat",
       "Kelas Khusus",
@@ -523,6 +544,7 @@ export default function MataPelajaranPage() {
         r.no,
         r.kode,
         r.nama,
+        r.label,
         r.kategori,
         r.tingkat,
         r.kelas,
@@ -542,6 +564,7 @@ export default function MataPelajaranPage() {
       { wch: 5 }, // No
       { wch: 14 }, // Kode
       { wch: 32 }, // Nama
+      { wch: 16 }, // Label
       { wch: 12 }, // Kategori
       { wch: 22 }, // Tingkat
       { wch: 42 }, // Kelas
@@ -564,7 +587,6 @@ export default function MataPelajaranPage() {
     };
 
     // --- Freeze pane: header tetap terlihat saat scroll ---
-    // (didukung oleh xlsx-js-style pada write xlsx)
     ws["!freeze"] = "A5";
 
     // --- Style ---
@@ -608,6 +630,10 @@ export default function MataPelajaranPage() {
       ...styleCellCenter,
       font: { sz: 11, bold: true, color: { rgb: "1D4ED8" } },
     };
+    const styleLabel = {
+      ...styleCellCenter,
+      font: { sz: 11, bold: true, color: { rgb: "6D28D9" } },
+    };
     const fillAlt = { fill: { fgColor: { rgb: "F1F5F9" } } };
 
     for (let R = range.s.r; R <= range.e.r; R++) {
@@ -628,6 +654,8 @@ export default function MataPelajaranPage() {
           if (C === 0 || C === 1) {
             ws[addr].s = { ...styleCellCenter, ...altPatch };
           } else if (C === 3) {
+            ws[addr].s = { ...styleLabel, ...altPatch };
+          } else if (C === 4) {
             ws[addr].s = { ...styleKategori, ...altPatch };
           } else {
             ws[addr].s = { ...styleCell, ...altPatch };
@@ -756,6 +784,11 @@ export default function MataPelajaranPage() {
               {m.kategori && (
                 <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 ring-1 ring-blue-200">
                   {kategoriLabel(m.kategori)}
+                </span>
+              )}
+              {m.Label && (
+                <span className="rounded-full bg-purple-50 px-2 py-0.5 text-xs font-medium text-purple-700 ring-1 ring-purple-200">
+                  {m.Label}
                 </span>
               )}
               <span className="text-xs text-neutral-400">•</span>
@@ -986,7 +1019,7 @@ export default function MataPelajaranPage() {
 
             <div className="hidden sm:block overflow-hidden rounded-2xl bg-white shadow-sm">
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm min-w-[720px]">
+                <table className="w-full text-left text-sm min-w-[820px]">
                   <thead>
                     <tr className="border-b border-neutral-100 bg-neutral-50 text-xs uppercase tracking-wide text-neutral-400">
                       <th className="px-5 py-3 font-medium whitespace-nowrap">
@@ -994,6 +1027,9 @@ export default function MataPelajaranPage() {
                       </th>
                       <th className="px-5 py-3 font-medium whitespace-nowrap">
                         Nama mapel
+                      </th>
+                      <th className="px-5 py-3 font-medium whitespace-nowrap">
+                        Label
                       </th>
                       <th className="px-5 py-3 font-medium whitespace-nowrap">
                         Kategori
@@ -1028,6 +1064,17 @@ export default function MataPelajaranPage() {
                           </td>
                           <td className="px-5 py-3 font-medium text-neutral-800 whitespace-nowrap">
                             {m.nama_mapel}
+                          </td>
+                          <td className="px-5 py-3 whitespace-nowrap">
+                            {m.Label ? (
+                              <span className="rounded-full bg-purple-50 px-2 py-0.5 text-xs font-medium text-purple-700 ring-1 ring-purple-200">
+                                {m.Label}
+                              </span>
+                            ) : (
+                              <span className="text-xs italic text-neutral-300">
+                                —
+                              </span>
+                            )}
                           </td>
                           <td className="px-5 py-3 whitespace-nowrap">
                             {m.kategori ? (
@@ -1167,6 +1214,22 @@ export default function MataPelajaranPage() {
                 />
               </Field>
             </div>
+
+            <Field label="Label (opsional)">
+              <input
+                value={form.Label}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, Label: e.target.value }))
+                }
+                placeholder="mis. Wajib / Pilihan / Muatan Lokal"
+                className="w-full rounded-xl border border-neutral-200 bg-neutral-50 px-3.5 py-2.5 text-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+              />
+              <p className="mt-1.5 text-xs text-neutral-400">
+                Bebas diisi. Berguna untuk menandai kelompok mapel, mis.
+                &quot;Wajib&quot;, &quot;Pilihan&quot;, atau &quot;Muatan
+                Lokal&quot;.
+              </p>
+            </Field>
 
             <Field label="Kategori (opsional)">
               <div className="flex flex-wrap gap-2">
@@ -1433,6 +1496,7 @@ export default function MataPelajaranPage() {
                         <th className="px-3 py-2 font-medium">#</th>
                         <th className="px-3 py-2 font-medium">Kode</th>
                         <th className="px-3 py-2 font-medium">Nama</th>
+                        <th className="px-3 py-2 font-medium">Label</th>
                         <th className="px-3 py-2 font-medium">Tingkat</th>
                         <th className="px-3 py-2 font-medium">Kategori</th>
                       </tr>
@@ -1448,6 +1512,9 @@ export default function MataPelajaranPage() {
                           </td>
                           <td className="px-3 py-1.5 text-neutral-700">
                             {v.nama_mapel}
+                          </td>
+                          <td className="px-3 py-1.5 text-neutral-500">
+                            {v.Label || "—"}
                           </td>
                           <td className="px-3 py-1.5 text-neutral-500">
                             {v.target_tingkat.join(", ")}

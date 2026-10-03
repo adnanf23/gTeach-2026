@@ -9,14 +9,6 @@ import { saveAs } from "file-saver";
 // ================================================================
 // KONFIGURASI
 // ================================================================
-const NAMA_BOBOT = {
-  formatif: "Formatif",
-  sumatif: "Sumatif",
-  uts: "Ujian Tengah Semester",
-  uas: "Ujian Akhir Semester",
-  kehadiran: "Kehadiran",
-};
-
 const JENIS_UTS = "ahb";
 const JENIS_UAS = "asas";
 
@@ -215,45 +207,31 @@ export default function RekapNilaiPage() {
         setMapelList([]);
         setNilaiAkhirMap({});
 
-        const [
-          siswaData,
-          mapelKhusus,
-          mapelTingkat,
-          plotingData,
-          presentaseData,
-          ujianData,
-          absensiData,
-        ] = await Promise.all([
-          pb.collection("siswa").getFullList({
-            filter: `kelas_id = "${kelasData.id}"`,
-            sort: "nama_siswa",
-            requestKey: null,
-          }),
-          pb.collection("mata_pelajaran").getFullList({
-            filter: `spesifik_kelas_id ~ "${kelasData.id}"`,
-            requestKey: null,
-          }),
-          pb.collection("mata_pelajaran").getFullList({
-            filter: `target_tingkat ~ "${String(kelasData.tingkat)}"`,
-            requestKey: null,
-          }),
-          pb.collection("ploting_guru").getFullList({
-            filter: `kelas_id ~ "${kelasData.id}"`,
-            expand: "guru_id",
-            requestKey: null,
-          }),
-          pb.collection("presentase_penilaian").getFullList({
-            requestKey: null,
-          }),
-          pb.collection("pengaturan_ujian").getFullList({
-            filter: `status_akses = "buka" && (target_kelas_id ~ "${kelasData.id}" || target_tingkat ~ "${String(kelasData.tingkat)}")`,
-            requestKey: null,
-          }),
-          pb.collection("absensi").getFullList({
-            filter: `kelas_id ~ "${kelasData.id}"`,
-            requestKey: null,
-          }),
-        ]);
+        const [siswaData, mapelKhusus, mapelTingkat, plotingData, ujianData] =
+          await Promise.all([
+            pb.collection("siswa").getFullList({
+              filter: `kelas_id = "${kelasData.id}"`,
+              sort: "nama_siswa",
+              requestKey: null,
+            }),
+            pb.collection("mata_pelajaran").getFullList({
+              filter: `spesifik_kelas_id ~ "${kelasData.id}"`,
+              requestKey: null,
+            }),
+            pb.collection("mata_pelajaran").getFullList({
+              filter: `target_tingkat ~ "${String(kelasData.tingkat)}"`,
+              requestKey: null,
+            }),
+            pb.collection("ploting_guru").getFullList({
+              filter: `kelas_id ~ "${kelasData.id}"`,
+              expand: "guru_id",
+              requestKey: null,
+            }),
+            pb.collection("pengaturan_ujian").getFullList({
+              filter: `status_akses = "buka" && (target_kelas_id ~ "${kelasData.id}" || target_tingkat ~ "${String(kelasData.tingkat)}")`,
+              requestKey: null,
+            }),
+          ]);
 
         if (cancelled) return;
         setSiswaList(siswaData);
@@ -317,31 +295,6 @@ export default function RekapNilaiPage() {
         if (cancelled) return;
         setMapelList(sortedMapel);
 
-        function getBobot(nama) {
-          const found = presentaseData.find(
-            (p) =>
-              (p.nama_presentase || "").trim().toLowerCase() ===
-              nama.toLowerCase(),
-          );
-          return found ? Number(found.angka_presentase) || 0 : 0;
-        }
-        const bobotFormatif = getBobot(NAMA_BOBOT.formatif);
-        const bobotSumatif = getBobot(NAMA_BOBOT.sumatif);
-        const bobotUts = getBobot(NAMA_BOBOT.uts);
-        const bobotUas = getBobot(NAMA_BOBOT.uas);
-        const bobotKehadiran = getBobot(NAMA_BOBOT.kehadiran);
-
-        const kehadiranMap = {};
-        siswaData.forEach((s) => {
-          const records = absensiData.filter((a) => a.siswa_id === s.id);
-          if (records.length === 0) {
-            kehadiranMap[s.id] = null;
-            return;
-          }
-          const hadir = records.filter((a) => a.status === "hadir").length;
-          kehadiranMap[s.id] = (hadir / records.length) * 100;
-        });
-
         const utsIds = ujianData
           .filter((u) => u.jenis_ujian === JENIS_UTS)
           .map((u) => u.id);
@@ -389,12 +342,11 @@ export default function RekapNilaiPage() {
             .join(" || ");
           [tpAll, lpAll] = await Promise.all([
             pb.collection("tujuan_pembelajaran").getFullList({
-              filter: mapelFilter,
+              filter: `(${mapelFilter}) && kelas_id ~ "${kelasData.id}"`,
               requestKey: null,
             }),
-            // ✅ Fix: lingkup_materi (bukan lingkup_mater)
             pb.collection("lingkup_materi").getFullList({
-              filter: mapelFilter,
+              filter: `(${mapelFilter}) && kelas_id ~ "${kelasData.id}"`,
               requestKey: null,
             }),
           ]);
@@ -453,6 +405,11 @@ export default function RekapNilaiPage() {
           }
         });
 
+        // ============================================================
+        // NILAI AKHIR — SAMA DENGAN penilaianmapelpage
+        // Rata-rata sederhana dari: Formatif, Sumatif, UTS, UAS
+        // (hanya komponen yang tersedia)
+        // ============================================================
         const nilaiAkhir = {};
         sortedMapel.forEach((m) => {
           nilaiAkhir[m.id] = {};
@@ -461,43 +418,17 @@ export default function RekapNilaiPage() {
             const sumatifAvg = average(sumatifValues[m.id]?.[s.id] || []);
             const utsVal = utsAvgMap[s.id];
             const uasVal = uasAvgMap[s.id];
-            const kehadiranVal = kehadiranMap[s.id];
 
-            const otherComponents = [
-              { value: formatifAvg, bobot: bobotFormatif },
-              { value: sumatifAvg, bobot: bobotSumatif },
-              { value: utsVal, bobot: bobotUts },
-              { value: uasVal, bobot: bobotUas },
-            ].filter(
-              (k) =>
-                k.value !== null &&
-                k.value !== undefined &&
-                !isNaN(k.value) &&
-                k.bobot > 0,
+            const komponen = [formatifAvg, sumatifAvg, utsVal, uasVal].filter(
+              (v) => v !== null && v !== undefined && !isNaN(v) && v !== -1,
             );
 
-            let komponen = [...otherComponents];
-            if (otherComponents.length > 0) {
-              if (
-                kehadiranVal !== null &&
-                kehadiranVal !== undefined &&
-                !isNaN(kehadiranVal) &&
-                bobotKehadiran > 0
-              ) {
-                komponen.push({ value: kehadiranVal, bobot: bobotKehadiran });
-              }
-            }
-
-            const totalBobot = komponen.reduce((a, k) => a + k.bobot, 0);
-            if (totalBobot === 0) {
+            if (komponen.length === 0) {
               nilaiAkhir[m.id][s.id] = null;
               return;
             }
-            const weightedSum = komponen.reduce(
-              (a, k) => a + k.value * k.bobot,
-              0,
-            );
-            nilaiAkhir[m.id][s.id] = weightedSum / totalBobot;
+            nilaiAkhir[m.id][s.id] =
+              komponen.reduce((a, b) => a + b, 0) / komponen.length;
           });
         });
 

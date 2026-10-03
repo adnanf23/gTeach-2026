@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, /* useMemo, */ useState } from "react";
 import { useRouter } from "next/navigation";
 import { pb, getCurrentUser, isAuthenticated } from "@/lib/pocketbase";
 
@@ -13,13 +13,6 @@ function getGreetingByTime() {
   if (h >= 11 && h < 15) return "Selamat Siang";
   if (h >= 15 && h < 18) return "Selamat Sore";
   return "Selamat Malam";
-}
-
-function pad(n) {
-  return String(n).padStart(2, "0");
-}
-function toISODate(d) {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 function hariIndo() {
@@ -40,6 +33,22 @@ function hariIndo() {
   ];
   const now = new Date();
   return `${hari[now.getDay()]}, ${now.getDate()} ${bulan[now.getMonth()]} ${now.getFullYear()}`;
+}
+
+// Field multi-select / multi-relation di PocketBase selalu berupa array,
+// tapi kita jaga-jaga kalau datanya string tunggal.
+function toArr(v) {
+  if (Array.isArray(v)) return v;
+  return v ? [v] : [];
+}
+
+/* ===== ABSENSI (di-comment, buka lagi kalau mau dipakai) =====================
+
+function pad(n) {
+  return String(n).padStart(2, "0");
+}
+function toISODate(d) {
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 function monthRange() {
@@ -108,6 +117,8 @@ function monthBuckets(offset = 0) {
   return days;
 }
 
+============================================================================= */
+
 // ---------------------------------------------------------------------------
 // UI
 // ---------------------------------------------------------------------------
@@ -135,6 +146,96 @@ export function Card({ title, subtitle, action, children, className = "" }) {
     </div>
   );
 }
+
+// Ilustrasi kertas raport terkunci: belum ada raport yang dibuka
+function EmptyRaporIllustration() {
+  return (
+    <svg
+      viewBox="0 0 160 160"
+      className="h-36 w-auto"
+      role="img"
+      aria-label="Kertas raport terkunci, belum ada raport yang dibuka"
+    >
+      <circle cx="80" cy="80" r="70" fill="#EEF2FF" />
+
+      {/* kertas */}
+      <rect
+        x="48"
+        y="30"
+        width="64"
+        height="86"
+        rx="8"
+        fill="#ffffff"
+        stroke="#A5B4FC"
+        strokeWidth="2.5"
+      />
+      <rect x="58" y="44" width="30" height="5" rx="2.5" fill="#C7D2FE" />
+      <rect x="58" y="58" width="44" height="4" rx="2" fill="#E0E7FF" />
+      <rect x="58" y="69" width="44" height="4" rx="2" fill="#E0E7FF" />
+      <rect x="58" y="80" width="32" height="4" rx="2" fill="#E0E7FF" />
+
+      {/* gembok */}
+      <circle cx="112" cy="112" r="22" fill="#6366F1" />
+      <rect x="103" y="110" width="18" height="14" rx="3" fill="#ffffff" />
+      <path
+        d="M107 110 v-3 a5 5 0 0 1 10 0 v3"
+        fill="none"
+        stroke="#ffffff"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+      />
+      <circle cx="112" cy="117" r="2" fill="#6366F1" />
+    </svg>
+  );
+}
+
+function EmptyRapor() {
+  return (
+    <div className="flex flex-col items-center px-2 py-6 text-center">
+      <EmptyRaporIllustration />
+      <h3 className="mt-3 text-base font-bold text-slate-800">
+        Belum ada raport yang dibuka
+      </h3>
+      <p className="mt-1 max-w-sm text-sm text-slate-500">
+        Raport akan muncul di sini setelah sekolah membuka akses raport untuk
+        ujian. Silakan cek kembali nanti.
+      </p>
+    </div>
+  );
+}
+
+function RaporItem({ ujian }) {
+  const jenis = toArr(ujian.jenis_ujian).join(", ");
+
+  return (
+    <li className="flex flex-col gap-3 rounded-xl border border-slate-100 bg-white p-4">
+      {/* Baris Atas: Status Badge */}
+      <div className="flex justify-end">
+        <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+          Dibuka
+        </span>
+      </div>
+
+      {/* Baris Bawah: Ikon dan Teks */}
+      <div className="flex min-w-0 items-start gap-3">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-indigo-50 text-lg ring-2 ring-indigo-100">
+          📄
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="break-words text-sm font-semibold text-slate-800">
+            {ujian.nama_ujian}
+          </p>
+          <p className="mt-0.5 break-words text-xs text-slate-400">
+            {jenis ? `Jenis ujian: ${jenis.toUpperCase()}` : "Raport ujian"}
+          </p>
+        </div>
+      </div>
+    </li>
+  );
+}
+
+/* ===== ABSENSI UI (di-comment) ===============================================
 
 const STATUS_META = {
   hadir: {
@@ -224,9 +325,6 @@ function MiniStat({ label, value, tone = "slate", suffix = "" }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Chart panjang (tall bars, scrollable)
-// ---------------------------------------------------------------------------
 function AttendanceTrendChart({
   weeklyData,
   monthlyData,
@@ -244,7 +342,6 @@ function AttendanceTrendChart({
   const showDateLabel = viewMode === "weekly";
   const colMin = showDateLabel ? 44 : 26;
 
-  // Ringkasan periode
   const total = data.length;
   const counts = data.reduce(
     (acc, d) => {
@@ -265,7 +362,6 @@ function AttendanceTrendChart({
 
   return (
     <div>
-      {/* Toggle + Legend */}
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-500">
           {["hadir", "sakit", "izin", "alpha"].map((s) => (
@@ -295,7 +391,6 @@ function AttendanceTrendChart({
         </div>
       </div>
 
-      {/* Ringkasan periode */}
       <div className="mb-5 grid grid-cols-2 gap-x-3 gap-y-4 rounded-xl border border-slate-100 bg-slate-50/60 p-3 sm:grid-cols-4 sm:gap-3">
         <div className="min-w-0">
           <p className="truncate text-[11px] font-medium text-slate-500">
@@ -341,7 +436,6 @@ function AttendanceTrendChart({
         </div>
       </div>
 
-      {/* Chart panjang — scrollable */}
       <div className="overflow-x-auto pb-2">
         <div
           className="flex items-end gap-1.5 sm:gap-2"
@@ -386,6 +480,8 @@ function AttendanceTrendChart({
   );
 }
 
+============================================================================= */
+
 // ---------------------------------------------------------------------------
 // Halaman Utama
 // ---------------------------------------------------------------------------
@@ -400,6 +496,10 @@ export default function OverviewWaliMuridPage() {
   const [siswa, setSiswa] = useState(null);
   const [kelas, setKelas] = useState(null);
 
+  // Raport: daftar ujian yang akses raportnya dibuka untuk anak ini
+  const [raporList, setRaporList] = useState([]);
+
+  /* ----- state absensi (di-comment) -----
   const [absensiBulanIni, setAbsensiBulanIni] = useState([]);
   const [absensiHariIni, setAbsensiHariIni] = useState(null);
 
@@ -407,6 +507,7 @@ export default function OverviewWaliMuridPage() {
   const [monthlyTrend, setMonthlyTrend] = useState([]);
   const [lastMonthTrend, setLastMonthTrend] = useState([]);
   const [trendView, setTrendView] = useState("weekly");
+  ---------------------------------------- */
 
   // Auth
   useEffect(() => {
@@ -443,19 +544,45 @@ export default function OverviewWaliMuridPage() {
         const siswaData = await pb.collection("siswa").getOne(siswaId);
         if (isMounted) setSiswa(siswaData);
 
+        let kelasData = null;
         const kelasId = Array.isArray(siswaData.kelas_id)
           ? siswaData.kelas_id[0]
           : siswaData.kelas_id;
         if (kelasId) {
           try {
-            const kelasData = await pb.collection("kelas").getOne(kelasId);
+            kelasData = await pb.collection("kelas").getOne(kelasId);
             if (isMounted) setKelas(kelasData);
           } catch (e) {
             console.warn("Gagal memuat kelas:", e);
           }
         }
 
-        // Absensi hari ini + bulan ini
+        // ===== RAPORT =====
+        // Ujian yang akses raportnya dibuka (akses_rapor = true)
+        const ujianBuka = await pb.collection("pengaturan_ujian").getFullList({
+          filter: "akses_rapor=true",
+          sort: "nama_ujian",
+        });
+
+        // Cocokkan dengan tingkat / kelas anak.
+        // target_tingkat & target_kelas_id keduanya multi-value (array).
+        const tingkat =
+          kelasData?.tingkat != null ? String(kelasData.tingkat) : null;
+
+        const ujianUntukAnak = ujianBuka.filter((u) => {
+          const tingkatList = toArr(u.target_tingkat).map(String);
+          const kelasList = toArr(u.target_kelas_id);
+          const cocokTingkat =
+            tingkatList.length === 0 ||
+            (tingkat && tingkatList.includes(tingkat));
+          const cocokKelas =
+            kelasList.length === 0 || (kelasId && kelasList.includes(kelasId));
+          return cocokTingkat && cocokKelas;
+        });
+
+        if (isMounted) setRaporList(ujianUntukAnak);
+
+        /* ===== ABSENSI (di-comment) ==========================================
         const now = new Date();
         const todayStart = `${toISODate(now)} 00:00:00`;
         const tomorrow = new Date(
@@ -481,20 +608,11 @@ export default function OverviewWaliMuridPage() {
           setAbsensiBulanIni(bulanList);
         }
 
-        // === Trend: minggu ini, bulan ini, bulan lalu ===
+        // Trend: minggu ini, bulan ini, bulan lalu
         const weekly = last7Days();
         const monthly = monthBuckets(0);
         const lastMonth = monthBuckets(-1);
 
-        const { start: prevStart, end: prevEnd } = prevMonthRange();
-
-        const rangeStart =
-          weekly[0].start && weekly[0].start < prevStart
-            ? weekly[0].start
-            : prevStart < monthly[0].key + " 00:00:00"
-              ? prevStart
-              : monthly[0].key + " 00:00:00";
-        // simpler: ambil range paling lebar
         const minStart =
           [weekly[0].key, monthly[0].key, lastMonth[0].key].sort()[0] +
           " 00:00:00";
@@ -532,6 +650,7 @@ export default function OverviewWaliMuridPage() {
           setMonthlyTrend(buildTrend(monthly));
           setLastMonthTrend(buildTrend(lastMonth));
         }
+        ======================================================================= */
 
         if (isMounted) setLoading(false);
       } catch (err) {
@@ -551,7 +670,7 @@ export default function OverviewWaliMuridPage() {
     };
   }, [authChecked, wali]);
 
-  // Statistik bulan ini
+  /* ----- statistik absensi bulan ini (di-comment) -----
   const stats = useMemo(() => {
     const s = { hadir: 0, sakit: 0, izin: 0, alpha: 0, total: 0 };
     absensiBulanIni.forEach((a) => {
@@ -564,6 +683,7 @@ export default function OverviewWaliMuridPage() {
 
   const persen = (v) =>
     stats.total > 0 ? Math.round((v / stats.total) * 100) : 0;
+  ----------------------------------------------------- */
 
   if (!authChecked) {
     return (
@@ -594,8 +714,6 @@ export default function OverviewWaliMuridPage() {
     );
   }
 
-  const namaWali = wali?.name || wali?.username || "Wali Murid";
-
   return (
     <div className="min-h-screen bg-slate-50 pb-16">
       {/* Header */}
@@ -608,7 +726,7 @@ export default function OverviewWaliMuridPage() {
             {getGreetingByTime()}, Ayah atau Mama! 👋
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            Pantau perkembangan & kehadiran anak Anda di sekolah
+            Pantau perkembangan & raport anak Anda di sekolah
           </p>
         </div>
       </div>
@@ -633,6 +751,7 @@ export default function OverviewWaliMuridPage() {
               </div>
             </div>
 
+            {/* Absensi hari ini (di-comment)
             <div className="rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3 text-center">
               <p className="text-[11px] font-medium text-slate-500">
                 Absensi Hari Ini
@@ -645,10 +764,41 @@ export default function OverviewWaliMuridPage() {
                 )}
               </div>
             </div>
+            */}
           </div>
         </Card>
 
-        {/* Statistik absen bulan ini */}
+        {/* Raport */}
+        <Card
+          title="Raport"
+          subtitle={
+            raporList.length > 0
+              ? "Raport yang sudah dibuka oleh sekolah"
+              : undefined
+          }
+        >
+          {raporList.length === 0 ? (
+            <EmptyRapor />
+          ) : (
+            <>
+              <div className="mb-4 flex items-start gap-3 rounded-xl border border-indigo-100 bg-indigo-50 p-3.5">
+                <span className="text-lg leading-none">🔔</span>
+                <p className="text-sm text-indigo-900">
+                  Raport sudah dibuka. Silakan lihat di menu Rapor.
+                </p>
+              </div>
+              <ul className="space-y-2.5">
+                {raporList.map((ujian) => (
+                  <RaporItem key={ujian.id} ujian={ujian} />
+                ))}
+              </ul>
+            </>
+          )}
+        </Card>
+
+        {/* ===== ABSENSI (di-comment) =========================================
+
+        Statistik absen bulan ini
         <Card
           title="Statistik Absensi Bulan Ini"
           subtitle={`Total ${stats.total} catatan absensi bulan ini`}
@@ -716,7 +866,7 @@ export default function OverviewWaliMuridPage() {
           </div>
         </Card>
 
-        {/* Chart panjang + shortcut bulan lalu */}
+        Chart panjang + shortcut bulan lalu
         <Card
           title="Riwayat Kehadiran"
           subtitle="Klik tab untuk melihat minggu ini, bulan ini, atau bulan lalu"
@@ -730,7 +880,7 @@ export default function OverviewWaliMuridPage() {
           />
         </Card>
 
-        {/* Riwayat absensi terbaru — modern */}
+        Riwayat absensi terbaru
         <Card
           title="Riwayat Absensi Terbaru"
           subtitle="10 catatan absensi terakhir bulan ini"
@@ -781,6 +931,8 @@ export default function OverviewWaliMuridPage() {
             </ul>
           )}
         </Card>
+
+        ===================================================================== */}
       </div>
     </div>
   );

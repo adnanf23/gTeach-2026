@@ -27,10 +27,6 @@ function jenisUjianBadge(jenis) {
   return map[jenis] || "bg-slate-50 text-slate-500 border-slate-100";
 }
 
-function firstOf(val) {
-  return Array.isArray(val) ? val[0] : val;
-}
-
 const emptyForm = {
   nama_ujian: "",
   target_tingkat: [],
@@ -38,6 +34,7 @@ const emptyForm = {
   template_rapor: "akademik",
   jenis_ujian: "ahb",
   status_akses: "tutup",
+  akses_rapor: false,
 };
 
 export default function ManajemenUjianPage() {
@@ -65,6 +62,7 @@ export default function ManajemenUjianPage() {
   const [savingForm, setSavingForm] = useState(false);
 
   const [togglingId, setTogglingId] = useState(null);
+  const [togglingRaporId, setTogglingRaporId] = useState(null);
   const [creatingSkema, setCreatingSkema] = useState(false);
 
   const selectedTahunAjaran = useMemo(
@@ -89,7 +87,7 @@ export default function ManajemenUjianPage() {
     setAuthChecked(true);
   }, [router]);
 
-  // 2. Ambil tahun ajaran + semua kelas (untuk picker target_kelas_id)
+  // 2. Ambil tahun ajaran + semua kelas
   useEffect(() => {
     if (!authChecked || unauthorized) return;
     let isMounted = true;
@@ -127,7 +125,7 @@ export default function ManajemenUjianPage() {
     };
   }, [authChecked, unauthorized]);
 
-  // 3. Ambil daftar pengaturan_ujian untuk tahun ajaran terpilih
+  // 3. Ambil daftar pengaturan_ujian
   useEffect(() => {
     if (!selectedTahunAjaranId) {
       setUjianList([]);
@@ -180,6 +178,7 @@ export default function ManajemenUjianPage() {
       template_rapor: u.template_rapor || "akademik",
       jenis_ujian: u.jenis_ujian || "ahb",
       status_akses: u.status_akses || "tutup",
+      akses_rapor: !!u.akses_rapor,
     });
     setShowForm(true);
   }
@@ -190,7 +189,6 @@ export default function ManajemenUjianPage() {
       target_tingkat: f.target_tingkat.includes(t)
         ? f.target_tingkat.filter((x) => x !== t)
         : [...f.target_tingkat, t],
-      // reset kelas spesifik kalau tingkat berubah, biar nggak nyangkut kelas dari tingkat lain
       target_kelas_id: [],
     }));
   }
@@ -224,6 +222,7 @@ export default function ManajemenUjianPage() {
         template_rapor: form.template_rapor,
         jenis_ujian: form.jenis_ujian,
         status_akses: form.status_akses,
+        akses_rapor: form.akses_rapor,
       };
 
       if (editingId) {
@@ -283,6 +282,25 @@ export default function ManajemenUjianPage() {
     }
   }
 
+  async function toggleAksesRapor(u) {
+    const next = !u.akses_rapor;
+    setTogglingRaporId(u.id);
+    setError("");
+    try {
+      const updated = await pb.collection("pengaturan_ujian").update(u.id, {
+        akses_rapor: next,
+      });
+      setUjianList((prev) =>
+        prev.map((x) => (x.id === updated.id ? updated : x)),
+      );
+    } catch (err) {
+      console.error("Error toggling akses_rapor:", err);
+      setError("Gagal mengubah akses rapor.");
+    } finally {
+      setTogglingRaporId(null);
+    }
+  }
+
   // ---------------- Quick action: buat skema standar semester ----------------
   async function buatSkemaStandar() {
     if (!selectedTahunAjaran) return;
@@ -324,6 +342,7 @@ export default function ManajemenUjianPage() {
             template_rapor: "akademik",
             jenis_ujian: item.jenis_ujian,
             status_akses: "tutup",
+            akses_rapor: false,
             requestKey: null,
           }),
         ),
@@ -379,8 +398,8 @@ export default function ManajemenUjianPage() {
         <div>
           <h1 className="text-lg font-bold text-slate-800">Manajemen Ujian</h1>
           <p className="text-xs text-slate-500 mt-1">
-            Atur skema ujian (AHB/ASAS/ASAT) dan buka/tutup akses nilai ujian
-            per tingkat.
+            Atur skema ujian (AHB/ASAS/ASAT), buka/tutup akses nilai ujian, dan
+            kontrol akses buka rapor per tingkat.
           </p>
         </div>
 
@@ -582,35 +601,70 @@ export default function ManajemenUjianPage() {
             </div>
           )}
 
-          <div>
-            <label className="text-[11px] font-medium text-slate-500">
-              Status Akses Awal
-            </label>
-            <div className="mt-1.5 flex gap-2">
-              <button
-                type="button"
-                onClick={() =>
-                  setForm((f) => ({ ...f, status_akses: "tutup" }))
-                }
-                className={`rounded-lg px-3 py-1.5 text-xs font-semibold border transition ${
-                  form.status_akses === "tutup"
-                    ? "bg-slate-700 text-white border-slate-700"
-                    : "bg-white text-slate-500 border-slate-200"
-                }`}
-              >
-                Tutup
-              </button>
-              <button
-                type="button"
-                onClick={() => setForm((f) => ({ ...f, status_akses: "buka" }))}
-                className={`rounded-lg px-3 py-1.5 text-xs font-semibold border transition ${
-                  form.status_akses === "buka"
-                    ? "bg-emerald-600 text-white border-emerald-600"
-                    : "bg-white text-slate-500 border-slate-200"
-                }`}
-              >
-                Buka
-              </button>
+          {/* Status Akses: Nilai Ujian & Rapor */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="text-[11px] font-medium text-slate-500">
+                Status Akses Nilai Ujian
+              </label>
+              <div className="mt-1.5 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setForm((f) => ({ ...f, status_akses: "tutup" }))
+                  }
+                  className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold border transition ${
+                    form.status_akses === "tutup"
+                      ? "bg-slate-700 text-white border-slate-700"
+                      : "bg-white text-slate-500 border-slate-200 hover:border-slate-300"
+                  }`}
+                >
+                  Tutup Nilai
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setForm((f) => ({ ...f, status_akses: "buka" }))
+                  }
+                  className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold border transition ${
+                    form.status_akses === "buka"
+                      ? "bg-emerald-600 text-white border-emerald-600"
+                      : "bg-white text-slate-500 border-slate-200 hover:border-emerald-300"
+                  }`}
+                >
+                  Buka Nilai
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-[11px] font-medium text-slate-500">
+                Akses Buka Rapor
+              </label>
+              <div className="mt-1.5 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setForm((f) => ({ ...f, akses_rapor: false }))}
+                  className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold border transition ${
+                    !form.akses_rapor
+                      ? "bg-slate-700 text-white border-slate-700"
+                      : "bg-white text-slate-500 border-slate-200 hover:border-slate-300"
+                  }`}
+                >
+                  Tutup Rapor
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setForm((f) => ({ ...f, akses_rapor: true }))}
+                  className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-semibold border transition ${
+                    form.akses_rapor
+                      ? "bg-amber-500 text-white border-amber-500"
+                      : "bg-white text-slate-500 border-slate-200 hover:border-amber-300"
+                  }`}
+                >
+                  Buka Rapor
+                </button>
+              </div>
             </div>
           </div>
 
@@ -681,6 +735,15 @@ export default function ManajemenUjianPage() {
                         ? "● Nilai Terbuka"
                         : "○ Nilai Tertutup"}
                     </span>
+                    <span
+                      className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${
+                        u.akses_rapor
+                          ? "text-amber-700 bg-amber-50"
+                          : "text-slate-500 bg-slate-100"
+                      }`}
+                    >
+                      {u.akses_rapor ? "● Rapor Terbuka" : "○ Rapor Tertutup"}
+                    </span>
                   </div>
                   <h3 className="text-sm font-bold text-slate-800 mt-2">
                     {u.nama_ujian}
@@ -697,7 +760,7 @@ export default function ManajemenUjianPage() {
                   </p>
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-2 shrink-0 flex-wrap">
                   <button
                     type="button"
                     disabled={togglingId === u.id}
@@ -714,6 +777,25 @@ export default function ManajemenUjianPage() {
                         ? "Tutup Nilai"
                         : "Buka Nilai"}
                   </button>
+
+                  <button
+                    type="button"
+                    disabled={togglingRaporId === u.id}
+                    onClick={() => toggleAksesRapor(u)}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-semibold border transition disabled:opacity-50 ${
+                      u.akses_rapor
+                        ? "bg-amber-50 text-amber-700 border-amber-100 hover:bg-amber-100"
+                        : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100"
+                    }`}
+                    title="Kontrol akses buka rapor untuk wali/orang tua"
+                  >
+                    {togglingRaporId === u.id
+                      ? "..."
+                      : u.akses_rapor
+                        ? "Tutup Rapor"
+                        : "Buka Rapor"}
+                  </button>
+
                   <button
                     type="button"
                     onClick={() => openEditForm(u)}

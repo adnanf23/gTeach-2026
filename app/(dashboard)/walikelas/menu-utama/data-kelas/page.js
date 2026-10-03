@@ -11,6 +11,11 @@ function firstOf(val) {
   return Array.isArray(val) ? val[0] : val;
 }
 
+function toArray(val) {
+  if (Array.isArray(val)) return val;
+  return val ? [val] : [];
+}
+
 export default function KelasSayaPage() {
   const router = useRouter();
 
@@ -24,6 +29,8 @@ export default function KelasSayaPage() {
   const [kelasList, setKelasList] = useState([]);
   const [siswaByKelas, setSiswaByKelas] = useState({});
   const [mapelByKelas, setMapelByKelas] = useState({});
+  // Map: siswaId -> array of wali_murid records (username)
+  const [waliMuridBySiswa, setWaliMuridBySiswa] = useState({});
   const [searchTerm, setSearchTerm] = useState("");
 
   // Sub-menu Utama: 'overview', 'siswa', atau 'mapel'
@@ -49,7 +56,7 @@ export default function KelasSayaPage() {
     setAuthChecked(true);
   }, [router]);
 
-  // 2. Ambil data kelas + siswa + mata_pelajaran
+  // 2. Ambil data kelas + siswa + mata_pelajaran + wali_murid
   useEffect(() => {
     if (!authChecked || unauthorized || !user?.id) return;
 
@@ -73,6 +80,7 @@ export default function KelasSayaPage() {
             setKelasList([]);
             setSiswaByKelas({});
             setMapelByKelas({});
+            setWaliMuridBySiswa({});
             setLoading(false);
           }
           return;
@@ -116,6 +124,41 @@ export default function KelasSayaPage() {
               .catch(() => []),
           ]);
 
+        /* ---------- Ambil akun wali murid untuk siswa-siswa ini ---------- */
+        const siswaIds = siswaRecords.map((s) => s.id);
+        let waliMuridRecords = [];
+        if (siswaIds.length > 0) {
+          // Chunk agar filter tidak terlalu panjang
+          const CHUNK = 50;
+          const chunks = [];
+          for (let i = 0; i < siswaIds.length; i += CHUNK) {
+            chunks.push(siswaIds.slice(i, i + CHUNK));
+          }
+          const results = await Promise.all(
+            chunks.map((chunk) =>
+              pb
+                .collection("wali_murid")
+                .getFullList({
+                  filter: chunk.map((id) => `siswa_id ~ "${id}"`).join(" || "),
+                  fields: "id,username,siswa_id",
+                  requestKey: null,
+                })
+                .catch(() => []),
+            ),
+          );
+          waliMuridRecords = results.flat();
+        }
+
+        // Map siswaId -> [wali_murid, ...]
+        const waliBySiswa = {};
+        for (const w of waliMuridRecords) {
+          for (const sid of toArray(w.siswa_id)) {
+            if (!waliBySiswa[sid]) waliBySiswa[sid] = [];
+            waliBySiswa[sid].push(w);
+          }
+        }
+
+        /* ---------- Grouping siswa per kelas ---------- */
         const groupedSiswa = {};
         for (const s of siswaRecords) {
           const kid = firstOf(s.kelas_id);
@@ -171,6 +214,7 @@ export default function KelasSayaPage() {
           setKelasList(kelasRecords);
           setSiswaByKelas(groupedSiswa);
           setMapelByKelas(groupedMapel);
+          setWaliMuridBySiswa(waliBySiswa);
         }
       } catch (err) {
         console.error("Error fetching data:", err);
@@ -355,10 +399,14 @@ export default function KelasSayaPage() {
             const filteredSiswa = siswaList.filter((s) => {
               if (!searchTerm.trim()) return true;
               const q = searchTerm.toLowerCase();
+              const waliUsernames = (waliMuridBySiswa[s.id] || [])
+                .map((w) => w.username || "")
+                .join(" ");
               return (
                 s.nama_siswa?.toLowerCase().includes(q) ||
                 s.nis?.toLowerCase().includes(q) ||
-                s.nisn?.toLowerCase().includes(q)
+                s.nisn?.toLowerCase().includes(q) ||
+                waliUsernames.toLowerCase().includes(q)
               );
             });
 
@@ -516,7 +564,7 @@ export default function KelasSayaPage() {
                       </p>
                     ) : (
                       <div className="overflow-x-auto rounded-xl border border-slate-100 shadow-sm">
-                        <table className="w-full min-w-[500px] text-xs">
+                        <table className="w-full min-w-[720px] text-xs">
                           <thead>
                             <tr className="bg-slate-50 text-left uppercase tracking-wider text-slate-400 text-[10px] font-semibold border-b border-slate-100">
                               <th className="px-4 py-2.5 text-center w-12">
@@ -530,41 +578,64 @@ export default function KelasSayaPage() {
                               <th className="px-4 py-2.5 text-center w-16">
                                 L/P
                               </th>
+                              <th className="px-4 py-2.5">Akun Wali Murid</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100 text-slate-600 bg-white">
-                            {filteredSiswa.map((s, idx) => (
-                              <tr
-                                key={s.id}
-                                className="hover:bg-slate-50/40 transition"
-                              >
-                                <td className="px-4 py-2.5 text-center text-slate-400 font-mono">
-                                  {idx + 1}
-                                </td>
-                                <td className="px-4 py-2.5 font-semibold text-slate-700">
-                                  {s.nama_siswa}
-                                </td>
-                                <td className="px-4 py-2.5 text-slate-500 font-mono">
-                                  {s.nis || "—"}
-                                </td>
-                                <td className="px-4 py-2.5 text-slate-500 font-mono">
-                                  {s.nisn || "—"}
-                                </td>
-                                <td className="px-4 py-2.5 text-center">
-                                  <span
-                                    className={`inline-block rounded px-2 py-0.5 text-[10px] font-bold ${
-                                      s.jenis_kelamin === "L"
-                                        ? "bg-sky-50 text-sky-600 border border-sky-100"
-                                        : s.jenis_kelamin === "P"
-                                          ? "bg-pink-50 text-pink-600 border border-pink-100"
-                                          : "bg-slate-50 text-slate-500"
-                                    }`}
-                                  >
-                                    {s.jenis_kelamin || "—"}
-                                  </span>
-                                </td>
-                              </tr>
-                            ))}
+                            {filteredSiswa.map((s, idx) => {
+                              const waliList = waliMuridBySiswa[s.id] || [];
+                              return (
+                                <tr
+                                  key={s.id}
+                                  className="hover:bg-slate-50/40 transition"
+                                >
+                                  <td className="px-4 py-2.5 text-center text-slate-400 font-mono">
+                                    {idx + 1}
+                                  </td>
+                                  <td className="px-4 py-2.5 font-semibold text-slate-700">
+                                    {s.nama_siswa}
+                                  </td>
+                                  <td className="px-4 py-2.5 text-slate-500 font-mono">
+                                    {s.nis || "—"}
+                                  </td>
+                                  <td className="px-4 py-2.5 text-slate-500 font-mono">
+                                    {s.nisn || "—"}
+                                  </td>
+                                  <td className="px-4 py-2.5 text-center">
+                                    <span
+                                      className={`inline-block rounded px-2 py-0.5 text-[10px] font-bold ${
+                                        s.jenis_kelamin === "L"
+                                          ? "bg-sky-50 text-sky-600 border border-sky-100"
+                                          : s.jenis_kelamin === "P"
+                                            ? "bg-pink-50 text-pink-600 border border-pink-100"
+                                            : "bg-slate-50 text-slate-500"
+                                      }`}
+                                    >
+                                      {s.jenis_kelamin || "—"}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-2.5">
+                                    {waliList.length === 0 ? (
+                                      <span className="inline-flex items-center gap-1 rounded bg-rose-50 text-rose-600 border border-rose-100 px-2 py-0.5 text-[10px] font-medium">
+                                        Belum ada akun
+                                      </span>
+                                    ) : (
+                                      <div className="flex flex-wrap gap-1">
+                                        {waliList.map((w) => (
+                                          <span
+                                            key={w.id}
+                                            className="inline-block rounded bg-slate-100 px-2 py-0.5 text-[10px] font-mono font-semibold text-slate-700"
+                                            title={`ID: ${w.id}`}
+                                          >
+                                            {w.username || "(tanpa username)"}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>

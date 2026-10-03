@@ -273,9 +273,9 @@ const LoginPage = () => {
   return (
     <div className="min-h-screen w-full bg-white font-sans text-gray-800 grid lg:grid-cols-[minmax(0,500px)_1fr]">
       {/* ── KIRI: form, layar penuh, tanpa kartu ── */}
-      <main className="flex flex-col px-6 sm:px-12 py-8 min-h-screen">
-        {/* Logo */}
-        <div className="flex items-center gap-2.5">
+      <main className="flex flex-col px-6 sm:px-12 py-8 lg:min-h-screen">
+        {/* Logo (desktop; di mobile logo ada di panel atas) */}
+        <div className="hidden lg:flex items-center gap-2.5">
           <div className="w-9 h-9 rounded-xl bg-[#3b6ef5] text-white flex items-center justify-center text-[17px] font-bold shadow-[0_8px_18px_rgba(59,110,245,0.35)]">
             g
           </div>
@@ -409,8 +409,8 @@ const LoginPage = () => {
         </p>
       </main>
 
-      {/* ── KANAN: panel navy + cuplikan dashboard (desktop saja) ── */}
-      <aside className="relative hidden lg:flex flex-col justify-between m-3 rounded-[28px] overflow-hidden bg-gradient-to-br from-[#2a3050] to-[#141829] text-white pt-14 pl-14 pr-0 pb-0">
+      {/* ── PANEL NAVY: di mobile tampil di atas form (tagline), di desktop di kanan ── */}
+      <aside className="relative order-first lg:order-none flex flex-col justify-between m-3 rounded-[28px] overflow-hidden bg-gradient-to-br from-[#2a3050] to-[#141829] text-white p-7 lg:pt-14 lg:pl-14 lg:pr-0 lg:pb-0">
         {/* Glow biru */}
         <div
           aria-hidden="true"
@@ -421,12 +421,22 @@ const LoginPage = () => {
           className="pointer-events-none absolute bottom-10 -left-24 h-[280px] w-[280px] rounded-full bg-[#7aa5ff]/15 blur-[90px]"
         />
 
-        <div className="relative z-10 pr-14">
-          <h2 className="text-[38px] xl:text-[44px] font-bold leading-[1.1] tracking-tight max-w-lg">
+        <div className="relative z-10 lg:pr-14">
+          {/* Logo (mobile saja) */}
+          <div className="flex items-center gap-2.5 mb-6 lg:hidden">
+            <div className="w-9 h-9 rounded-xl bg-[#3b6ef5] text-white flex items-center justify-center text-[17px] font-bold shadow-[0_8px_18px_rgba(59,110,245,0.45)]">
+              g
+            </div>
+            <p className="text-[16px] font-bold leading-tight">
+              gTech Academic
+            </p>
+          </div>
+
+          <h2 className="text-[26px] sm:text-[32px] lg:text-[38px] xl:text-[44px] font-bold leading-[1.12] tracking-tight max-w-lg">
             Kelola data akademik guru dalam satu dashboard.
           </h2>
 
-          <ul className="mt-7 space-y-3">
+          <ul className="hidden sm:block mt-6 lg:mt-7 space-y-3">
             {FITUR.map((item) => (
               <li key={item} className="flex items-center gap-3">
                 <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#3b6ef5] text-white">
@@ -438,7 +448,8 @@ const LoginPage = () => {
           </ul>
         </div>
 
-        <div className="relative z-10 mt-10">
+        {/* Cuplikan dashboard (desktop saja) */}
+        <div className="relative z-10 mt-10 hidden lg:block">
           <DashboardPreview />
         </div>
       </aside>

@@ -162,11 +162,11 @@ export default function PilihMapelPenilaian() {
 
       const [tpAll, lmAll, nfAll, nsAll, siswaAll] = await Promise.all([
         pb.collection("tujuan_pembelajaran").getFullList({
-          filter: mapelFilter,
+          filter: `(${mapelFilter}) && kelas_id ~ "${currentKelas.id}"`,
           requestKey: null,
         }),
         pb.collection("lingkup_materi").getFullList({
-          filter: mapelFilter,
+          filter: `(${mapelFilter}) && kelas_id ~ "${currentKelas.id}"`,
           sort: "created",
           requestKey: null,
         }),
@@ -485,7 +485,7 @@ export default function PilihMapelPenilaian() {
             >
               {exporting
                 ? exportProgress || "Mengexport..."
-                : "⬇ Export Nilai Mentah (Per Mapel)"}
+                : "⬇ Export Pengolahan Nilai"}
             </button>
           </div>
         </div>

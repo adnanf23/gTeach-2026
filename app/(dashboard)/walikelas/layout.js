@@ -47,57 +47,127 @@ const icons = {
   bell: "M8 2a4 4 0 00-4 4c0 4-2 5-2 5h12s-2-1-2-5a4 4 0 00-4-4zM6.5 14a1.5 1.5 0 003 0",
   shield:
     "M8 1.5l5 2v4c0 3-2 5.5-5 7-3-1.5-5-4-5-7v-4l5-2zM6 8l1.5 1.5L10.5 6.5",
+  chevron: "M6 4l4 4-4 4",
 };
 
-const NAV = [
-  { key: "overview", label: "Overview", href: "/walikelas/", icon: "overview" },
+// ── Struktur navigasi: array of groups ──
+const NAV_GROUPS = [
   {
-    key: "kelas",
-    label: "Data Kelas",
-    href: "/walikelas/data-kelas",
+    key: "overview",
+    label: "Overview",
+    href: "/walikelas/",
+    icon: "overview",
+    standalone: true,
+  },
+  {
+    key: "menu-utama",
+    label: "Menu Utama",
     icon: "kelas",
+    children: [
+      {
+        key: "kelas",
+        label: "Data Kelas",
+        href: "/walikelas/menu-utama/data-kelas",
+        icon: "kelas",
+      },
+      {
+        key: "pengajar",
+        label: "Pengajar",
+        href: "/walikelas/menu-utama/guru-pengajar",
+        icon: "pembelajaran",
+      },
+      {
+        key: "catatan_kasus",
+        label: "Catatan Kasus",
+        href: "/walikelas/menu-utama/catatan-kasus",
+        icon: "catatan",
+      },
+    ],
   },
   {
-    key: "absensi",
-    label: "Absensi Kelas",
-    href: "/walikelas/absensi",
+    key: "harian",
+    label: "Harian",
     icon: "absensi",
-  },
-  {
-    key: "pengajar",
-    label: "Pengajar",
-    href: "/walikelas/guru-pengajar",
-    icon: "pembelajaran",
+    children: [
+      {
+        key: "absensi",
+        label: "Absensi",
+        href: "/walikelas/harian/absensi",
+        icon: "absensi",
+      },
+      {
+        key: "agenda",
+        label: "Agenda Mengajar",
+        href: "/walikelas/harian/agenda",
+        icon: "pengajaran",
+      },
+    ],
   },
   {
     key: "nilai",
-    label: "Rekap Nilai",
-    href: "/walikelas/penilaian",
+    label: "Nilai",
     icon: "nilai",
+    children: [
+      {
+        key: "nilai",
+        label: "Penilaian",
+        href: "/walikelas/nilai/penilaian",
+        icon: "nilai",
+      },
+      {
+        key: "leger",
+        label: "Leger",
+        href: "/walikelas/nilai/leger",
+        icon: "leger",
+      },
+      {
+        key: "ekstrakurikuler",
+        label: "Ekstrakurikuler",
+        href: "/walikelas/nilai/ekstrakurikuler",
+        icon: "catatan",
+      },
+    ],
   },
-  { key: "leger", label: "Leger", href: "/walikelas/leger", icon: "leger" },
   {
-    key: "agenda",
-    label: "Agenda Mengajar",
-    href: "/walikelas/agenda",
-    icon: "pengajaran",
-  },
-  {
-    key: "catatan_kasus",
-    label: "Catatan Kasus",
-    href: "/walikelas/catatan-kasus",
-    icon: "catatan",
+    key: "rapor",
+    label: "Rapor",
+    icon: "leger",
+    children: [
+      {
+        key: "status_kelengkapan",
+        label: "Status Kelengkapan",
+        href: "/walikelas/rapor/status-kelengkapan",
+        icon: "log",
+      },
+      {
+        key: "capaian_kompetensi",
+        label: "Capaian Kompetensi",
+        href: "/walikelas/rapor/capaian-kompetensi",
+        icon: "nilai",
+      },
+      {
+        key: "catatan_siswa",
+        label: "Catatan Siswa",
+        href: "/walikelas/rapor/catatan-siswa",
+        icon: "catatan",
+      },
+    ],
   },
 ];
 
-const ICT_NAV = [
-  {
-    key: "system_logs",
-    label: "System Logs",
-    href: "/walikelas/system-logs",
-    icon: "log",
-  },
-];
+const ICT_GROUP = {
+  key: "ict",
+  label: "ICT",
+  icon: "log",
+  children: [
+    {
+      key: "system_logs",
+      label: "System Logs",
+      href: "/walikelas/system-logs",
+      icon: "log",
+    },
+  ],
+};
 
 const PROFILE_NAV = [
   {
@@ -131,91 +201,181 @@ const SectionLabel = ({ children }) => (
   </p>
 );
 
-// Konten sidebar — dipakai bersama oleh desktop & drawer mobile
+// ── Konten sidebar: dipakai bersama desktop & drawer mobile ──
 const SidebarContent = ({
   user,
-  currentNavList,
+  navGroups,
   activeKey,
+  activeGroupKey,
   isProfileActive,
   pathname,
   onNavigate,
   onLogout,
-}) => (
-  <>
-    {/* Logo */}
-    <div className="flex items-center gap-2.5 px-5 pt-5 pb-2">
-      <div className="min-w-0">
-        <h1 className="text-[16px] font-bold text-gray-800 leading-tight truncate">
-          gTech Academic
-        </h1>
-        <p className="text-[10.5px] text-gray-400 capitalize">
-          {user?.role ?? ""}
-        </p>
-      </div>
-    </div>
+}) => {
+  // State group yang terbuka — default: group yang berisi halaman aktif
+  const [openGroups, setOpenGroups] = useState(() =>
+    activeGroupKey ? { [activeGroupKey]: true } : {},
+  );
 
-    {/* Menu */}
-    <nav className="px-3 flex-1">
-      <SectionLabel>Menu</SectionLabel>
-      <div className="flex flex-col gap-1">
-        {currentNavList.map(({ key, label, icon, href }) => {
-          const isActive = activeKey === key && !isProfileActive;
-          return (
-            <button
-              key={key}
-              onClick={() => onNavigate(href)}
-              className={navClass(isActive)}
-            >
-              <span className={navIconClass(isActive)}>
-                <Icon d={icons[icon]} size={16} />
-              </span>
-              <span className="flex-1">{label}</span>
-            </button>
-          );
-        })}
-      </div>
+  // Auto-buka group saat halaman berpindah
+  useEffect(() => {
+    if (activeGroupKey) {
+      setOpenGroups((prev) => ({ ...prev, [activeGroupKey]: true }));
+    }
+  }, [activeGroupKey]);
 
-      <SectionLabel>Akun</SectionLabel>
-      <div className="flex flex-col gap-1">
-        {PROFILE_NAV.map(({ key, label, icon, href }) => {
-          const isActive = pathname === href;
-          return (
-            <button
-              key={key}
-              onClick={() => onNavigate(href)}
-              className={navClass(isActive)}
-            >
-              <span className={navIconClass(isActive)}>
-                <Icon d={icons[icon]} size={16} />
-              </span>
-              <span className="flex-1">{label}</span>
-            </button>
-          );
-        })}
-      </div>
-    </nav>
+  const toggleGroup = (key) =>
+    setOpenGroups((prev) => ({ ...prev, [key]: !prev[key] }));
 
-    {/* Kartu bawah */}
-    <div className="p-3">
-      <div className="rounded-2xl bg-[#1c2033] text-white p-4">
-        <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center">
-          <Icon d={icons.shield} size={16} strokeWidth={1.5} />
+  return (
+    <>
+      {/* Logo */}
+      <div className="flex items-center gap-2.5 px-5 pt-5 pb-2">
+        <div className="min-w-0">
+          <h1 className="text-[16px] font-bold text-gray-800 leading-tight truncate">
+            gTech Academic
+          </h1>
+          <p className="text-[10.5px] text-gray-400 capitalize">
+            {user?.role ?? ""}
+          </p>
         </div>
-        <p className="text-[13px] font-semibold mt-3">Portal Wali Kelas</p>
-        <p className="text-[11px] text-white/60 mt-1 leading-snug">
-          Kelola kelas, absensi, dan nilai siswa dengan mudah.
-        </p>
-        <button
-          onClick={onLogout}
-          className="mt-3 w-full flex items-center justify-center gap-2 rounded-lg bg-[#4d8bff] hover:bg-[#3b6ef5] py-2 text-[12px] font-medium transition-colors"
-        >
-          <Icon d={icons.logout} size={13} strokeWidth={1.6} />
-          Keluar
-        </button>
       </div>
-    </div>
-  </>
-);
+
+      {/* Menu */}
+      <nav className="px-3 flex-1">
+        <SectionLabel>Menu</SectionLabel>
+        <div className="flex flex-col gap-1">
+          {navGroups.map((group) => {
+            // ── Item standalone (Overview) ──
+            if (group.standalone) {
+              const isActive = activeKey === group.key && !isProfileActive;
+              return (
+                <button
+                  key={group.key}
+                  onClick={() => onNavigate(group.href)}
+                  className={navClass(isActive)}
+                >
+                  <span className={navIconClass(isActive)}>
+                    <Icon d={icons[group.icon]} size={16} />
+                  </span>
+                  <span className="flex-1">{group.label}</span>
+                </button>
+              );
+            }
+
+            // ── Group dengan children (dropdown) ──
+            const isOpen = !!openGroups[group.key];
+            const hasActiveChild = group.children.some(
+              (c) => c.key === activeKey && !isProfileActive,
+            );
+
+            return (
+              <div key={group.key}>
+                {/* Header group */}
+                <button
+                  onClick={() => toggleGroup(group.key)}
+                  className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-left text-[13px] transition-all ${
+                    hasActiveChild
+                      ? "text-[#3b6ef5] font-semibold"
+                      : "text-gray-600 hover:bg-gray-50 hover:text-gray-800"
+                  }`}
+                >
+                  <span
+                    className={`flex-shrink-0 ${
+                      hasActiveChild ? "text-[#3b6ef5]" : "text-gray-400"
+                    }`}
+                  >
+                    <Icon d={icons[group.icon]} size={16} />
+                  </span>
+                  <span className="flex-1">{group.label}</span>
+                  <span
+                    className={`flex-shrink-0 transition-transform duration-200 ${
+                      isOpen ? "rotate-90" : ""
+                    } ${hasActiveChild ? "text-[#3b6ef5]" : "text-gray-400"}`}
+                  >
+                    <Icon d={icons.chevron} size={12} strokeWidth={1.8} />
+                  </span>
+                </button>
+
+                {/* Children (collapsible) */}
+                <div
+                  className={`overflow-hidden transition-all duration-300 ease-out ${
+                    isOpen ? "max-h-96 opacity-100" : "max-h-0 opacity-0"
+                  }`}
+                >
+                  <div className="flex flex-col gap-0.5 mt-0.5 ml-3 pl-3 border-l border-gray-100">
+                    {group.children.map(({ key, label, icon, href }) => {
+                      const isActive = activeKey === key && !isProfileActive;
+                      return (
+                        <button
+                          key={key}
+                          onClick={() => onNavigate(href)}
+                          className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left text-[12.5px] transition-all ${
+                            isActive
+                              ? "bg-[#eef3ff] text-[#3b6ef5] font-medium"
+                              : "text-gray-500 hover:bg-gray-50 hover:text-gray-700"
+                          }`}
+                        >
+                          <span
+                            className={`flex-shrink-0 ${
+                              isActive ? "text-[#3b6ef5]" : "text-gray-400"
+                            }`}
+                          >
+                            <Icon d={icons[icon]} size={14} />
+                          </span>
+                          <span className="flex-1">{label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <SectionLabel>Akun</SectionLabel>
+        <div className="flex flex-col gap-1">
+          {PROFILE_NAV.map(({ key, label, icon, href }) => {
+            const isActive = pathname === href;
+            return (
+              <button
+                key={key}
+                onClick={() => onNavigate(href)}
+                className={navClass(isActive)}
+              >
+                <span className={navIconClass(isActive)}>
+                  <Icon d={icons[icon]} size={16} />
+                </span>
+                <span className="flex-1">{label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </nav>
+
+      {/* Kartu bawah */}
+      <div className="p-3">
+        <div className="rounded-2xl bg-[#1c2033] text-white p-4">
+          <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center">
+            <Icon d={icons.shield} size={16} strokeWidth={1.5} />
+          </div>
+          <p className="text-[13px] font-semibold mt-3">Portal Wali Kelas</p>
+          <p className="text-[11px] text-white/60 mt-1 leading-snug">
+            Kelola kelas, absensi, dan nilai siswa dengan mudah.
+          </p>
+          <button
+            onClick={onLogout}
+            className="mt-3 w-full flex items-center justify-center gap-2 rounded-lg bg-[#4d8bff] hover:bg-[#3b6ef5] py-2 text-[12px] font-medium transition-colors"
+          >
+            <Icon d={icons.logout} size={13} strokeWidth={1.6} />
+            Keluar
+          </button>
+        </div>
+      </div>
+    </>
+  );
+};
 
 export default function WalikelasLayout({ children }) {
   const router = useRouter();
@@ -224,7 +384,7 @@ export default function WalikelasLayout({ children }) {
   const [user, setUser] = useState(null);
   const [checked, setChecked] = useState(false);
 
-  // Gesture swipe untuk drawer mobile
+  // Gesture swipe drawer mobile
   const touchStartX = useRef(null);
   const touchStartY = useRef(null);
 
@@ -239,7 +399,6 @@ export default function WalikelasLayout({ children }) {
     const t = e.changedTouches[0];
     const dx = t.clientX - touchStartX.current;
     const dy = t.clientY - touchStartY.current;
-    // abaikan kalau gerakannya lebih vertikal (biar scroll tetap jalan)
     if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 50) {
       if (dx > 0 && touchStartX.current < 60 && !navOpen) {
         setNavOpen(true);
@@ -268,6 +427,7 @@ export default function WalikelasLayout({ children }) {
     }
   }, [navOpen]);
 
+  // Auth + role guard
   useEffect(() => {
     if (!pb.authStore.isValid) {
       router.replace("/login");
@@ -276,8 +436,6 @@ export default function WalikelasLayout({ children }) {
 
     const currentUser = pb.authStore.model;
 
-    // Guard role: halaman /walikelas/* hanya untuk guru walikelas / pendamping.
-    // (ICT juga diizinkan bila ingin mengakses menu System Logs.)
     const allowedRoles = ["guru walikelas", "guru pendamping", "ict"];
     if (!currentUser || !allowedRoles.includes(currentUser.role)) {
       router.replace("/login");
@@ -323,26 +481,43 @@ export default function WalikelasLayout({ children }) {
     setNavOpen(false);
   };
 
-  const currentNavList = user?.role === "ict" ? [...NAV, ...ICT_NAV] : NAV;
+  // ── Gabungkan group sesuai role ──
+  const navGroups =
+    user?.role === "ict" ? [...NAV_GROUPS, ICT_GROUP] : NAV_GROUPS;
 
-  const activeKey =
-    currentNavList.find((n) => pathname === n.href)?.key ||
-    currentNavList.find(
-      (n) => n.href !== "/admin" && pathname.startsWith(n.href),
-    )?.key ||
-    "overview";
+  // ── Flatten semua item untuk lookup ──
+  const allNavItems = navGroups.flatMap((g) =>
+    g.standalone ? [g] : g.children,
+  );
 
-  const activeNav =
-    currentNavList.find((n) => n.key === activeKey) || currentNavList[0];
+  // ── Cari item aktif ──
+  const activeItem =
+    allNavItems.find((n) => pathname === n.href) ||
+    allNavItems.find(
+      (n) =>
+        n.href !== "/" &&
+        n.href !== "/walikelas/" &&
+        pathname.startsWith(n.href),
+    );
+
+  const activeKey = activeItem?.key ?? "overview";
+
+  // ── Cari group yang berisi item aktif (untuk auto-expand) ──
+  const activeGroupKey = navGroups.find((g) =>
+    g.standalone
+      ? g.key === activeKey
+      : g.children?.some((c) => c.key === activeKey),
+  )?.key;
 
   const isProfileActive =
     pathname === "/walikelas/profile" || pathname === "/walikelas/settings";
+
   const activeProfileNav = PROFILE_NAV.find((n) => pathname === n.href);
 
   const pageTitle =
     isProfileActive && activeProfileNav
       ? activeProfileNav.label
-      : (activeNav?.label ?? "");
+      : (activeItem?.label ?? "Overview");
 
   const fullName = user?.nama_lengkap || user?.name || user?.username || "";
   const shortName = shortenName(fullName) || "Wali Kelas";
@@ -376,8 +551,9 @@ export default function WalikelasLayout({ children }) {
       <aside className="hidden lg:flex relative flex-col w-[240px] min-w-[240px] bg-white overflow-y-auto no-scrollbar my-4 ml-4 rounded-3xl shadow-[0_8px_30px_rgba(99,120,200,0.10)]">
         <SidebarContent
           user={user}
-          currentNavList={currentNavList}
+          navGroups={navGroups}
           activeKey={activeKey}
+          activeGroupKey={activeGroupKey}
           isProfileActive={isProfileActive}
           pathname={pathname}
           onNavigate={handleNavigate}
@@ -385,14 +561,13 @@ export default function WalikelasLayout({ children }) {
         />
       </aside>
 
-      {/* ── DRAWER MOBILE (geser dari kiri, bentuk sama seperti desktop) ── */}
+      {/* ── DRAWER MOBILE ── */}
       <div
         className={`lg:hidden fixed inset-0 z-50 ${
           navOpen ? "pointer-events-auto" : "pointer-events-none"
         }`}
         aria-hidden={!navOpen}
       >
-        {/* Overlay */}
         <div
           className={`absolute inset-0 bg-black/40 transition-opacity duration-300 ${
             navOpen ? "opacity-100" : "opacity-0"
@@ -400,7 +575,6 @@ export default function WalikelasLayout({ children }) {
           onClick={() => setNavOpen(false)}
         />
 
-        {/* Panel drawer */}
         <aside
           className={`absolute left-0 top-0 h-full w-[260px] max-w-[82vw] bg-white rounded-r-3xl flex flex-col overflow-y-auto no-scrollbar shadow-[0_10px_40px_rgba(99,120,200,0.25)] transition-transform duration-300 ease-out ${
             navOpen ? "translate-x-0" : "-translate-x-full"
@@ -409,8 +583,9 @@ export default function WalikelasLayout({ children }) {
         >
           <SidebarContent
             user={user}
-            currentNavList={currentNavList}
+            navGroups={navGroups}
             activeKey={activeKey}
+            activeGroupKey={activeGroupKey}
             isProfileActive={isProfileActive}
             pathname={pathname}
             onNavigate={handleNavigate}
@@ -458,7 +633,7 @@ export default function WalikelasLayout({ children }) {
           </div>
         </header>
 
-        {/* Topbar MOBILE — hamburger + judul + avatar. Sidebar buka dari kiri. */}
+        {/* Topbar MOBILE */}
         <header className="no-print lg:hidden sticky top-0 z-30 bg-[#eef1fc] flex-shrink-0 pt-[env(safe-area-inset-top)]">
           <div className="flex items-center gap-3 px-4 pt-3 pb-3">
             <button
