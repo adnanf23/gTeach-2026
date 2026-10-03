@@ -4,6 +4,16 @@
 // import { useRouter } from "next/navigation";
 // import { pb, isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
 
+// app/(dashboard)/wali-murid/absensi/page.tsx
+export default function AbsensiPage() {
+  return (
+    <div className="p-6">
+      <h1 className="text-xl font-semibold">Halaman Absensi</h1>
+      <p className="text-gray-500">Halaman ini belum tersedia.</p>
+    </div>
+  );
+}
+
 // // =========================================================
 // // Konfigurasi status
 // // =========================================================
