@@ -503,7 +503,9 @@ export default function PilihMapelPenilaian() {
           mapel.map((item) => (
             <button
               key={item.id}
-              onClick={() => router.push(`/walikelas/penilaian/${item.id}`)}
+              onClick={() =>
+                router.push(`/walikelas/nilai/penilaian/${item.id}`)
+              }
               className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-all duration-300 hover:border-blue-600 hover:shadow-lg hover:shadow-blue-200 hover:bg-blue-600 active:scale-[0.98]"
             >
               {/* Kode Mapel - Badge */}
