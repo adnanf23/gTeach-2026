@@ -43,20 +43,19 @@ function Spinner({ className = "w-4 h-4" }) {
 }
 
 function Badge({ children, variant = "gray", dot = false }) {
+  // Semua variant → monokrom hitam/zinc
   const map = {
-    gray: "bg-zinc-100 text-zinc-500 ring-zinc-200/60",
-    blue: "bg-blue-50 text-blue-600 ring-blue-200/60",
-    green: "bg-emerald-50 text-emerald-600 ring-emerald-200/60",
-    amber: "bg-amber-50 text-amber-600 ring-amber-200/60",
-    red: "bg-red-50 text-red-600 ring-red-200/60",
-    violet: "bg-violet-50 text-violet-600 ring-violet-200/60",
-    teal: "bg-teal-50 text-teal-600 ring-teal-200/60",
+    gray: "bg-zinc-100 text-zinc-600 ring-zinc-200/70",
+    black: "bg-gray-900 text-white ring-gray-900/10",
+    outline: "bg-white text-zinc-600 ring-zinc-200",
+    soft: "bg-zinc-50 text-zinc-500 ring-zinc-200/60",
   };
+  const style = map[variant] || map.gray;
   return (
     <span
       className={cn(
         "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold ring-1",
-        map[variant],
+        style,
       )}
     >
       {dot && (
@@ -75,18 +74,7 @@ function Avatar({ name = "?", size = "sm", colorClass }) {
     .slice(0, 2)
     .join("")
     .toUpperCase();
-  const palette = [
-    "bg-blue-100 text-blue-700",
-    "bg-violet-100 text-violet-700",
-    "bg-emerald-100 text-emerald-700",
-    "bg-amber-100 text-amber-700",
-    "bg-pink-100 text-pink-700",
-    "bg-teal-100 text-teal-700",
-    "bg-orange-100 text-orange-700",
-    "bg-indigo-100 text-indigo-700",
-  ];
-  const bg =
-    colorClass || palette[(name || "?").charCodeAt(0) % palette.length];
+  const bg = colorClass || "bg-gray-900 text-white";
   const sz = {
     xs: "w-6 h-6 text-[9px]",
     sm: "w-8 h-8 text-[11px]",
@@ -139,7 +127,7 @@ function PersonCard({ user, roleLabel, icon: Icon }) {
         )}
       </div>
       {user.is_aktif !== undefined && (
-        <Badge variant={user.is_aktif ? "green" : "red"} dot>
+        <Badge variant="gray" dot>
           {user.is_aktif ? "Aktif" : "Nonaktif"}
         </Badge>
       )}
@@ -165,20 +153,10 @@ const TABS = [
 
 // ─── Stat Card ────────────────────────────────────────────────────────────────
 
-function StatCard({
-  icon: Icon,
-  label,
-  value,
-  colorClass = "bg-blue-50 text-blue-600",
-}) {
+function StatCard({ icon: Icon, label, value }) {
   return (
     <div className="bg-white border border-zinc-100 rounded-2xl p-4 shadow-sm flex items-center gap-3 hover:shadow-md transition-shadow">
-      <div
-        className={cn(
-          "w-10 h-10 rounded-xl flex items-center justify-center shrink-0",
-          colorClass,
-        )}
-      >
+      <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0 bg-gray-900 text-white">
         <Icon className="w-5 h-5" />
       </div>
       <div>
@@ -256,26 +234,14 @@ export default function DetailKelasPage() {
     setLoadMapel(true);
     try {
       const tingkat = String(kelas.tingkat);
-      console.log("[fetchMapel] kelas.id =", id, "tingkat =", tingkat);
-
-      // Sengaja TANPA .catch(() => []) dulu, biar error PocketBase
-      // (kalau ada) muncul jelas di console, bukan ke-swallow jadi [].
       const spesifik = await pb.collection("mata_pelajaran").getFullList({
         filter: `spesifik_kelas_id ~ "${id}"`,
         requestKey: null,
       });
-      console.log("[fetchMapel] spesifik hasil:", spesifik.length, spesifik);
-
       const kandidatUmum = await pb.collection("mata_pelajaran").getFullList({
         filter: `target_tingkat ~ "${tingkat}"`,
         requestKey: null,
       });
-      console.log(
-        "[fetchMapel] kandidatUmum hasil:",
-        kandidatUmum.length,
-        kandidatUmum,
-      );
-
       const umum = kandidatUmum.filter((m) => {
         const spesifikIds = Array.isArray(m.spesifik_kelas_id)
           ? m.spesifik_kelas_id
@@ -284,8 +250,6 @@ export default function DetailKelasPage() {
             : [];
         return spesifikIds.length === 0;
       });
-      console.log("[fetchMapel] umum setelah difilter:", umum.length, umum);
-
       const map = {};
       [...spesifik, ...umum].forEach((m) => {
         map[m.id] = m;
@@ -293,7 +257,6 @@ export default function DetailKelasPage() {
       setMapel(Object.values(map));
       setFetchedMapel(true);
     } catch (err) {
-      // biarkan error tampil apa adanya dulu untuk diagnosa
       console.error("[fetchMapel] ERROR:", err?.data || err);
     } finally {
       setLoadMapel(false);
@@ -366,7 +329,7 @@ export default function DetailKelasPage() {
           </p>
           <button
             onClick={() => router.back()}
-            className="mt-2 inline-flex items-center gap-1.5 px-4 py-2 text-[13px] font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-xl transition-colors"
+            className="mt-2 inline-flex items-center gap-1.5 px-4 py-2 text-[13px] font-medium text-white bg-gray-900 hover:bg-black rounded-xl transition-colors"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
             Kembali
@@ -378,16 +341,8 @@ export default function DetailKelasPage() {
 
   // ── Main ───────────────────────────────────────────────────────────────────
 
-  const gradientMap = {
-    1: "from-blue-600 to-blue-800",
-    2: "from-violet-600 to-violet-800",
-    3: "from-emerald-600 to-emerald-800",
-    4: "from-amber-500 to-orange-700",
-    5: "from-rose-500 to-rose-700",
-    6: "from-teal-600 to-teal-800",
-  };
-  const heroGradient =
-    gradientMap[String(kelas.tingkat)] || "from-blue-600 to-blue-800";
+  // Hero gradient monokrom hitam
+  const heroGradient = "from-gray-800 via-gray-900 to-black";
 
   return (
     <div className="min-h-screen bg-zinc-50/50">
@@ -396,19 +351,19 @@ export default function DetailKelasPage() {
         <div className="flex items-center gap-2 text-[13px]">
           <button
             onClick={() => router.back()}
-            className="flex items-center gap-1.5 text-zinc-400 hover:text-zinc-700 transition-colors group"
+            className="flex items-center gap-1.5 text-zinc-400 hover:text-zinc-900 transition-colors group"
           >
             <ArrowLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
             Data Kelas
           </button>
           <span className="text-zinc-200">/</span>
-          <span className="text-zinc-700 font-medium">{kelas.nama_kelas}</span>
+          <span className="text-zinc-900 font-medium">{kelas.nama_kelas}</span>
         </div>
 
         {/* ── Hero Card ──────────────────────────────────────────────────────── */}
         <div
           className={cn(
-            "relative overflow-hidden bg-gradient-to-br rounded-3xl p-6 text-white shadow-xl shadow-blue-900/10",
+            "relative overflow-hidden bg-gradient-to-br rounded-3xl p-6 text-white shadow-xl shadow-black/20",
             heroGradient,
           )}
         >
@@ -469,14 +424,7 @@ export default function DetailKelasPage() {
                 <div className="mt-3">
                   <div className="h-1.5 bg-white/15 rounded-full overflow-hidden">
                     <div
-                      className={cn(
-                        "h-full rounded-full transition-all duration-700",
-                        pct >= 95
-                          ? "bg-red-300"
-                          : pct >= 75
-                            ? "bg-amber-300"
-                            : "bg-emerald-300",
-                      )}
+                      className="h-full rounded-full transition-all duration-700 bg-white"
                       style={{ width: `${pct}%` }}
                     />
                   </div>
@@ -540,8 +488,8 @@ export default function DetailKelasPage() {
               className={cn(
                 "flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-[13px] font-medium rounded-xl transition-all duration-150",
                 tab === t.id
-                  ? "bg-white text-zinc-900 shadow-sm"
-                  : "text-zinc-500 hover:text-zinc-700",
+                  ? "bg-gray-900 text-white shadow-sm"
+                  : "text-zinc-500 hover:text-zinc-900",
               )}
             >
               <t.Icon className="w-4 h-4 shrink-0" />
@@ -551,8 +499,8 @@ export default function DetailKelasPage() {
                   className={cn(
                     "px-1.5 py-0.5 text-[10px] font-bold rounded-full",
                     tab === "siswa"
-                      ? "bg-blue-100 text-blue-600"
-                      : "bg-zinc-200 text-zinc-500",
+                      ? "bg-white text-gray-900"
+                      : "bg-zinc-200 text-zinc-600",
                   )}
                 >
                   {siswa.length}
@@ -563,8 +511,8 @@ export default function DetailKelasPage() {
                   className={cn(
                     "px-1.5 py-0.5 text-[10px] font-bold rounded-full",
                     tab === "mapel"
-                      ? "bg-violet-100 text-violet-600"
-                      : "bg-zinc-200 text-zinc-500",
+                      ? "bg-white text-gray-900"
+                      : "bg-zinc-200 text-zinc-600",
                   )}
                 >
                   {mapel.length}
@@ -578,29 +526,21 @@ export default function DetailKelasPage() {
         {tab === "overview" && (
           <div className="space-y-5">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <StatCard
-                icon={Layers}
-                label="Tingkat"
-                value={kelas.tingkat}
-                colorClass="bg-blue-50 text-blue-600"
-              />
+              <StatCard icon={Layers} label="Tingkat" value={kelas.tingkat} />
               <StatCard
                 icon={Users}
                 label="Jumlah Siswa"
                 value={jumlahSiswa !== null ? jumlahSiswa : "—"}
-                colorClass="bg-violet-50 text-violet-600"
               />
               <StatCard
                 icon={School}
                 label="Sisa Slot"
                 value={jumlahSiswa !== null ? kapasitas - jumlahSiswa : "—"}
-                colorClass="bg-emerald-50 text-emerald-600"
               />
               <StatCard
                 icon={BookMarked}
                 label="Mata Pelajaran"
                 value={fetchedMapel ? mapel.length : "—"}
-                colorClass="bg-amber-50 text-amber-600"
               />
             </div>
 
@@ -717,16 +657,12 @@ export default function DetailKelasPage() {
                       placeholder="Cari nama, NIS, atau NISN..."
                       value={searchSiswa}
                       onChange={(e) => setSearchSiswa(e.target.value)}
-                      className="w-full pl-10 pr-4 py-2.5 bg-white border border-zinc-200 rounded-xl text-[13px] text-zinc-800 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400 transition-all shadow-sm"
+                      className="w-full pl-10 pr-4 py-2.5 bg-white border border-zinc-200 rounded-xl text-[13px] text-zinc-800 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-gray-900/20 focus:border-gray-900 transition-all shadow-sm"
                     />
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    <Badge variant="blue">{siswa.length} siswa</Badge>
-                    <Badge
-                      variant={
-                        pct >= 95 ? "red" : pct >= 75 ? "amber" : "green"
-                      }
-                    >
+                    <Badge variant="black">{siswa.length} siswa</Badge>
+                    <Badge variant="outline">
                       {kapasitas - siswa.length} slot tersisa
                     </Badge>
                   </div>
@@ -813,17 +749,17 @@ export default function DetailKelasPage() {
                     <div className="px-5 py-3 border-t border-zinc-50 bg-zinc-50/50 text-[12px] text-zinc-400 flex justify-between items-center">
                       <span>
                         Menampilkan{" "}
-                        <strong className="text-zinc-600">
+                        <strong className="text-zinc-700">
                           {filteredSiswa.length}
                         </strong>{" "}
                         dari{" "}
-                        <strong className="text-zinc-600">
+                        <strong className="text-zinc-700">
                           {siswa.length}
                         </strong>{" "}
                         siswa
                       </span>
                       <span>
-                        <strong className="text-zinc-600">
+                        <strong className="text-zinc-700">
                           {kapasitas - siswa.length}
                         </strong>{" "}
                         slot tersisa
@@ -865,35 +801,16 @@ export default function DetailKelasPage() {
                 <div className="flex items-center justify-between">
                   <p className="text-[12px] text-zinc-400">
                     Untuk{" "}
-                    <strong className="text-zinc-600">
+                    <strong className="text-zinc-700">
                       {TINGKAT_LABEL[String(kelas.tingkat)] ||
                         `Tingkat ${kelas.tingkat}`}
                     </strong>
                   </p>
-                  <Badge variant="violet">{mapel.length} mata pelajaran</Badge>
+                  <Badge variant="black">{mapel.length} mata pelajaran</Badge>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {mapel.map((m, i) => {
-                    const accents = [
-                      { bg: "bg-blue-50", icon: "bg-blue-100 text-blue-600" },
-                      {
-                        bg: "bg-violet-50",
-                        icon: "bg-violet-100 text-violet-600",
-                      },
-                      {
-                        bg: "bg-emerald-50",
-                        icon: "bg-emerald-100 text-emerald-600",
-                      },
-                      {
-                        bg: "bg-amber-50",
-                        icon: "bg-amber-100 text-amber-600",
-                      },
-                      { bg: "bg-teal-50", icon: "bg-teal-100 text-teal-600" },
-                      { bg: "bg-rose-50", icon: "bg-rose-100 text-rose-600" },
-                    ];
-                    const { icon: iconCls } = accents[i % accents.length];
-
+                  {mapel.map((m) => {
                     const isSpesifik = Array.isArray(m.spesifik_kelas_id)
                       ? m.spesifik_kelas_id.includes(id)
                       : m.spesifik_kelas_id === id;
@@ -903,12 +820,7 @@ export default function DetailKelasPage() {
                         key={m.id}
                         className="bg-white border border-zinc-100 rounded-2xl p-4 shadow-sm flex gap-3 hover:shadow-md hover:border-zinc-200 transition-all"
                       >
-                        <div
-                          className={cn(
-                            "w-11 h-11 rounded-xl flex items-center justify-center text-[11px] font-bold shrink-0",
-                            iconCls,
-                          )}
-                        >
+                        <div className="w-11 h-11 rounded-xl flex items-center justify-center text-[11px] font-bold shrink-0 bg-gray-900 text-white">
                           {(m.kode_mapel || m.nama_mapel || "?")
                             .slice(0, 3)
                             .toUpperCase()}
@@ -919,7 +831,7 @@ export default function DetailKelasPage() {
                             <p className="font-semibold text-zinc-900 text-[13px] leading-snug">
                               {m.nama_mapel || "-"}
                             </p>
-                            <Badge variant={isSpesifik ? "violet" : "gray"}>
+                            <Badge variant={isSpesifik ? "black" : "gray"}>
                               {isSpesifik ? "Spesifik" : "Umum"}
                             </Badge>
                           </div>
@@ -935,7 +847,7 @@ export default function DetailKelasPage() {
                                     key={t}
                                     variant={
                                       String(t) === String(kelas.tingkat)
-                                        ? "blue"
+                                        ? "black"
                                         : "gray"
                                     }
                                   >

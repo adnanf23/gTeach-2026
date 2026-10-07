@@ -85,23 +85,23 @@ const FITUR = [
 const BAR_HEIGHTS = [40, 65, 50, 85, 60, 95, 55, 75];
 
 const inputClass =
-  "w-full rounded-xl bg-[#f5f7fd] border border-gray-200 px-4 py-3 text-[14px] text-gray-800 placeholder:text-gray-400 focus:outline-none focus:bg-white focus:border-[#3b6ef5] focus:ring-4 focus:ring-[#3b6ef5]/10 disabled:opacity-50 disabled:cursor-not-allowed transition";
+  "w-full rounded-xl bg-[#f5f8ff] border border-blue-100 px-4 py-3 text-[14px] text-blue-950 placeholder:text-blue-300 focus:outline-none focus:bg-white focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 disabled:opacity-50 disabled:cursor-not-allowed transition";
 
 // Cuplikan dashboard (hanya ilustrasi bentuk, tanpa data)
 const DashboardPreview = () => (
   <div
     aria-hidden="true"
-    className="ml-auto w-[92%] h-[300px] overflow-hidden rounded-tl-3xl bg-[#eef1fc] p-3 pb-0 shadow-[0_-10px_60px_rgba(0,0,0,0.35)]"
+    className="ml-auto w-[92%] h-[300px] overflow-hidden rounded-tl-3xl bg-[#e8efff] p-3 pb-0 shadow-[0_-10px_60px_rgba(0,0,0,0.35)]"
   >
     <div className="flex gap-3 h-full">
       {/* Sidebar mini */}
       <div className="w-[104px] flex-shrink-0 rounded-2xl rounded-b-none bg-white p-3">
         <div className="flex items-center gap-1.5 mb-4">
-          <div className="w-5 h-5 rounded-md bg-[#3b6ef5]" />
-          <div className="h-2 w-12 rounded bg-gray-200" />
+          <div className="w-5 h-5 rounded-md bg-blue-600" />
+          <div className="h-2 w-12 rounded bg-blue-100" />
         </div>
         <div className="space-y-1.5">
-          <div className="h-7 rounded-lg bg-[#3b6ef5] flex items-center gap-1.5 px-2">
+          <div className="h-7 rounded-lg bg-blue-600 flex items-center gap-1.5 px-2">
             <div className="w-2.5 h-2.5 rounded bg-white/80" />
             <div className="h-1.5 w-9 rounded bg-white/70" />
           </div>
@@ -110,8 +110,8 @@ const DashboardPreview = () => (
               key={i}
               className="h-7 rounded-lg flex items-center gap-1.5 px-2"
             >
-              <div className="w-2.5 h-2.5 rounded bg-gray-200" />
-              <div className="h-1.5 w-9 rounded bg-gray-100" />
+              <div className="w-2.5 h-2.5 rounded bg-blue-100" />
+              <div className="h-1.5 w-9 rounded bg-blue-50" />
             </div>
           ))}
         </div>
@@ -121,33 +121,33 @@ const DashboardPreview = () => (
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between mb-3">
           <div>
-            <div className="h-3 w-24 rounded bg-gray-800/80" />
-            <div className="h-1.5 w-16 rounded bg-gray-300 mt-1.5" />
+            <div className="h-3 w-24 rounded bg-blue-950/80" />
+            <div className="h-1.5 w-16 rounded bg-blue-200 mt-1.5" />
           </div>
           <div className="flex gap-1.5">
             <div className="w-6 h-6 rounded-full bg-white" />
-            <div className="w-6 h-6 rounded-full bg-[#7aa5ff]" />
+            <div className="w-6 h-6 rounded-full bg-blue-400" />
           </div>
         </div>
 
         <div className="grid grid-cols-3 gap-2.5">
           {[0, 1, 2].map((i) => (
             <div key={i} className="rounded-xl bg-white p-3">
-              <div className="h-1.5 w-10 rounded bg-gray-200" />
-              <div className="h-3.5 w-14 rounded bg-gray-800/80 mt-2" />
-              <div className="h-1.5 w-8 rounded bg-[#3b6ef5]/40 mt-2" />
+              <div className="h-1.5 w-10 rounded bg-blue-100" />
+              <div className="h-3.5 w-14 rounded bg-blue-950/80 mt-2" />
+              <div className="h-1.5 w-8 rounded bg-blue-500/40 mt-2" />
             </div>
           ))}
         </div>
 
         <div className="mt-2.5 rounded-xl bg-white p-3 h-[140px]">
-          <div className="h-1.5 w-20 rounded bg-gray-300" />
+          <div className="h-1.5 w-20 rounded bg-blue-200" />
           <div className="mt-3 flex items-end gap-2 h-[84px]">
             {BAR_HEIGHTS.map((h, i) => (
               <div
                 key={i}
                 className={`flex-1 rounded-t-md ${
-                  i % 2 === 1 ? "bg-[#3b6ef5]" : "bg-[#dbe3fb]"
+                  i % 2 === 1 ? "bg-blue-600" : "bg-blue-100"
                 }`}
                 style={{ height: `${h}%` }}
               />
@@ -271,15 +271,15 @@ const LoginPage = () => {
   }
 
   return (
-    <div className="min-h-screen w-full bg-white font-sans text-gray-800 grid lg:grid-cols-[minmax(0,500px)_1fr]">
+    <div className="min-h-screen w-full bg-white font-sans text-blue-950 grid lg:grid-cols-[minmax(0,500px)_1fr]">
       {/* ── KIRI: form, layar penuh, tanpa kartu ── */}
       <main className="flex flex-col px-6 sm:px-12 py-8 lg:min-h-screen">
         {/* Logo (desktop; di mobile logo ada di panel atas) */}
         <div className="hidden lg:flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-xl bg-[#3b6ef5] text-white flex items-center justify-center text-[17px] font-bold shadow-[0_8px_18px_rgba(59,110,245,0.35)]">
+          <div className="w-9 h-9 rounded-xl bg-blue-600 text-white flex items-center justify-center text-[17px] font-bold shadow-[0_8px_18px_rgba(37,99,235,0.35)]">
             g
           </div>
-          <p className="text-[16px] font-bold text-gray-900 leading-tight">
+          <p className="text-[16px] font-bold text-blue-950 leading-tight">
             gTech Academic
           </p>
         </div>
@@ -287,15 +287,15 @@ const LoginPage = () => {
         {/* Form */}
         <div className="flex-1 flex items-center">
           <div className="w-full max-w-sm mx-auto py-10">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-semibold bg-[#eef1fc] text-[#3b6ef5] mb-4 tracking-[0.16em] uppercase">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#3b6ef5]" />
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-semibold bg-blue-50 text-blue-600 mb-4 tracking-[0.16em] uppercase">
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />
               Portal Internal Guru
             </span>
 
-            <h1 className="text-[30px] font-bold text-gray-900 tracking-tight leading-tight">
+            <h1 className="text-[30px] font-bold text-blue-950 tracking-tight leading-tight">
               Masuk
             </h1>
-            <p className="mt-1.5 text-[13.5px] text-gray-500">
+            <p className="mt-1.5 text-[13.5px] text-slate-500">
               Silakan login untuk melanjutkan ke Dashboard.
             </p>
 
@@ -315,7 +315,7 @@ const LoginPage = () => {
               <div>
                 <label
                   htmlFor="username"
-                  className="block text-[12px] font-medium text-gray-600 mb-1.5"
+                  className="block text-[12px] font-medium text-slate-600 mb-1.5"
                 >
                   Username
                 </label>
@@ -335,7 +335,7 @@ const LoginPage = () => {
               <div>
                 <label
                   htmlFor="password"
-                  className="block text-[12px] font-medium text-gray-600 mb-1.5"
+                  className="block text-[12px] font-medium text-slate-600 mb-1.5"
                 >
                   Password
                 </label>
@@ -354,7 +354,7 @@ const LoginPage = () => {
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-[#3b6ef5] cursor-pointer rounded focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#3b6ef5] transition-colors"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-blue-300 hover:text-blue-600 cursor-pointer rounded focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 transition-colors"
                     aria-label={
                       showPassword
                         ? "Sembunyikan password"
@@ -366,11 +366,11 @@ const LoginPage = () => {
                 </div>
               </div>
 
-              {/* Tombol navy — penanda login internal */}
+              {/* Tombol biru — penanda login internal */}
               <button
                 type="submit"
                 disabled={isLoading}
-                className="w-full py-3.5 rounded-xl bg-[#1c2033] text-white text-[14px] font-semibold shadow-[0_8px_18px_rgba(28,32,51,0.28)] hover:bg-[#2a3050] active:scale-[0.98] transition cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#3b6ef5] disabled:bg-gray-200 disabled:text-gray-400 disabled:shadow-none disabled:cursor-not-allowed disabled:active:scale-100"
+                className="w-full py-3.5 rounded-xl bg-blue-600 text-white text-[14px] font-semibold shadow-[0_8px_18px_rgba(37,99,235,0.32)] hover:bg-blue-700 active:scale-[0.98] transition cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 disabled:bg-blue-100 disabled:text-blue-300 disabled:shadow-none disabled:cursor-not-allowed disabled:active:scale-100"
               >
                 {isLoading ? (
                   <span className="flex items-center justify-center gap-2">
@@ -404,27 +404,27 @@ const LoginPage = () => {
           </div>
         </div>
 
-        <p className="text-[12px] text-gray-400 text-center lg:text-left">
+        <p className="text-[12px] text-blue-300 text-center lg:text-left">
           Lupa akses? Hubungi admin atau tim ICT.
         </p>
       </main>
 
-      {/* ── PANEL NAVY: di mobile tampil di atas form (tagline), di desktop di kanan ── */}
-      <aside className="relative order-first lg:order-none flex flex-col justify-between m-3 rounded-[28px] overflow-hidden bg-gradient-to-br from-[#2a3050] to-[#141829] text-white p-7 lg:pt-14 lg:pl-14 lg:pr-0 lg:pb-0">
-        {/* Glow biru */}
+      {/* ── PANEL BIRU: di mobile tampil di atas form (tagline), di desktop di kanan ── */}
+      <aside className="relative order-first lg:order-none flex flex-col justify-between m-3 rounded-[28px] overflow-hidden bg-gradient-to-br from-blue-600 via-blue-700 to-blue-900 text-white p-7 lg:pt-14 lg:pl-14 lg:pr-0 lg:pb-0">
+        {/* Glow biru muda */}
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute -top-32 -right-20 h-[380px] w-[380px] rounded-full bg-[#3b6ef5]/35 blur-[100px]"
+          className="pointer-events-none absolute -top-32 -right-20 h-[380px] w-[380px] rounded-full bg-sky-300/35 blur-[100px]"
         />
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute bottom-10 -left-24 h-[280px] w-[280px] rounded-full bg-[#7aa5ff]/15 blur-[90px]"
+          className="pointer-events-none absolute bottom-10 -left-24 h-[280px] w-[280px] rounded-full bg-blue-300/20 blur-[90px]"
         />
 
         <div className="relative z-10 lg:pr-14">
           {/* Logo (mobile saja) */}
           <div className="flex items-center gap-2.5 mb-6 lg:hidden">
-            <div className="w-9 h-9 rounded-xl bg-[#3b6ef5] text-white flex items-center justify-center text-[17px] font-bold shadow-[0_8px_18px_rgba(59,110,245,0.45)]">
+            <div className="w-9 h-9 rounded-xl bg-white text-blue-700 flex items-center justify-center text-[17px] font-bold shadow-[0_8px_18px_rgba(0,0,0,0.25)]">
               g
             </div>
             <p className="text-[16px] font-bold leading-tight">
@@ -439,10 +439,10 @@ const LoginPage = () => {
           <ul className="hidden sm:block mt-6 lg:mt-7 space-y-3">
             {FITUR.map((item) => (
               <li key={item} className="flex items-center gap-3">
-                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#3b6ef5] text-white">
+                <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white text-blue-700">
                   <CheckIcon />
                 </span>
-                <span className="text-[14px] text-white/85">{item}</span>
+                <span className="text-[14px] text-white/90">{item}</span>
               </li>
             ))}
           </ul>

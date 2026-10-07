@@ -82,6 +82,12 @@ const NAV_GROUPS = [
         href: "/admin/data-utama/data-siswa",
         icon: "siswa",
       },
+      {
+        key: "wali-murid",
+        label: "Akun Siswa",
+        href: "/admin/data-utama/wali-murid",
+        icon: "siswa",
+      },
     ],
   },
   {

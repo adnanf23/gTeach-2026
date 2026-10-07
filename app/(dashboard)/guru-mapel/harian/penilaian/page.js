@@ -17,6 +17,10 @@ const JENIS_LABEL = {
   lainnya: "Lainnya",
 };
 
+// Konstanta jenis ujian untuk perhitungan nilai akhir
+const JENIS_UTS = "ahb";
+const JENIS_UAS = "asas";
+
 const DAFTAR_NO_TP = [
   "TP 1",
   "TP 2",
@@ -31,8 +35,7 @@ const DAFTAR_NO_TP = [
 ];
 
 // ================================================================
-// Kriteria K1-K4 (semua selalu ditampilkan — disamakan dengan
-// PenilaianMapelPage)
+// Kriteria K1-K4 (semua selalu ditampilkan)
 // ================================================================
 const SEMUA_KRITERIA = ["k1", "k2", "k3", "k4"];
 
@@ -439,6 +442,9 @@ export default function PenilaianGuruMapelPage() {
         });
         if (!isMounted) return;
         setUjianAktif(ujianData);
+        if (ujianData.length > 0) {
+          setSelectedUjianId(ujianData[0].id);
+        }
       } catch (err) {
         if (!err?.isAbort) {
           console.error("Error fetching ujian aktif:", err);
@@ -455,29 +461,34 @@ export default function PenilaianGuruMapelPage() {
     };
   }, [selectedKelas]);
 
-  // 6. Ambil nilai_ujian saat ujian dipilih
+  // 6. Ambil SEMUA nilai_ujian untuk semua ujian aktif
   useEffect(() => {
-    if (!selectedUjianId || !selectedMapelId || siswaList.length === 0) {
+    if (ujianAktif.length === 0 || !selectedMapelId || siswaList.length === 0) {
       setNilaiUjian({});
       return;
     }
     let isMounted = true;
 
-    async function fetchNilaiUjian() {
+    async function fetchAllNilaiUjian() {
       setLoadingNilaiUjian(true);
       try {
         const filterSiswa = siswaList
           .map((s) => `siswa_id = "${s.id}"`)
           .join(" || ");
+        const filterUjian = ujianAktif
+          .map((u) => `pengaturan_ujian_id = "${u.id}"`)
+          .join(" || ");
         const data = await pb.collection("nilai_ujian").getFullList({
-          filter: `pengaturan_ujian_id = "${selectedUjianId}" && mapel_id = "${selectedMapelId}" && (${filterSiswa})`,
+          filter: `mapel_id = "${selectedMapelId}" && (${filterUjian}) && (${filterSiswa})`,
           requestKey: null,
         });
         if (!isMounted) return;
         const map = {};
         data.forEach((n) => {
+          const uid = firstOf(n.pengaturan_ujian_id);
           const sid = firstOf(n.siswa_id);
-          map[sid] = { recordId: n.id, nilai: n.nilai };
+          if (!map[uid]) map[uid] = {};
+          map[uid][sid] = { recordId: n.id, nilai: n.nilai };
         });
         setNilaiUjian(map);
       } catch (err) {
@@ -490,16 +501,13 @@ export default function PenilaianGuruMapelPage() {
       }
     }
 
-    fetchNilaiUjian();
+    fetchAllNilaiUjian();
     return () => {
       isMounted = false;
     };
-  }, [selectedUjianId, selectedMapelId, siswaList]);
+  }, [ujianAktif, selectedMapelId, siswaList]);
 
   // ================= NILAI AKHIR =================
-  // DISAMAKAN dengan PenilaianMapelPage:
-  //   - Formatif = rata-rata nilai K1-K4 yang terisi (nilai kosong diabaikan)
-  //   - Sumatif  = rata-rata nilai LP yang terisi (nilai kosong diabaikan)
   const formatifAvgMap = useMemo(() => {
     const result = {};
     siswaList.forEach((s) => {
@@ -535,6 +543,59 @@ export default function PenilaianGuruMapelPage() {
     return result;
   }, [nilaiSumatif, siswaList]);
 
+  const utsIds = useMemo(
+    () =>
+      ujianAktif.filter((u) => u.jenis_ujian === JENIS_UTS).map((u) => u.id),
+    [ujianAktif],
+  );
+  const uasIds = useMemo(
+    () =>
+      ujianAktif.filter((u) => u.jenis_ujian === JENIS_UAS).map((u) => u.id),
+    [ujianAktif],
+  );
+
+  function avgUjianByIds(ids, siswaId) {
+    const vals = ids
+      .map((uid) => nilaiUjian[uid]?.[siswaId]?.nilai)
+      .filter((v) => typeof v === "number" && !isNaN(v) && v !== -1);
+    return average(vals);
+  }
+
+  const utsAvgMap = useMemo(() => {
+    const result = {};
+    siswaList.forEach((s) => {
+      result[s.id] = avgUjianByIds(utsIds, s.id);
+    });
+    return result;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nilaiUjian, utsIds, siswaList]);
+
+  const uasAvgMap = useMemo(() => {
+    const result = {};
+    siswaList.forEach((s) => {
+      result[s.id] = avgUjianByIds(uasIds, s.id);
+    });
+    return result;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nilaiUjian, uasIds, siswaList]);
+
+  const raporMap = useMemo(() => {
+    const result = {};
+    siswaList.forEach((s) => {
+      const komponen = [
+        formatifAvgMap[s.id],
+        sumatifAvgMap[s.id],
+        utsAvgMap[s.id],
+        uasAvgMap[s.id],
+      ].filter((v) => v !== null && v !== undefined && !isNaN(v) && v !== -1);
+      result[s.id] =
+        komponen.length === 0
+          ? null
+          : komponen.reduce((a, b) => a + b, 0) / komponen.length;
+    });
+    return result;
+  }, [formatifAvgMap, sumatifAvgMap, utsAvgMap, uasAvgMap, siswaList]);
+
   // ---------------- Handlers: Tambah TP ----------------
   async function handleAddTp() {
     if (!selectedNoTp || !selectedMapelId || !selectedKelas) return;
@@ -562,7 +623,6 @@ export default function PenilaianGuruMapelPage() {
     }
   }
 
-  // ---------------- Handlers: Hapus TP ----------------
   function handleDeleteTp(tp) {
     setConfirmDialog({ type: "tp", data: tp });
   }
@@ -606,7 +666,6 @@ export default function PenilaianGuruMapelPage() {
     }
   }
 
-  // ---------------- Handlers: Nilai Formatif ----------------
   function handleFormatifChange(siswaId, tpId, kField, rawValue) {
     setNilaiFormatif((prev) => ({
       ...prev,
@@ -689,7 +748,6 @@ export default function PenilaianGuruMapelPage() {
     }
   }
 
-  // ---------------- Handlers: Tambah LP ----------------
   async function handleAddLp(e) {
     e.preventDefault();
     if (!namaLp.trim() || !selectedMapelId || !selectedKelas) return;
@@ -716,7 +774,6 @@ export default function PenilaianGuruMapelPage() {
     }
   }
 
-  // ---------------- Handlers: Hapus LP ----------------
   function handleDeleteLp(lp) {
     setConfirmDialog({ type: "lp", data: lp });
   }
@@ -757,7 +814,6 @@ export default function PenilaianGuruMapelPage() {
     }
   }
 
-  // ---------------- Handlers: Nilai Sumatif ----------------
   function handleSumatifChange(siswaId, lpId, rawValue) {
     setNilaiSumatif((prev) => ({
       ...prev,
@@ -816,17 +872,23 @@ export default function PenilaianGuruMapelPage() {
     }
   }
 
-  // ---------------- Handlers: Nilai Ujian ----------------
   function handleUjianChange(siswaId, rawValue) {
+    if (!selectedUjianId) return;
     setNilaiUjian((prev) => ({
       ...prev,
-      [siswaId]: { ...(prev[siswaId] || {}), nilai: rawValue },
+      [selectedUjianId]: {
+        ...(prev[selectedUjianId] || {}),
+        [siswaId]: {
+          ...(prev[selectedUjianId]?.[siswaId] || {}),
+          nilai: rawValue,
+        },
+      },
     }));
   }
 
   async function handleUjianBlur(siswaId) {
     if (!selectedUjianId || !selectedPloting || !selectedMapelId) return;
-    const existing = nilaiUjian[siswaId];
+    const existing = nilaiUjian[selectedUjianId]?.[siswaId];
     const rawValue = existing?.nilai;
     if (rawValue === "" || rawValue === undefined || rawValue === null) return;
     const nilaiNum = Number(rawValue);
@@ -855,7 +917,10 @@ export default function PenilaianGuruMapelPage() {
       }
       setNilaiUjian((prev) => ({
         ...prev,
-        [siswaId]: { recordId: saved.id, nilai: clamped },
+        [selectedUjianId]: {
+          ...(prev[selectedUjianId] || {}),
+          [siswaId]: { recordId: saved.id, nilai: clamped },
+        },
       }));
       setSavedUFlash(siswaId);
       setTimeout(() => setSavedUFlash((k) => (k === siswaId ? null : k)), 1200);
@@ -869,7 +934,6 @@ export default function PenilaianGuruMapelPage() {
 
   // ================================================================
   // EXPORT EXCEL — 1 SHEET PER KELAS YANG DIAJAR
-  // Semua K1–K4 selalu ditulis (tanpa filter kriteria aktif)
   // ================================================================
   async function handleExportPerKelas() {
     if (!user?.id) return;
@@ -1254,30 +1318,33 @@ export default function PenilaianGuruMapelPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-8">
+    <section className="mx-auto max-w-6xl space-y-6 px-4 py-8 lg:p-10">
       {/* Breadcrumb */}
-      <div className="mb-6 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+      <nav
+        aria-label="Breadcrumb"
+        className="flex flex-wrap items-center gap-1.5 text-xs"
+      >
         <button
           type="button"
           onClick={backToMapel}
           className={
             selectedPloting
-              ? "hover:text-slate-600 cursor-pointer"
-              : "text-slate-600 font-medium"
+              ? "text-slate-400 transition hover:text-blue-700"
+              : "font-semibold text-blue-700"
           }
         >
           Penilaian
         </button>
         {selectedPloting && (
           <>
-            <span>/</span>
+            <span className="text-slate-300">/</span>
             <button
               type="button"
               onClick={backToKelas}
               className={
                 selectedKelas
-                  ? "hover:text-slate-600 cursor-pointer"
-                  : "text-slate-600 font-medium"
+                  ? "text-slate-400 transition hover:text-blue-700"
+                  : "font-semibold text-blue-700"
               }
             >
               {selectedPloting.expand?.mapel_id?.nama_mapel || "Mata Pelajaran"}
@@ -1286,16 +1353,16 @@ export default function PenilaianGuruMapelPage() {
         )}
         {selectedKelas && (
           <>
-            <span>/</span>
-            <span className="text-slate-600 font-medium">
+            <span className="text-slate-300">/</span>
+            <span className="font-semibold text-blue-700">
               {selectedKelas.nama_kelas}
             </span>
           </>
         )}
-      </div>
+      </nav>
 
       {error && (
-        <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
           {error}
         </div>
       )}
@@ -1303,25 +1370,36 @@ export default function PenilaianGuruMapelPage() {
       {/* ============ STEP 1: PILIH MAPEL ============ */}
       {!selectedPloting && (
         <>
-          <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h1 className="mb-1 text-lg font-bold text-slate-800">
-                Pilih Mata Pelajaran
-              </h1>
-              <p className="text-xs text-slate-500">
-                Pilih mata pelajaran untuk mengelola nilai kelas yang Anda ampu.
-              </p>
+          {/* Hero */}
+          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-blue-600 via-blue-600 to-blue-700 p-6 text-white shadow-lg md:p-8">
+            <div className="pointer-events-none absolute -right-10 -bottom-20 h-80 w-80 rounded-full bg-white/5" />
+            <div className="relative z-10 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+              <div className="space-y-1">
+                <span className="block text-xs font-semibold uppercase tracking-widest text-blue-200">
+                  Penilaian
+                </span>
+                <h1 className="text-2xl font-extrabold uppercase tracking-wide md:text-3xl">
+                  Pilih Mata Pelajaran
+                </h1>
+                <p className="text-sm text-blue-100">
+                  Pilih mata pelajaran untuk mengelola nilai kelas yang Anda
+                  ampu.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleExportPerKelas}
+                disabled={
+                  exporting || loadingPloting || plotingList.length === 0
+                }
+                className="inline-flex flex-shrink-0 items-center gap-2 self-start rounded-xl bg-white/15 px-4 py-2.5 text-xs font-bold text-white ring-1 ring-inset ring-white/20 backdrop-blur-sm transition hover:bg-white/25 disabled:cursor-not-allowed disabled:opacity-50 sm:self-end"
+              >
+                {exporting
+                  ? exportProgress || "Mengexport..."
+                  : "⬇ Export Nilai Mentah (Per Kelas)"}
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={handleExportPerKelas}
-              disabled={exporting || loadingPloting || plotingList.length === 0}
-              className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs font-bold px-4 py-2.5 rounded-lg whitespace-nowrap inline-flex items-center gap-2 self-start sm:self-center transition"
-            >
-              {exporting
-                ? exportProgress || "Mengexport..."
-                : "⬇ Export Nilai Mentah (Per Kelas)"}
-            </button>
           </div>
 
           {loadingPloting ? (
@@ -1344,20 +1422,20 @@ export default function PenilaianGuruMapelPage() {
                     key={p.id}
                     type="button"
                     onClick={() => setSelectedPlotingId(p.id)}
-                    className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition-all duration-300 hover:border-blue-600 hover:shadow-lg hover:shadow-blue-200 hover:bg-blue-600 active:scale-[0.98]"
+                    className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition-all duration-300 hover:border-blue-600 hover:bg-blue-600 hover:shadow-lg hover:shadow-blue-200 active:scale-[0.98]"
                   >
-                    <span className="inline-block text-[9px] font-mono bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold uppercase group-hover:bg-white/20 group-hover:text-white transition-colors duration-300">
+                    <span className="inline-block rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase text-slate-600 transition-colors duration-300 group-hover:bg-white/20 group-hover:text-white">
                       {mapel?.kode_mapel || "MPL"}
                     </span>
-                    <h3 className="text-sm font-bold text-slate-800 mt-2 group-hover:text-white transition-colors duration-300">
+                    <h3 className="mt-2 text-sm font-bold text-slate-800 transition-colors duration-300 group-hover:text-white">
                       {mapel?.nama_mapel || "—"}
                     </h3>
-                    <p className="text-[11px] text-slate-400 mt-1 group-hover:text-blue-100 transition-colors duration-300">
+                    <p className="mt-1 text-[11px] text-slate-400 transition-colors duration-300 group-hover:text-blue-100">
                       Diampu di {kelasArr.length} kelas
                     </p>
-                    <div className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 group-hover:text-white group-hover:translate-x-1.5 transition-all duration-300">
+                    <div className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 transition-all duration-300 group-hover:translate-x-1.5 group-hover:text-white">
                       <svg
-                        className="w-5 h-5"
+                        className="h-5 w-5"
                         fill="none"
                         viewBox="0 0 24 24"
                         stroke="currentColor"
@@ -1370,7 +1448,7 @@ export default function PenilaianGuruMapelPage() {
                         />
                       </svg>
                     </div>
-                    <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/15 to-white/0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 pointer-events-none" />
+                    <div className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-white/0 via-white/15 to-white/0 transition-transform duration-700 group-hover:translate-x-full" />
                   </button>
                 );
               })}
@@ -1382,15 +1460,21 @@ export default function PenilaianGuruMapelPage() {
       {/* ============ STEP 2: PILIH KELAS ============ */}
       {selectedPloting && !selectedKelas && (
         <>
-          <div className="mb-6">
-            <h1 className="text-lg font-bold text-slate-800">Pilih Kelas</h1>
-            <p className="text-xs text-slate-500 mt-1">
-              Pilih kelas untuk mengelola penilaian mata pelajaran{" "}
-              <span className="font-semibold text-slate-700">
-                {selectedPloting.expand?.mapel_id?.nama_mapel}
+          {/* Hero */}
+          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-blue-600 via-blue-600 to-blue-700 p-6 text-white shadow-lg md:p-8">
+            <div className="pointer-events-none absolute -right-10 -bottom-20 h-80 w-80 rounded-full bg-white/5" />
+            <div className="relative z-10 space-y-1">
+              <span className="block text-xs font-semibold uppercase tracking-widest text-blue-200">
+                {selectedPloting.expand?.mapel_id?.kode_mapel ||
+                  "Mata Pelajaran"}
               </span>
-              .
-            </p>
+              <h1 className="text-2xl font-extrabold uppercase tracking-wide md:text-3xl">
+                {selectedPloting.expand?.mapel_id?.nama_mapel || "Pilih Kelas"}
+              </h1>
+              <p className="text-sm text-blue-100">
+                Pilih kelas untuk mengelola penilaian mata pelajaran ini.
+              </p>
+            </div>
           </div>
 
           {loadingKelasOptions ? (
@@ -1406,65 +1490,74 @@ export default function PenilaianGuruMapelPage() {
                   key={kelas.id}
                   type="button"
                   onClick={() => setSelectedKelasId(kelas.id)}
-                  className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-all duration-300 hover:border-blue-600 hover:shadow-lg hover:shadow-blue-200 hover:bg-blue-600 active:scale-[0.98]"
+                  className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-all duration-300 hover:border-blue-600 hover:bg-blue-600 hover:shadow-lg hover:shadow-blue-200 active:scale-[0.98]"
                 >
-                  <h3 className="text-base font-semibold text-slate-900 group-hover:text-white transition-colors duration-300">
-                    {kelas.nama_kelas}
-                  </h3>
-                  <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500 group-hover:text-blue-100 transition-colors duration-300">
-                    <span className="flex items-center gap-1">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h3 className="truncate text-base font-semibold text-slate-900 transition-colors duration-300 group-hover:text-white">
+                        {kelas.nama_kelas}
+                      </h3>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 transition-colors duration-300 group-hover:text-blue-100">
+                        <span className="flex items-center gap-1">
+                          <svg
+                            className="h-3.5 w-3.5 text-slate-400 transition-colors duration-300 group-hover:text-blue-200"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={2}
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M19 21v-2a4 4 0 00-4-4H9a4 4 0 00-4 4v2"
+                            />
+                            <circle cx="12" cy="7" r="4" />
+                          </svg>
+                          Tingkat {kelas.tingkat}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <svg
+                            className="h-3.5 w-3.5 text-slate-400 transition-colors duration-300 group-hover:text-blue-200"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={2}
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"
+                            />
+                          </svg>
+                          {siswaCount} siswa
+                        </span>
+                      </div>
+                    </div>
+
+                    <span className="flex h-8 min-w-8 flex-shrink-0 items-center justify-center rounded-lg bg-slate-100 px-1.5 text-[11px] font-semibold text-slate-600 transition-colors duration-300 group-hover:bg-white/20 group-hover:text-white">
+                      {getKelasBadge(kelas)}
+                    </span>
+                  </div>
+
+                  <div className="mt-4 flex items-center justify-end border-t border-slate-100 pt-3 transition-colors duration-300 group-hover:border-white/20">
+                    <span className="text-slate-300 transition-all duration-300 group-hover:translate-x-1.5 group-hover:text-white">
                       <svg
-                        className="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-200 transition-colors duration-300"
+                        className="h-4 w-4"
                         fill="none"
                         viewBox="0 0 24 24"
                         stroke="currentColor"
-                        strokeWidth={2}
+                        strokeWidth={2.5}
                       >
                         <path
                           strokeLinecap="round"
                           strokeLinejoin="round"
-                          d="M19 21v-2a4 4 0 00-4-4H9a4 4 0 00-4 4v2"
-                        />
-                        <circle cx="12" cy="7" r="4" />
-                      </svg>
-                      Tingkat {kelas.tingkat}
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <svg
-                        className="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-200 transition-colors duration-300"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        strokeWidth={2}
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"
+                          d="M9 5l7 7-7 7"
                         />
                       </svg>
-                      {siswaCount} siswa
                     </span>
                   </div>
-                  <div className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 group-hover:text-white group-hover:translate-x-1.5 transition-all duration-300">
-                    <svg
-                      className="w-5 h-5"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      stroke="currentColor"
-                      strokeWidth={2.5}
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        d="M9 5l7 7-7 7"
-                      />
-                    </svg>
-                  </div>
-                  <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/15 to-white/0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 pointer-events-none" />
-                  <div className="absolute top-3 right-12 text-[10px] font-medium text-slate-400 group-hover:text-blue-200 transition-colors duration-300">
-                    {getKelasBadge(kelas)}
-                  </div>
+
+                  <div className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-white/0 via-white/15 to-white/0 transition-transform duration-700 group-hover:translate-x-full" />
                 </button>
               ))}
             </div>
@@ -1475,68 +1568,86 @@ export default function PenilaianGuruMapelPage() {
       {/* ============ STEP 3: INPUT NILAI ============ */}
       {selectedPloting && selectedKelas && (
         <>
-          <div className="mb-6 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 p-5 text-white shadow-sm">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-[11px] uppercase tracking-wider text-blue-100 font-semibold">
-                  {selectedPloting.expand?.mapel_id?.nama_mapel ||
-                    "Mata Pelajaran"}
-                </p>
-                <h1 className="text-lg font-bold mt-0.5">
-                  {selectedKelas.nama_kelas}
-                </h1>
-                <p className="text-xs text-blue-100 mt-1">
-                  Input nilai untuk kelas ini. Halaman ini khusus input — export
-                  &amp; rekap rapor dikelola wali kelas.
-                </p>
+          {/* Hero */}
+          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-blue-600 via-blue-600 to-blue-700 p-6 text-white shadow-lg md:p-8">
+            <div className="pointer-events-none absolute -right-10 -bottom-20 h-80 w-80 rounded-full bg-white/5" />
+
+            <div className="relative z-10 flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex min-w-0 items-start gap-4">
+                <div className="flex h-14 min-w-14 flex-shrink-0 items-center justify-center rounded-2xl bg-white/15 px-2 text-base font-bold backdrop-blur-sm">
+                  {getKelasBadge(selectedKelas)}
+                </div>
+                <div className="min-w-0">
+                  <span className="block text-[11px] font-semibold uppercase tracking-widest text-blue-200">
+                    {selectedPloting.expand?.mapel_id?.nama_mapel ||
+                      "Mata Pelajaran"}
+                  </span>
+                  <h1 className="truncate text-2xl font-extrabold uppercase tracking-wide md:text-3xl">
+                    {selectedKelas.nama_kelas}
+                  </h1>
+                  <p className="mt-1 text-xs text-blue-100">
+                    Input nilai untuk kelas ini — export &amp; rekap rapor
+                    dikelola wali kelas.
+                  </p>
+                </div>
               </div>
-              <div className="flex gap-4 text-center">
-                <div className="rounded-xl bg-white/10 px-4 py-2">
-                  <p className="text-[10px] uppercase text-blue-100">Siswa</p>
-                  <p className="text-lg font-bold">{siswaList.length}</p>
-                </div>
-                <div className="rounded-xl bg-white/10 px-4 py-2">
-                  <p className="text-[10px] uppercase text-blue-100">TP</p>
-                  <p className="text-lg font-bold">{tpList.length}</p>
-                </div>
-                <div className="rounded-xl bg-white/10 px-4 py-2">
-                  <p className="text-[10px] uppercase text-blue-100">LP</p>
-                  <p className="text-lg font-bold">{lpList.length}</p>
-                </div>
+
+              <div className="flex flex-shrink-0 gap-2 sm:gap-3">
+                {[
+                  { label: "Siswa", value: siswaList.length },
+                  { label: "TP", value: tpList.length },
+                  { label: "LP", value: lpList.length },
+                ].map((s) => (
+                  <div
+                    key={s.label}
+                    className="flex-1 rounded-2xl bg-white/10 px-4 py-3 text-center ring-1 ring-inset ring-white/15 backdrop-blur-sm sm:flex-none"
+                  >
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-blue-100">
+                      {s.label}
+                    </p>
+                    <p className="text-2xl font-bold leading-tight tabular-nums">
+                      {s.value}
+                    </p>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
 
           {kelasOptions.length > 1 && (
-            <div className="mb-6 flex items-center gap-2 overflow-x-auto no-scrollbar">
-              <span className="text-[11px] font-medium text-slate-400 shrink-0">
-                Ganti kelas:
-              </span>
-              {kelasOptions.map(({ kelas }) => (
-                <button
-                  key={kelas.id}
-                  type="button"
-                  onClick={() => setSelectedKelasId(kelas.id)}
-                  className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-semibold border transition ${
-                    kelas.id === selectedKelasId
-                      ? "bg-blue-600 text-white border-blue-600"
-                      : "bg-white text-slate-500 border-slate-200 hover:border-blue-300"
-                  }`}
-                >
-                  {kelas.nama_kelas}
-                </button>
-              ))}
+            <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+              <div className="flex items-center gap-3">
+                <span className="shrink-0 pl-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                  Ganti kelas
+                </span>
+                <div className="no-scrollbar flex flex-1 items-center gap-2 overflow-x-auto">
+                  {kelasOptions.map(({ kelas }) => (
+                    <button
+                      key={kelas.id}
+                      type="button"
+                      onClick={() => setSelectedKelasId(kelas.id)}
+                      className={`shrink-0 rounded-xl border px-3 py-1.5 text-xs font-semibold transition ${
+                        kelas.id === selectedKelasId
+                          ? "border-blue-600 bg-blue-600 text-white shadow-sm"
+                          : "border-slate-200 bg-white text-slate-500 hover:border-blue-300 hover:text-blue-700"
+                      }`}
+                    >
+                      {kelas.nama_kelas}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           )}
 
-          <div className="mb-6 flex items-center gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1 no-scrollbar w-full sm:w-fit">
+          <div className="no-scrollbar flex w-full items-center gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1 sm:w-fit">
             <button
               type="button"
               onClick={() => setInnerTab("formatif")}
-              className={`whitespace-nowrap rounded-lg px-4 py-2 text-xs font-semibold transition-all cursor-pointer min-w-[140px] flex-1 sm:flex-initial ${
+              className={`min-w-[140px] flex-1 cursor-pointer whitespace-nowrap rounded-lg px-4 py-2 text-xs font-semibold transition-all sm:flex-initial ${
                 innerTab === "formatif"
-                  ? "bg-white text-blue-600 shadow-sm border border-slate-200/50"
-                  : "text-slate-500 hover:text-slate-800 hover:bg-white/40"
+                  ? "border border-slate-200/50 bg-white text-blue-600 shadow-sm"
+                  : "text-slate-500 hover:bg-white/40 hover:text-slate-800"
               }`}
             >
               Nilai Formatif
@@ -1544,10 +1655,10 @@ export default function PenilaianGuruMapelPage() {
             <button
               type="button"
               onClick={() => setInnerTab("sumatif")}
-              className={`whitespace-nowrap rounded-lg px-4 py-2 text-xs font-semibold transition-all cursor-pointer min-w-[140px] flex-1 sm:flex-initial ${
+              className={`min-w-[140px] flex-1 cursor-pointer whitespace-nowrap rounded-lg px-4 py-2 text-xs font-semibold transition-all sm:flex-initial ${
                 innerTab === "sumatif"
-                  ? "bg-white text-blue-600 shadow-sm border border-slate-200/50"
-                  : "text-slate-500 hover:text-slate-800 hover:bg-white/40"
+                  ? "border border-slate-200/50 bg-white text-blue-600 shadow-sm"
+                  : "text-slate-500 hover:bg-white/40 hover:text-slate-800"
               }`}
             >
               Nilai Sumatif
@@ -1555,13 +1666,24 @@ export default function PenilaianGuruMapelPage() {
             <button
               type="button"
               onClick={() => setInnerTab("ujian")}
-              className={`whitespace-nowrap rounded-lg px-4 py-2 text-xs font-semibold transition-all cursor-pointer min-w-[140px] flex-1 sm:flex-initial ${
+              className={`min-w-[140px] flex-1 cursor-pointer whitespace-nowrap rounded-lg px-4 py-2 text-xs font-semibold transition-all sm:flex-initial ${
                 innerTab === "ujian"
-                  ? "bg-white text-blue-600 shadow-sm border border-slate-200/50"
-                  : "text-slate-500 hover:text-slate-800 hover:bg-white/40"
+                  ? "border border-slate-200/50 bg-white text-blue-600 shadow-sm"
+                  : "text-slate-500 hover:bg-white/40 hover:text-slate-800"
               }`}
             >
               Nilai Ujian {ujianAktif.length > 0 && `(${ujianAktif.length})`}
+            </button>
+            <button
+              type="button"
+              onClick={() => setInnerTab("nilaiAkhir")}
+              className={`min-w-[140px] flex-1 cursor-pointer whitespace-nowrap rounded-lg px-4 py-2 text-xs font-semibold transition-all sm:flex-initial ${
+                innerTab === "nilaiAkhir"
+                  ? "border border-slate-200/50 bg-white text-blue-600 shadow-sm"
+                  : "text-slate-500 hover:bg-white/40 hover:text-slate-800"
+              }`}
+            >
+              Nilai Akhir
             </button>
           </div>
 
@@ -1572,7 +1694,7 @@ export default function PenilaianGuruMapelPage() {
               {/* ---------------- TAB: FORMATIF ---------------- */}
               {innerTab === "formatif" && (
                 <div className="space-y-3">
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
                     <p className="text-[11px] text-slate-400">
                       Setiap TP dinilai dengan 4 kriteria (K1–K4). Nilai akhir
                       adalah <b>rata-rata dari kriteria yang terisi</b>. Nilai
@@ -1583,7 +1705,7 @@ export default function PenilaianGuruMapelPage() {
                         type="button"
                         onClick={() => setAddingTp(true)}
                         disabled={tpList.length >= DAFTAR_NO_TP.length}
-                        className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 transition disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+                        className="whitespace-nowrap rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         + Tambah TP
                       </button>
@@ -1617,7 +1739,7 @@ export default function PenilaianGuruMapelPage() {
                             setAddingTp(false);
                             setSelectedNoTp("");
                           }}
-                          className="text-xs font-semibold text-slate-500 px-2"
+                          className="px-2 text-xs font-semibold text-slate-500"
                         >
                           Batal
                         </button>
@@ -1626,22 +1748,22 @@ export default function PenilaianGuruMapelPage() {
                   </div>
 
                   {tpList.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500 text-xs">
+                    <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-xs text-slate-500">
                       Belum ada TP untuk mata pelajaran ini. Tambahkan TP untuk
                       mulai input nilai.
                     </div>
                   ) : siswaList.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500 text-xs">
+                    <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-xs text-slate-500">
                       Belum ada siswa terdaftar di kelas ini.
                     </div>
                   ) : (
                     <div className="overflow-x-auto rounded-xl border border-slate-100 shadow-sm">
                       <table className="w-full text-xs">
                         <thead>
-                          <tr className="bg-slate-50 text-left uppercase tracking-wider text-slate-400 text-[10px] font-semibold border-b border-slate-100">
+                          <tr className="border-b border-slate-100 bg-slate-50 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">
                             <th
                               rowSpan={2}
-                              className="px-4 py-2.5 sticky left-0 z-10 bg-slate-50 min-w-[150px] align-bottom"
+                              className="sticky left-0 z-10 min-w-[150px] bg-slate-50 px-4 py-2.5 align-bottom"
                             >
                               Nama Siswa
                             </th>
@@ -1649,7 +1771,7 @@ export default function PenilaianGuruMapelPage() {
                               <th
                                 key={tp.id}
                                 colSpan={SEMUA_KRITERIA.length}
-                                className="text-center px-2 py-2 font-semibold border-l border-slate-200"
+                                className="border-l border-slate-200 px-2 py-2 text-center font-semibold"
                               >
                                 <div className="flex flex-col items-center justify-center gap-1">
                                   <span>{tp.no_tp}</span>
@@ -1657,7 +1779,7 @@ export default function PenilaianGuruMapelPage() {
                                     type="button"
                                     onClick={() => handleDeleteTp(tp)}
                                     title={`Hapus ${tp.no_tp}`}
-                                    className="text-[9px] font-bold text-red-600 hover:text-white hover:bg-red-600 border border-red-300 hover:border-red-600 rounded px-1.5 py-0.5 transition-colors normal-case tracking-normal"
+                                    className="rounded border border-red-300 px-1.5 py-0.5 text-[9px] font-bold normal-case tracking-normal text-red-600 transition-colors hover:border-red-600 hover:bg-red-600 hover:text-white"
                                   >
                                     Hapus
                                   </button>
@@ -1666,17 +1788,17 @@ export default function PenilaianGuruMapelPage() {
                             ))}
                             <th
                               rowSpan={2}
-                              className="px-4 py-2.5 text-center min-w-[100px] bg-blue-50/60 text-blue-600 align-bottom"
+                              className="min-w-[100px] bg-blue-50/60 px-4 py-2.5 text-center align-bottom text-blue-600"
                             >
                               Nilai Akhir
                             </th>
                           </tr>
-                          <tr className="bg-slate-50 text-slate-400 text-[9px] uppercase tracking-wider border-b border-slate-100">
+                          <tr className="border-b border-slate-100 bg-slate-50 text-[9px] uppercase tracking-wider text-slate-400">
                             {tpList.map((tp) =>
                               SEMUA_KRITERIA.map((k, i) => (
                                 <th
                                   key={`${tp.id}-${k}`}
-                                  className={`text-center px-1 py-1.5 font-semibold ${i === 0 ? "border-l border-slate-200" : ""}`}
+                                  className={`px-1 py-1.5 text-center font-semibold ${i === 0 ? "border-l border-slate-200" : ""}`}
                                 >
                                   {k.toUpperCase()}
                                 </th>
@@ -1690,9 +1812,9 @@ export default function PenilaianGuruMapelPage() {
                             return (
                               <tr
                                 key={s.id}
-                                className="hover:bg-slate-50/40 transition"
+                                className="transition hover:bg-slate-50/40"
                               >
-                                <td className="px-4 py-2 font-semibold text-slate-700 sticky left-0 z-10 bg-white min-w-[150px]">
+                                <td className="sticky left-0 z-10 min-w-[150px] bg-white px-4 py-2 font-semibold text-slate-700">
                                   {s.nama_siswa}
                                 </td>
                                 {tpList.map((tp) => {
@@ -1729,9 +1851,9 @@ export default function PenilaianGuruMapelPage() {
                                     );
                                   });
                                 })}
-                                <td className="px-4 py-2 text-center bg-blue-50/30">
+                                <td className="bg-blue-50/30 px-4 py-2 text-center">
                                   <span
-                                    className={`font-bold font-mono ${nilaiColor(avg)}`}
+                                    className={`font-mono font-bold ${nilaiColor(avg)}`}
                                   >
                                     {formatGrade(avg)}
                                   </span>
@@ -1749,7 +1871,7 @@ export default function PenilaianGuruMapelPage() {
               {/* ---------------- TAB: SUMATIF ---------------- */}
               {innerTab === "sumatif" && (
                 <div className="space-y-3">
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div className="flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
                     <p className="text-[11px] text-slate-400">
                       Nilai akhir sumatif ={" "}
                       <b>rata-rata nilai LP yang terisi</b>. Nilai kosong
@@ -1758,7 +1880,7 @@ export default function PenilaianGuruMapelPage() {
                     <button
                       type="button"
                       onClick={() => setShowAddLp((v) => !v)}
-                      className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-sm hover:bg-blue-700 transition whitespace-nowrap"
+                      className="whitespace-nowrap rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-blue-700"
                     >
                       {showAddLp ? "Batal" : "+ Tambah LP"}
                     </button>
@@ -1767,9 +1889,9 @@ export default function PenilaianGuruMapelPage() {
                   {showAddLp && (
                     <form
                       onSubmit={handleAddLp}
-                      className="rounded-2xl border border-blue-100 bg-blue-50/40 p-4 flex flex-col sm:flex-row gap-3 items-end"
+                      className="flex flex-col items-end gap-3 rounded-2xl border border-blue-100 bg-blue-50/40 p-4 sm:flex-row"
                     >
-                      <div className="flex-1 w-full">
+                      <div className="w-full flex-1">
                         <label className="text-[11px] font-medium text-slate-500">
                           Nama Lingkup Materi
                         </label>
@@ -1785,7 +1907,7 @@ export default function PenilaianGuruMapelPage() {
                       <button
                         type="submit"
                         disabled={savingLp}
-                        className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap"
+                        className="whitespace-nowrap rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
                       >
                         {savingLp ? "Menyimpan..." : "Simpan LP"}
                       </button>
@@ -1793,44 +1915,44 @@ export default function PenilaianGuruMapelPage() {
                   )}
 
                   {lpList.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500 text-xs">
+                    <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-xs text-slate-500">
                       Belum ada LP untuk mata pelajaran ini. Tambahkan LP untuk
                       mulai input nilai.
                     </div>
                   ) : siswaList.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500 text-xs">
+                    <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-xs text-slate-500">
                       Belum ada siswa terdaftar di kelas ini.
                     </div>
                   ) : (
                     <div className="overflow-x-auto rounded-xl border border-slate-100 shadow-sm">
                       <table className="w-full min-w-[640px] text-xs">
                         <thead>
-                          <tr className="bg-slate-50 text-left uppercase tracking-wider text-slate-400 text-[10px] font-semibold border-b border-slate-100">
-                            <th className="px-4 py-2.5 sticky left-0 bg-slate-50 min-w-[160px]">
+                          <tr className="border-b border-slate-100 bg-slate-50 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                            <th className="sticky left-0 min-w-[160px] bg-slate-50 px-4 py-2.5">
                               Nama Siswa
                             </th>
                             {lpList.map((lp) => (
                               <th
                                 key={lp.id}
-                                className="px-3 py-2.5 text-center min-w-[110px]"
+                                className="min-w-[110px] px-3 py-2.5 text-center"
                                 title={lp.nama}
                               >
                                 <div className="flex flex-col items-center justify-center gap-1">
-                                  <span className="line-clamp-2 normal-case font-semibold text-slate-500">
+                                  <span className="line-clamp-2 font-semibold normal-case text-slate-500">
                                     {lp.nama}
                                   </span>
                                   <button
                                     type="button"
                                     onClick={() => handleDeleteLp(lp)}
                                     title={`Hapus ${lp.nama}`}
-                                    className="text-[9px] font-bold text-red-600 hover:text-white hover:bg-red-600 border border-red-300 hover:border-red-600 rounded px-1.5 py-0.5 transition-colors normal-case tracking-normal"
+                                    className="rounded border border-red-300 px-1.5 py-0.5 text-[9px] font-bold normal-case tracking-normal text-red-600 transition-colors hover:border-red-600 hover:bg-red-600 hover:text-white"
                                   >
                                     Hapus
                                   </button>
                                 </div>
                               </th>
                             ))}
-                            <th className="px-4 py-2.5 text-center min-w-[100px] bg-blue-50/60 text-blue-600">
+                            <th className="min-w-[100px] bg-blue-50/60 px-4 py-2.5 text-center text-blue-600">
                               Nilai Akhir
                             </th>
                           </tr>
@@ -1841,9 +1963,9 @@ export default function PenilaianGuruMapelPage() {
                             return (
                               <tr
                                 key={s.id}
-                                className="hover:bg-slate-50/40 transition"
+                                className="transition hover:bg-slate-50/40"
                               >
-                                <td className="px-4 py-2 font-semibold text-slate-700 sticky left-0 bg-white">
+                                <td className="sticky left-0 bg-white px-4 py-2 font-semibold text-slate-700">
                                   {s.nama_siswa}
                                 </td>
                                 {lpList.map((lp) => {
@@ -1873,9 +1995,9 @@ export default function PenilaianGuruMapelPage() {
                                     </td>
                                   );
                                 })}
-                                <td className="px-4 py-2 text-center bg-blue-50/30">
+                                <td className="bg-blue-50/30 px-4 py-2 text-center">
                                   <span
-                                    className={`font-bold font-mono ${nilaiColor(avg)}`}
+                                    className={`font-mono font-bold ${nilaiColor(avg)}`}
                                   >
                                     {formatGrade(avg)}
                                   </span>
@@ -1894,11 +2016,11 @@ export default function PenilaianGuruMapelPage() {
               {innerTab === "ujian" && (
                 <div className="space-y-4">
                   {loadingUjianAktif ? (
-                    <div className="rounded-xl border border-slate-100 bg-white p-8 text-center text-slate-400 text-xs">
+                    <div className="rounded-xl border border-slate-100 bg-white p-8 text-center text-xs text-slate-400">
                       Memuat daftar ujian...
                     </div>
                   ) : ujianAktif.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500 text-xs">
+                    <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-xs text-slate-500">
                       Belum ada ujian yang diaktifkan oleh Admin untuk kelas
                       ini.
                     </div>
@@ -1910,10 +2032,10 @@ export default function PenilaianGuruMapelPage() {
                             key={u.id}
                             type="button"
                             onClick={() => setSelectedUjianId(u.id)}
-                            className={`text-xs font-bold px-4 py-2 rounded-full border transition-colors ${
+                            className={`rounded-full border px-4 py-2 text-xs font-bold transition-colors ${
                               selectedUjianId === u.id
-                                ? "bg-blue-600 border-blue-600 text-white"
-                                : "bg-white border-slate-200 text-slate-600 hover:border-blue-300"
+                                ? "border-blue-600 bg-blue-600 text-white"
+                                : "border-slate-200 bg-white text-slate-600 hover:border-blue-300"
                             }`}
                           >
                             {u.nama_ujian}
@@ -1925,42 +2047,42 @@ export default function PenilaianGuruMapelPage() {
                       </div>
 
                       {!selectedUjianId ? (
-                        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500 text-xs">
+                        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-xs text-slate-500">
                           Pilih ujian di atas untuk mulai input nilai.
                         </div>
                       ) : loadingNilaiUjian ? (
-                        <div className="rounded-xl border border-slate-100 bg-white p-8 text-center text-slate-400 text-xs">
+                        <div className="rounded-xl border border-slate-100 bg-white p-8 text-center text-xs text-slate-400">
                           Memuat nilai ujian...
                         </div>
                       ) : siswaList.length === 0 ? (
-                        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500 text-xs">
+                        <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-xs text-slate-500">
                           Belum ada siswa terdaftar di kelas ini.
                         </div>
                       ) : (
                         <div className="overflow-x-auto rounded-xl border border-slate-100 shadow-sm">
                           <table className="w-full min-w-[420px] text-xs">
                             <thead>
-                              <tr className="bg-slate-50 text-left uppercase tracking-wider text-slate-400 text-[10px] font-semibold border-b border-slate-100">
-                                <th className="px-4 py-2.5 min-w-[180px]">
+                              <tr className="border-b border-slate-100 bg-slate-50 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                                <th className="min-w-[180px] px-4 py-2.5">
                                   Nama Siswa
                                 </th>
-                                <th className="px-4 py-2.5 text-center min-w-[120px] bg-blue-50/60 text-blue-600">
+                                <th className="min-w-[120px] bg-blue-50/60 px-4 py-2.5 text-center text-blue-600">
                                   Nilai Ujian
                                 </th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100 bg-white">
                               {siswaList.map((s) => {
-                                const rec = nilaiUjian[s.id];
+                                const rec = nilaiUjian[selectedUjianId]?.[s.id];
                                 return (
                                   <tr
                                     key={s.id}
-                                    className="hover:bg-slate-50/40 transition"
+                                    className="transition hover:bg-slate-50/40"
                                   >
                                     <td className="px-4 py-2 font-semibold text-slate-700">
                                       {s.nama_siswa}
                                     </td>
-                                    <td className="px-4 py-2 text-center bg-blue-50/20">
+                                    <td className="bg-blue-50/20 px-4 py-2 text-center">
                                       <NilaiInput
                                         value={rec?.nilai}
                                         onChange={(e) =>
@@ -1986,6 +2108,101 @@ export default function PenilaianGuruMapelPage() {
                   )}
                 </div>
               )}
+
+              {/* ---------------- TAB: NILAI AKHIR ---------------- */}
+              {innerTab === "nilaiAkhir" && (
+                <div className="space-y-3">
+                  <p className="text-[11px] text-slate-400">
+                    Nilai akhir ={" "}
+                    <b>
+                      rata-rata dari komponen Formatif, Sumatif, UTS, dan UAS
+                    </b>{" "}
+                    yang tersedia. Komponen yang masih kosong akan diabaikan.
+                  </p>
+
+                  {siswaList.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-xs text-slate-500">
+                      Belum ada siswa terdaftar di kelas ini.
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto rounded-xl border border-slate-100 shadow-sm">
+                      <table className="w-full min-w-[680px] text-xs">
+                        <thead>
+                          <tr className="border-b border-slate-100 bg-slate-50 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                            <th className="sticky left-0 min-w-[170px] bg-slate-50 px-4 py-2.5">
+                              Nama Siswa
+                            </th>
+                            <th className="min-w-[90px] px-3 py-2.5 text-center">
+                              Formatif
+                            </th>
+                            <th className="min-w-[90px] px-3 py-2.5 text-center">
+                              Sumatif
+                            </th>
+                            <th className="min-w-[80px] px-3 py-2.5 text-center">
+                              UTS
+                            </th>
+                            <th className="min-w-[80px] px-3 py-2.5 text-center">
+                              UAS
+                            </th>
+                            <th className="min-w-[120px] bg-blue-50/60 px-4 py-2.5 text-center text-blue-600">
+                              Nilai Akhir
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 bg-white">
+                          {siswaList.map((s) => (
+                            <tr
+                              key={s.id}
+                              className="transition hover:bg-slate-50/40"
+                            >
+                              <td className="sticky left-0 bg-white px-4 py-2 font-semibold text-slate-700">
+                                {s.nama_siswa}
+                              </td>
+                              <td
+                                className={`px-3 py-2 text-center font-semibold ${nilaiColor(
+                                  formatifAvgMap[s.id],
+                                )}`}
+                              >
+                                {formatGrade(formatifAvgMap[s.id])}
+                              </td>
+                              <td
+                                className={`px-3 py-2 text-center font-semibold ${nilaiColor(
+                                  sumatifAvgMap[s.id],
+                                )}`}
+                              >
+                                {formatGrade(sumatifAvgMap[s.id])}
+                              </td>
+                              <td
+                                className={`px-3 py-2 text-center font-semibold ${nilaiColor(
+                                  utsAvgMap[s.id],
+                                )}`}
+                              >
+                                {formatGrade(utsAvgMap[s.id])}
+                              </td>
+                              <td
+                                className={`px-3 py-2 text-center font-semibold ${nilaiColor(
+                                  uasAvgMap[s.id],
+                                )}`}
+                              >
+                                {formatGrade(uasAvgMap[s.id])}
+                              </td>
+                              <td className="bg-blue-50/30 px-4 py-2 text-center">
+                                <span
+                                  className={`font-mono font-bold ${nilaiColor(
+                                    raporMap[s.id],
+                                  )}`}
+                                >
+                                  {formatGrade(raporMap[s.id])}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
             </>
           )}
         </>
@@ -1994,16 +2211,16 @@ export default function PenilaianGuruMapelPage() {
       {/* ================= MODAL KONFIRMASI HAPUS ================= */}
       {confirmDialog && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm"
           onClick={() => !deleting && setConfirmDialog(null)}
         >
           <div
-            className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 space-y-4"
+            className="w-full max-w-sm space-y-4 rounded-2xl bg-white p-6 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start gap-3">
-              <div className="shrink-0 w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
-                <span className="text-red-600 text-xl font-bold">!</span>
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-100">
+                <span className="text-xl font-bold text-red-600">!</span>
               </div>
               <div className="flex-1">
                 <h3 className="text-base font-bold text-slate-800">
@@ -2028,7 +2245,7 @@ export default function PenilaianGuruMapelPage() {
                     </>
                   )}
                 </p>
-                <p className="mt-2 text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+                <p className="mt-2 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-600">
                   ⚠ Semua nilai{" "}
                   {confirmDialog.type === "tp" ? "formatif" : "sumatif"} terkait
                   akan ikut terhapus dan tidak bisa dikembalikan.
@@ -2041,7 +2258,7 @@ export default function PenilaianGuruMapelPage() {
                 type="button"
                 onClick={() => setConfirmDialog(null)}
                 disabled={deleting}
-                className="px-4 py-2 rounded-lg text-sm font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+                className="rounded-lg px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-50"
               >
                 Batal
               </button>
@@ -2055,7 +2272,7 @@ export default function PenilaianGuruMapelPage() {
                   }
                 }}
                 disabled={deleting}
-                className="px-4 py-2 rounded-lg text-sm font-bold text-white bg-red-600 hover:bg-red-700 disabled:opacity-50"
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-bold text-white hover:bg-red-700 disabled:opacity-50"
               >
                 {deleting ? "Menghapus..." : "Yakin, Hapus"}
               </button>
@@ -2063,7 +2280,7 @@ export default function PenilaianGuruMapelPage() {
           </div>
         </div>
       )}
-    </div>
+    </section>
   );
 }
 

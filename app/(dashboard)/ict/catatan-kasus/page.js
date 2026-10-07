@@ -264,7 +264,7 @@ function Toast({ toast, onClose }) {
     <div className="pointer-events-none fixed inset-x-0 top-4 z-50 flex justify-center px-4">
       <div
         role="alert"
-        className="pointer-events-auto flex w-full max-w-sm animate-[toast-in_0.25s_ease-out] items-start gap-3 rounded-2xl border border-slate-200 bg-white p-3.5 shadow-xl shadow-blue-900/10 motion-reduce:animate-none"
+        className="pointer-events-auto flex w-full max-w-sm animate-[toast-in_0.25s_ease-out] items-start gap-3 rounded-2xl border border-slate-200 bg-white p-3.5 shadow-xl shadow-slate-900/10 motion-reduce:animate-none"
       >
         <span
           className={`mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-white ${
@@ -297,7 +297,7 @@ function Segmented({ value, onChange, options, ariaLabel }) {
     <div
       role="group"
       aria-label={ariaLabel}
-      className="inline-flex flex-shrink-0 rounded-xl bg-blue-50 p-1 ring-1 ring-blue-100"
+      className="inline-flex flex-shrink-0 rounded-xl bg-slate-100 p-1 ring-1 ring-slate-200"
     >
       {options.map((o) => {
         const active = value === o.value;
@@ -309,8 +309,8 @@ function Segmented({ value, onChange, options, ariaLabel }) {
             onClick={() => onChange(o.value)}
             className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition ${
               active
-                ? "bg-white text-blue-700 shadow-sm"
-                : "text-slate-500 hover:text-blue-700"
+                ? "bg-slate-900 text-white shadow-sm"
+                : "text-slate-500 hover:text-slate-900"
             }`}
           >
             {o.label}
@@ -379,17 +379,17 @@ function StatsOverview({ records, loading }) {
 
   return (
     <div className="grid gap-3 sm:grid-cols-3">
-      {/* Total — gradient biru */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-blue-600 via-blue-600 to-blue-700 p-5 text-white shadow-sm">
+      {/* Total — gradient hitam */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-slate-900 via-slate-900 to-slate-950 p-5 text-white shadow-sm">
         <div className="pointer-events-none absolute -right-8 -bottom-10 h-40 w-40 rounded-full bg-white/5" />
         <div className="relative">
-          <p className="text-xs font-medium text-blue-100">
+          <p className="text-xs font-medium text-slate-400">
             Total catatan kasus
           </p>
           <p className="mt-2 text-4xl font-semibold tabular-nums tracking-tight">
             {s.total}
           </p>
-          <p className="mt-3 text-xs text-blue-100">
+          <p className="mt-3 text-xs text-slate-400">
             <span className="font-semibold text-white">{sudahPct}%</span> sudah
             tersinkron ke SIAS
           </p>
@@ -479,7 +479,7 @@ function TrendChart({
     {
       label: mode === "yearly" ? "Bulan ada kasus" : "Hari ada kasus",
       value: hariAdaKasus,
-      tone: "text-blue-700",
+      tone: "text-slate-900",
     },
   ];
 
@@ -510,7 +510,7 @@ function TrendChart({
               value={year ?? new Date().getFullYear()}
               onChange={(e) => onYearChange(Number(e.target.value))}
               aria-label="Pilih tahun"
-              className="h-8 rounded-lg border border-blue-200 bg-white px-2 text-xs font-medium text-slate-700 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+              className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-xs font-medium text-slate-700 shadow-sm outline-none transition focus:border-slate-900 focus:ring-2 focus:ring-slate-200"
             >
               {availableYears.map((y) => (
                 <option key={y} value={y}>
@@ -533,12 +533,12 @@ function TrendChart({
         </div>
       </div>
 
-      <div className="mb-5 grid grid-cols-2 gap-x-3 gap-y-4 rounded-xl bg-blue-50/60 p-3 sm:grid-cols-4">
+      <div className="mb-5 grid grid-cols-2 gap-x-3 gap-y-4 rounded-xl bg-slate-50/60 p-3 sm:grid-cols-4">
         {summary.map((item, i) => (
           <div
             key={item.label}
             className={`min-w-0 ${
-              i > 0 ? "sm:border-l sm:border-blue-100 sm:pl-3" : ""
+              i > 0 ? "sm:border-l sm:border-slate-200 sm:pl-3" : ""
             }`}
           >
             <p className="truncate text-[11px] font-medium text-slate-500">
@@ -612,7 +612,7 @@ function TrendChart({
                   <p
                     className={`text-[10px] ${
                       d.isToday
-                        ? "font-bold text-blue-700"
+                        ? "font-bold text-slate-900"
                         : "font-medium text-slate-500"
                     }`}
                   >
@@ -886,7 +886,7 @@ export default function AdminCatatanKasusPage() {
   if (!authChecked) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center gap-3 text-sm text-slate-500">
-        <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+        <span className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-slate-900 border-t-transparent" />
         Memeriksa sesi login...
       </div>
     );
@@ -920,18 +920,18 @@ export default function AdminCatatanKasusPage() {
       `}</style>
       <Toast toast={message} onClose={closeToast} />
 
-      {/* HEADER — gradient biru ala nilai */}
+      {/* HEADER — gradient hitam */}
       <div>
-        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-blue-600 via-blue-600 to-blue-700 p-6 text-white shadow-lg md:p-8">
+        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-slate-900 via-slate-900 to-slate-950 p-6 text-white shadow-lg md:p-8">
           <div className="pointer-events-none absolute -right-10 -bottom-20 h-80 w-80 rounded-full bg-white/5" />
           <div className="relative z-10 space-y-1">
-            <span className="block text-xs font-semibold uppercase tracking-widest text-blue-200">
+            <span className="block text-xs font-semibold uppercase tracking-widest text-slate-400">
               Catatan Kasus
             </span>
             <h1 className="text-2xl font-extrabold uppercase tracking-wide md:text-3xl">
               Monitoring Catatan Kasus
             </h1>
-            <p className="text-sm text-blue-100">
+            <p className="text-sm text-slate-400">
               Pantau catatan kasus semua kelas dan kelola status sinkronisasi ke
               SIAS.
             </p>
@@ -948,8 +948,8 @@ export default function AdminCatatanKasusPage() {
             onClick={() => setSelectedKelasId(null)}
             className={
               selectedKelas
-                ? "text-slate-400 transition hover:text-blue-700"
-                : "font-semibold text-blue-700"
+                ? "text-slate-400 transition hover:text-slate-900"
+                : "font-semibold text-slate-900"
             }
           >
             Semua kelas
@@ -957,7 +957,7 @@ export default function AdminCatatanKasusPage() {
           {selectedKelas && (
             <>
               <Icon name="chevronRight" className="h-3 w-3 text-slate-300" />
-              <span className="font-semibold text-blue-700">
+              <span className="font-semibold text-slate-900">
                 {selectedKelas.nama_kelas}
               </span>
             </>
@@ -977,7 +977,7 @@ export default function AdminCatatanKasusPage() {
           />
 
           <div className="pt-1">
-            <h2 className="text-base font-semibold text-blue-700">
+            <h2 className="text-base font-semibold text-slate-900">
               Pilih kelas
             </h2>
             <p className="mt-0.5 text-xs text-slate-500">
@@ -997,14 +997,14 @@ export default function AdminCatatanKasusPage() {
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Cari nama kelas..."
                 aria-label="Cari nama kelas"
-                className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-800 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-800 shadow-sm outline-none transition focus:border-slate-900 focus:ring-2 focus:ring-slate-200"
               />
             </div>
             <select
               value={filterTingkat}
               onChange={(e) => setFilterTingkat(e.target.value)}
               aria-label="Filter tingkat"
-              className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 sm:w-48"
+              className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 shadow-sm outline-none transition focus:border-slate-900 focus:ring-2 focus:ring-slate-200 sm:w-48"
             >
               <option value="">Semua tingkat</option>
               {tingkatOptions.map((t) => (
@@ -1019,8 +1019,8 @@ export default function AdminCatatanKasusPage() {
               onClick={() => setOnlyBelumSync((v) => !v)}
               className={`inline-flex h-10 flex-shrink-0 items-center justify-center gap-2 rounded-xl border px-3.5 text-sm font-medium shadow-sm transition ${
                 onlyBelumSync
-                  ? "border-blue-600 bg-blue-600 text-white"
-                  : "border-slate-200 bg-white text-slate-600 hover:bg-blue-50 hover:text-blue-700"
+                  ? "border-slate-900 bg-slate-900 text-white"
+                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900"
               }`}
             >
               Belum sync saja
@@ -1039,7 +1039,7 @@ export default function AdminCatatanKasusPage() {
             </div>
           ) : filteredKelas.length === 0 ? (
             <div className="flex flex-col items-center rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-12 text-center">
-              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-blue-500">
+              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-500">
                 <Icon name="search" className="h-6 w-6" />
               </span>
               <p className="mt-4 text-sm font-semibold text-slate-800">
@@ -1066,25 +1066,25 @@ export default function AdminCatatanKasusPage() {
                     key={kelas.id}
                     type="button"
                     onClick={() => setSelectedKelasId(kelas.id)}
-                    className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-all duration-300 hover:border-blue-600 hover:bg-blue-600 hover:shadow-lg hover:shadow-blue-200 active:scale-[0.98]"
+                    className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-all duration-300 hover:border-slate-900 hover:bg-slate-900 hover:shadow-lg hover:shadow-slate-300 active:scale-[0.98]"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <h3 className="truncate text-base font-semibold text-slate-900 transition-colors duration-300 group-hover:text-white">
                           {kelas.nama_kelas}
                         </h3>
-                        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 transition-colors duration-300 group-hover:text-blue-100">
+                        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 transition-colors duration-300 group-hover:text-slate-300">
                           <span className="flex items-center gap-1">
                             <Icon
                               name="user"
-                              className="h-3.5 w-3.5 text-slate-400 transition-colors duration-300 group-hover:text-blue-200"
+                              className="h-3.5 w-3.5 text-slate-400 transition-colors duration-300 group-hover:text-slate-400"
                             />
                             Tingkat {kelas.tingkat}
                           </span>
                           <span className="flex items-center gap-1">
                             <Icon
                               name="users"
-                              className="h-3.5 w-3.5 text-slate-400 transition-colors duration-300 group-hover:text-blue-200"
+                              className="h-3.5 w-3.5 text-slate-400 transition-colors duration-300 group-hover:text-slate-400"
                             />
                             {siswaCountMap[kelas.id] || 0} siswa
                           </span>
@@ -1098,12 +1098,12 @@ export default function AdminCatatanKasusPage() {
 
                     <div className="mt-4 flex flex-wrap items-center gap-1.5 border-t border-slate-100 pt-3 transition-colors duration-300 group-hover:border-white/20">
                       {info.total === 0 ? (
-                        <span className="text-xs text-slate-400 transition-colors duration-300 group-hover:text-blue-100">
+                        <span className="text-xs text-slate-400 transition-colors duration-300 group-hover:text-slate-300">
                           Belum ada kasus
                         </span>
                       ) : (
                         <>
-                          <span className="rounded-full bg-blue-600 px-2 py-0.5 text-[11px] font-medium text-white transition-colors duration-300 group-hover:bg-white group-hover:text-blue-700">
+                          <span className="rounded-full bg-slate-900 px-2 py-0.5 text-[11px] font-medium text-white transition-colors duration-300 group-hover:bg-white group-hover:text-slate-900">
                             {info.total} kasus
                           </span>
                           {info.berat > 0 && (
@@ -1123,7 +1123,7 @@ export default function AdminCatatanKasusPage() {
                       </span>
                     </div>
 
-                    {/* Shimmer ala nilai */}
+                    {/* Shimmer */}
                     <div className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-white/0 via-white/15 to-white/0 transition-transform duration-700 group-hover:translate-x-full" />
                   </button>
                 );
@@ -1139,11 +1139,11 @@ export default function AdminCatatanKasusPage() {
           {/* Header kelas */}
           <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-5">
             <div className="flex min-w-0 items-center gap-3">
-              <span className="flex h-11 min-w-11 flex-shrink-0 items-center justify-center rounded-xl bg-blue-600 px-2 text-sm font-semibold text-white shadow-sm">
+              <span className="flex h-11 min-w-11 flex-shrink-0 items-center justify-center rounded-xl bg-slate-900 px-2 text-sm font-semibold text-white shadow-sm">
                 {getKelasBadge(selectedKelas)}
               </span>
               <div className="min-w-0">
-                <h2 className="truncate text-lg font-bold text-blue-700">
+                <h2 className="truncate text-lg font-bold text-slate-900">
                   {selectedKelas.nama_kelas}
                 </h2>
                 <p className="text-xs text-slate-500">
@@ -1155,7 +1155,7 @@ export default function AdminCatatanKasusPage() {
             <button
               type="button"
               onClick={() => setSelectedKelasId(null)}
-              className="inline-flex h-10 flex-shrink-0 items-center justify-center gap-2 self-start rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:bg-blue-50 hover:text-blue-700 sm:self-center"
+              className="inline-flex h-10 flex-shrink-0 items-center justify-center gap-2 self-start rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 transition hover:bg-slate-100 hover:text-slate-900 sm:self-center"
             >
               <Icon name="swap" />
               Ganti kelas
@@ -1182,7 +1182,7 @@ export default function AdminCatatanKasusPage() {
                 onChange={(e) => setSearchCatatan(e.target.value)}
                 placeholder="Cari nama siswa..."
                 aria-label="Cari nama siswa"
-                className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-800 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-800 shadow-sm outline-none transition focus:border-slate-900 focus:ring-2 focus:ring-slate-200"
               />
             </div>
             <div className="flex flex-wrap gap-2">
@@ -1229,7 +1229,7 @@ export default function AdminCatatanKasusPage() {
             </div>
           ) : filteredCatatan.length === 0 ? (
             <div className="flex flex-col items-center rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-12 text-center">
-              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-50 text-blue-500">
+              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-500">
                 <Icon
                   name={catatanList.length === 0 ? "file" : "search"}
                   className="h-6 w-6"
@@ -1258,7 +1258,7 @@ export default function AdminCatatanKasusPage() {
                     className={`relative overflow-hidden rounded-2xl border bg-white py-4 pl-5 pr-4 shadow-sm transition ${
                       synced
                         ? "border-emerald-200"
-                        : "border-slate-200 hover:border-blue-300"
+                        : "border-slate-200 hover:border-slate-400"
                     }`}
                   >
                     <span
@@ -1315,7 +1315,7 @@ export default function AdminCatatanKasusPage() {
                       </div>
 
                       {/* Switch sync SIAS */}
-                      <div className="flex flex-shrink-0 items-center gap-2.5 self-start rounded-xl bg-blue-50/70 px-3 py-2 ring-1 ring-blue-100 sm:self-start">
+                      <div className="flex flex-shrink-0 items-center gap-2.5 self-start rounded-xl bg-slate-50 px-3 py-2 ring-1 ring-slate-200 sm:self-start">
                         <div className="text-right leading-tight">
                           <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400">
                             Sync SIAS

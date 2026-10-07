@@ -1,8 +1,11 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { pb, isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
-import { KelasToolbarButtons } from "@/components/organism/dashboard Comp/component";
+import { pb } from "@/lib/pocketbase";
+
+/* ═══════════════════════════════════════════════════════════════
+   KONSTANTA
+   ═══════════════════════════════════════════════════════════════ */
 
 const TINGKAT_OPTIONS = ["1", "2", "3", "4", "5", "6"];
 const KATEGORI_OPTIONS = [
@@ -17,6 +20,10 @@ const TEMPLATE_HEADERS = [
   "kategori",
   "kelas",
 ];
+
+function cn(...c) {
+  return c.filter(Boolean).join(" ");
+}
 
 function todayStr() {
   const d = new Date();
@@ -57,11 +64,11 @@ function parseImportRows(rawRows, kelasList, existingCodes) {
   );
   const valid = [];
   const errors = [];
-  const seenCodes = new Map(); // kode -> nomor baris (deteksi duplikat dalam file)
+  const seenCodes = new Map();
   let skipped = 0;
 
   rawRows.forEach((row, idx) => {
-    const nomorBaris = idx + 2; // header = baris 1
+    const nomorBaris = idx + 2;
 
     const nama_mapel = String(row.nama_mapel ?? row["Nama Mapel"] ?? "").trim();
     const kode_mapel = String(row.kode_mapel ?? row["Kode Mapel"] ?? "")
@@ -77,7 +84,6 @@ function parseImportRows(rawRows, kelasList, existingCodes) {
       row.kelas ?? row["Kelas"] ?? row["Kelas Terkait"] ?? "",
     ).trim();
 
-    // baris komentar / benar-benar kosong → di-skip (bukan error)
     if (nama_mapel.startsWith("#")) {
       skipped++;
       return;
@@ -104,7 +110,6 @@ function parseImportRows(rawRows, kelasList, existingCodes) {
       ? kategoriRaw
       : "";
 
-    // resolusi kelas
     const kelasNames = kelasRaw
       .split(",")
       .map((s) => s.trim())
@@ -120,7 +125,6 @@ function parseImportRows(rawRows, kelasList, existingCodes) {
       messages.push(`kelas tidak ditemukan: ${notFound.join(", ")}`);
     }
 
-    // cek duplikat kode
     if (kode_mapel) {
       if (seenCodes.has(kode_mapel)) {
         messages.push(
@@ -164,6 +168,160 @@ function parseImportRows(rawRows, kelasList, existingCodes) {
   return { valid, errors, skipped, total: rawRows.length };
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   KOMPONEN UI LOKAL — TEMA HITAM
+   ═══════════════════════════════════════════════════════════════ */
+
+function ToolbarBtn({ onClick, children, variant = "default", disabled }) {
+  const styles =
+    variant === "primary"
+      ? "bg-gray-900 text-white hover:bg-black"
+      : "border border-gray-200 text-gray-700 bg-white hover:bg-gray-50";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        "inline-flex h-9 items-center gap-1.5 rounded-lg px-3.5 text-[12.5px] font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
+        styles,
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+function KelasToolbarButtons({ onTambah, onTemplate, onImport, onExport }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <ToolbarBtn variant="primary" onClick={onTambah}>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+        >
+          <line x1="12" y1="5" x2="12" y2="19" />
+          <line x1="5" y1="12" x2="19" y2="12" />
+        </svg>
+        Tambah Mapel
+      </ToolbarBtn>
+      <ToolbarBtn onClick={onTemplate}>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+        >
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+          <polyline points="7 10 12 15 17 10" />
+          <line x1="12" y1="15" x2="12" y2="3" />
+        </svg>
+        Template
+      </ToolbarBtn>
+      <ToolbarBtn onClick={onImport}>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+        >
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+          <polyline points="17 8 12 3 7 8" />
+          <line x1="12" y1="3" x2="12" y2="15" />
+        </svg>
+        Import
+      </ToolbarBtn>
+      <ToolbarBtn onClick={onExport}>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+        >
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+          <polyline points="7 10 12 15 17 10" />
+          <line x1="12" y1="15" x2="12" y2="3" />
+        </svg>
+        Export
+      </ToolbarBtn>
+    </div>
+  );
+}
+
+function StatCard({ label, value }) {
+  return (
+    <div className="rounded-2xl bg-white p-4 shadow-sm">
+      <p className="text-xs font-medium uppercase tracking-wide text-neutral-400">
+        {label}
+      </p>
+      <p className="mt-1.5 text-xl font-semibold text-neutral-900">{value}</p>
+    </div>
+  );
+}
+
+function LoadingState({ label }) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-3 py-32 text-neutral-400">
+      <div className="h-9 w-9 animate-spin rounded-full border-[3px] border-neutral-200 border-t-gray-900" />
+      <p className="text-sm">{label}</p>
+    </div>
+  );
+}
+
+function Field({ label, children }) {
+  return (
+    <label className="block">
+      <span className="mb-1.5 block text-xs font-medium text-neutral-500">
+        {label}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+function Modal({ children, onClose, narrow }) {
+  useEffect(() => {
+    const onKey = (e) => e.key === "Escape" && onClose();
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div
+        className="absolute inset-0 bg-gray-900/40 backdrop-blur-[2px]"
+        onClick={onClose}
+      />
+      <div
+        className={cn(
+          "relative w-full rounded-2xl bg-white p-6 shadow-xl",
+          narrow ? "max-w-sm" : "max-w-lg",
+        )}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   MAIN PAGE
+   ═══════════════════════════════════════════════════════════════ */
+
 export default function MataPelajaranPage() {
   const [mapelList, setMapelList] = useState([]);
   const [kelasList, setKelasList] = useState([]);
@@ -183,13 +341,9 @@ export default function MataPelajaranPage() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
-  // import states
   const [importPreview, setImportPreview] = useState(null);
-  // { fileName, valid[], errors[], skipped, total }
   const [importProgress, setImportProgress] = useState(null);
-  // { done, total } saat proses berjalan
   const [importResult, setImportResult] = useState(null);
-  // { success, failed:[{row,kode,messages}], skipped }
   const fileInputRef = useRef(null);
 
   const [toast, setToast] = useState("");
@@ -201,9 +355,6 @@ export default function MataPelajaranPage() {
 
   const isEditing = Boolean(form.id);
 
-  // ------------------------------------------------------------------
-  // Load data
-  // ------------------------------------------------------------------
   const loadData = useCallback(async () => {
     setLoading(true);
     setErrorBase("");
@@ -234,9 +385,6 @@ export default function MataPelajaranPage() {
     loadData();
   }, [loadData]);
 
-  // ------------------------------------------------------------------
-  // Filtering
-  // ------------------------------------------------------------------
   const filteredMapel = useMemo(() => {
     let list = mapelList;
     if (filterTingkat !== "semua") {
@@ -262,9 +410,6 @@ export default function MataPelajaranPage() {
     return list;
   }, [mapelList, search, filterTingkat, filterKategori]);
 
-  // ------------------------------------------------------------------
-  // Modal helpers (form)
-  // ------------------------------------------------------------------
   const openCreate = () => {
     setForm(emptyForm());
     setFormError("");
@@ -344,9 +489,6 @@ export default function MataPelajaranPage() {
     }));
   };
 
-  // ------------------------------------------------------------------
-  // Submit create / update
-  // ------------------------------------------------------------------
   const handleSubmit = async (e) => {
     e.preventDefault();
     setFormError("");
@@ -400,9 +542,6 @@ export default function MataPelajaranPage() {
     }
   };
 
-  // ------------------------------------------------------------------
-  // Delete
-  // ------------------------------------------------------------------
   const confirmDelete = async () => {
     if (!deleteTarget) return;
     setDeleting(true);
@@ -419,9 +558,6 @@ export default function MataPelajaranPage() {
     }
   };
 
-  // ------------------------------------------------------------------
-  // Download template (.xlsx)
-  // ------------------------------------------------------------------
   const handleDownloadTemplate = async () => {
     const XLSX = await import("xlsx");
     const wsData = [
@@ -464,14 +600,9 @@ export default function MataPelajaranPage() {
     XLSX.writeFile(wb, "template_mata_pelajaran.xlsx");
   };
 
-  // ------------------------------------------------------------------
-  // Export data saat ini (.xlsx)
-  // ------------------------------------------------------------------
   const handleExport = async () => {
-    // xlsx-js-style: fork dari xlsx yang mendukung cell styling saat write
     const XLSX = await import("xlsx-js-style");
 
-    // --- Susun baris data ---
     const rows = filteredMapel.map((m, i) => {
       const relatedKelas = m.expand?.spesifik_kelas_id
         ? Array.isArray(m.expand.spesifik_kelas_id)
@@ -513,7 +644,6 @@ export default function MataPelajaranPage() {
       `Total: ${rows.length} mapel`,
     ].join("   •   ");
 
-    // --- Bangun AOA: judul → meta → baris kosong → header → data ---
     const aoa = [
       [TITLE],
       [META],
@@ -531,31 +661,22 @@ export default function MataPelajaranPage() {
 
     const ws = XLSX.utils.aoa_to_sheet(aoa);
 
-    // --- Merge judul & meta sepanjang kolom ---
     ws["!merges"] = [
       { s: { r: 0, c: 0 }, e: { r: 0, c: HEADERS.length - 1 } },
       { s: { r: 1, c: 0 }, e: { r: 1, c: HEADERS.length - 1 } },
     ];
 
-    // --- Lebar kolom ---
     ws["!cols"] = [
-      { wch: 5 }, // No
-      { wch: 14 }, // Kode
-      { wch: 32 }, // Nama
-      { wch: 12 }, // Kategori
-      { wch: 22 }, // Tingkat
-      { wch: 42 }, // Kelas
+      { wch: 5 },
+      { wch: 14 },
+      { wch: 32 },
+      { wch: 12 },
+      { wch: 22 },
+      { wch: 42 },
     ];
 
-    // --- Tinggi baris ---
-    ws["!rows"] = [
-      { hpt: 30 }, // judul
-      { hpt: 18 }, // meta
-      { hpt: 6 }, // pemisah
-      { hpt: 24 }, // header
-    ];
+    ws["!rows"] = [{ hpt: 30 }, { hpt: 18 }, { hpt: 6 }, { hpt: 24 }];
 
-    // --- Autofilter di baris header ---
     ws["!autofilter"] = {
       ref: XLSX.utils.encode_range({
         s: { r: 3, c: 0 },
@@ -563,15 +684,13 @@ export default function MataPelajaranPage() {
       }),
     };
 
-    // --- Freeze pane: header tetap terlihat saat scroll ---
-    // (didukung oleh xlsx-js-style pada write xlsx)
     ws["!freeze"] = "A5";
 
-    // --- Style ---
     const range = XLSX.utils.decode_range(ws["!ref"]);
 
+    // Semua warna → hitam monokrom
     const styleTitle = {
-      font: { bold: true, sz: 15, color: { rgb: "1E3A8A" } },
+      font: { bold: true, sz: 15, color: { rgb: "111827" } },
       alignment: { horizontal: "center", vertical: "center" },
     };
     const styleMeta = {
@@ -586,13 +705,13 @@ export default function MataPelajaranPage() {
     };
     const styleHeader = {
       font: { bold: true, sz: 11, color: { rgb: "FFFFFF" } },
-      fill: { fgColor: { rgb: "2563EB" } }, // biru
+      fill: { fgColor: { rgb: "111827" } }, // hitam
       alignment: { horizontal: "center", vertical: "center", wrapText: true },
       border: {
-        top: { style: "thin", color: { rgb: "1E40AF" } },
-        bottom: { style: "thin", color: { rgb: "1E40AF" } },
-        left: { style: "thin", color: { rgb: "1E40AF" } },
-        right: { style: "thin", color: { rgb: "1E40AF" } },
+        top: { style: "thin", color: { rgb: "000000" } },
+        bottom: { style: "thin", color: { rgb: "000000" } },
+        left: { style: "thin", color: { rgb: "000000" } },
+        right: { style: "thin", color: { rgb: "000000" } },
       },
     };
     const styleCell = {
@@ -606,7 +725,7 @@ export default function MataPelajaranPage() {
     };
     const styleKategori = {
       ...styleCellCenter,
-      font: { sz: 11, bold: true, color: { rgb: "1D4ED8" } },
+      font: { sz: 11, bold: true, color: { rgb: "111827" } },
     };
     const fillAlt = { fill: { fgColor: { rgb: "F1F5F9" } } };
 
@@ -636,21 +755,16 @@ export default function MataPelajaranPage() {
       }
     }
 
-    // --- Simpan ---
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Mata Pelajaran");
     XLSX.writeFile(wb, `mata_pelajaran_${todayStr()}.xlsx`);
     setToast("Data mata pelajaran berhasil diexport.");
   };
 
-  // ------------------------------------------------------------------
-  // IMPORT — 3 tahap: pilih file → preview → konfirmasi
-  // ------------------------------------------------------------------
   const handleImportClick = () => {
     fileInputRef.current?.click();
   };
 
-  // Tahap 1: baca file → validasi → tampilkan preview
   const handleImportFile = async (e) => {
     const file = e.target.files?.[0];
     e.target.value = "";
@@ -691,7 +805,6 @@ export default function MataPelajaranPage() {
     }
   };
 
-  // Tahap 2: konfirmasi import
   const confirmImport = async () => {
     if (!importPreview || importPreview.valid.length === 0) return;
 
@@ -732,9 +845,6 @@ export default function MataPelajaranPage() {
     setImportProgress(null);
   };
 
-  // ------------------------------------------------------------------
-  // Render helper card mobile
-  // ------------------------------------------------------------------
   const renderMapelCard = (m) => {
     const relatedKelas = m.expand?.spesifik_kelas_id
       ? Array.isArray(m.expand.spesifik_kelas_id)
@@ -750,11 +860,11 @@ export default function MataPelajaranPage() {
         <div className="flex items-start justify-between mb-2">
           <div>
             <div className="flex items-center gap-2 mb-1 flex-wrap">
-              <span className="rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-semibold text-neutral-600">
+              <span className="rounded-full bg-gray-900 px-2.5 py-1 text-xs font-semibold text-white">
                 {m.kode_mapel}
               </span>
               {m.kategori && (
-                <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 ring-1 ring-blue-200">
+                <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700 ring-1 ring-zinc-200">
                   {kategoriLabel(m.kategori)}
                 </span>
               )}
@@ -767,7 +877,7 @@ export default function MataPelajaranPage() {
               {(m.target_tingkat || []).map((t) => (
                 <span
                   key={t}
-                  className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 ring-1 ring-blue-200"
+                  className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700 ring-1 ring-zinc-200"
                 >
                   Tingkat {t}
                 </span>
@@ -777,7 +887,7 @@ export default function MataPelajaranPage() {
           <div className="flex gap-1 flex-shrink-0">
             <button
               onClick={() => openEdit(m)}
-              className="rounded-lg p-2 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700"
+              className="rounded-lg p-2 text-neutral-400 transition hover:bg-gray-900 hover:text-white"
               title="Edit"
             >
               <svg
@@ -796,7 +906,7 @@ export default function MataPelajaranPage() {
             </button>
             <button
               onClick={() => setDeleteTarget(m)}
-              className="rounded-lg p-2 text-neutral-400 transition hover:bg-rose-50 hover:text-rose-600"
+              className="rounded-lg p-2 text-neutral-400 transition hover:bg-gray-900 hover:text-white"
               title="Hapus"
             >
               <svg
@@ -841,7 +951,6 @@ export default function MataPelajaranPage() {
           onTambah={openCreate}
           onTemplate={handleDownloadTemplate}
         />
-        {/* input file tersembunyi */}
         <input
           ref={fileInputRef}
           type="file"
@@ -854,13 +963,7 @@ export default function MataPelajaranPage() {
         {/* Banner hasil import */}
         {importResult &&
           (importResult.failed?.length > 0 || importResult.success > 0) && (
-            <div
-              className={`mb-6 rounded-2xl border px-5 py-4 text-sm ${
-                importResult.failed?.length > 0
-                  ? "border-amber-200 bg-amber-50 text-amber-800"
-                  : "border-emerald-200 bg-emerald-50 text-emerald-800"
-              }`}
-            >
+            <div className="mb-6 rounded-2xl border border-zinc-200 bg-zinc-50 px-5 py-4 text-sm text-zinc-800">
               <div className="flex items-center justify-between gap-3">
                 <p className="font-medium">
                   {importResult.success} baris berhasil diimpor
@@ -893,7 +996,7 @@ export default function MataPelajaranPage() {
           )}
 
         {errorBase && (
-          <div className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">
+          <div className="mb-6 rounded-2xl border border-zinc-200 bg-zinc-50 px-5 py-4 text-sm text-zinc-800">
             {errorBase}
           </div>
         )}
@@ -938,13 +1041,13 @@ export default function MataPelajaranPage() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Cari nama / kode mapel"
-                className="w-full sm:w-auto rounded-full border border-neutral-200 bg-neutral-50 py-2 pl-9 pr-3 text-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                className="w-full sm:w-auto rounded-full border border-neutral-200 bg-neutral-50 py-2 pl-9 pr-3 text-sm focus:border-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-900/10"
               />
             </div>
             <select
               value={filterKategori}
               onChange={(e) => setFilterKategori(e.target.value)}
-              className="rounded-full border border-neutral-200 bg-white px-4 py-2 text-sm shadow-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+              className="rounded-full border border-neutral-200 bg-white px-4 py-2 text-sm shadow-sm focus:border-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-900/10"
             >
               <option value="semua">Semua kategori</option>
               {KATEGORI_OPTIONS.map((k) => (
@@ -957,7 +1060,7 @@ export default function MataPelajaranPage() {
             <select
               value={filterTingkat}
               onChange={(e) => setFilterTingkat(e.target.value)}
-              className="rounded-full border border-neutral-200 bg-white px-4 py-2 text-sm shadow-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+              className="rounded-full border border-neutral-200 bg-white px-4 py-2 text-sm shadow-sm focus:border-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-900/10"
             >
               <option value="semua">Semua tingkat</option>
               {TINGKAT_OPTIONS.map((t) => (
@@ -1022,7 +1125,7 @@ export default function MataPelajaranPage() {
                           className="transition hover:bg-neutral-50/60"
                         >
                           <td className="px-5 py-3 whitespace-nowrap">
-                            <span className="rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-semibold text-neutral-600">
+                            <span className="rounded-full bg-gray-900 px-2.5 py-1 text-xs font-semibold text-white">
                               {m.kode_mapel}
                             </span>
                           </td>
@@ -1031,7 +1134,7 @@ export default function MataPelajaranPage() {
                           </td>
                           <td className="px-5 py-3 whitespace-nowrap">
                             {m.kategori ? (
-                              <span className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 ring-1 ring-blue-200">
+                              <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700 ring-1 ring-zinc-200">
                                 {kategoriLabel(m.kategori)}
                               </span>
                             ) : (
@@ -1045,7 +1148,7 @@ export default function MataPelajaranPage() {
                               {(m.target_tingkat || []).map((t) => (
                                 <span
                                   key={t}
-                                  className="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 ring-1 ring-blue-200"
+                                  className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-700 ring-1 ring-zinc-200"
                                 >
                                   {t}
                                 </span>
@@ -1073,7 +1176,7 @@ export default function MataPelajaranPage() {
                             <div className="flex justify-end gap-1.5">
                               <button
                                 onClick={() => openEdit(m)}
-                                className="rounded-lg p-2 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700"
+                                className="rounded-lg p-2 text-neutral-400 transition hover:bg-gray-900 hover:text-white"
                                 title="Edit"
                               >
                                 <svg
@@ -1092,7 +1195,7 @@ export default function MataPelajaranPage() {
                               </button>
                               <button
                                 onClick={() => setDeleteTarget(m)}
-                                className="rounded-lg p-2 text-neutral-400 transition hover:bg-rose-50 hover:text-rose-600"
+                                className="rounded-lg p-2 text-neutral-400 transition hover:bg-gray-900 hover:text-white"
                                 title="Hapus"
                               >
                                 <svg
@@ -1122,9 +1225,7 @@ export default function MataPelajaranPage() {
         )}
       </div>
 
-      {/* ---------------------------------------------------------- */}
-      {/* Modal: form create / edit                                  */}
-      {/* ---------------------------------------------------------- */}
+      {/* Modal: form create / edit */}
       {modalOpen && (
         <Modal onClose={closeModal}>
           <form onSubmit={handleSubmit} className="space-y-5">
@@ -1140,7 +1241,7 @@ export default function MataPelajaranPage() {
             </div>
 
             {formError && (
-              <div className="rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">
+              <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3.5 py-2.5 text-sm text-zinc-800">
                 {formError}
               </div>
             )}
@@ -1153,7 +1254,7 @@ export default function MataPelajaranPage() {
                     setForm((p) => ({ ...p, nama_mapel: e.target.value }))
                   }
                   placeholder="mis. Matematika"
-                  className="w-full rounded-xl border border-neutral-200 bg-neutral-50 px-3.5 py-2.5 text-sm focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                  className="w-full rounded-xl border border-neutral-200 bg-neutral-50 px-3.5 py-2.5 text-sm focus:border-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-900/10"
                 />
               </Field>
               <Field label="Kode mapel">
@@ -1163,7 +1264,7 @@ export default function MataPelajaranPage() {
                     setForm((p) => ({ ...p, kode_mapel: e.target.value }))
                   }
                   placeholder="mis. MTK"
-                  className="w-full rounded-xl border border-neutral-200 bg-neutral-50 px-3.5 py-2.5 text-sm uppercase focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                  className="w-full rounded-xl border border-neutral-200 bg-neutral-50 px-3.5 py-2.5 text-sm uppercase focus:border-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-900/10"
                 />
               </Field>
             </div>
@@ -1177,11 +1278,12 @@ export default function MataPelajaranPage() {
                       type="button"
                       key={k.value}
                       onClick={() => toggleKategori(k.value)}
-                      className={`rounded-full px-4 py-2 text-sm font-medium transition ${
+                      className={cn(
+                        "rounded-full px-4 py-2 text-sm font-medium transition",
                         active
-                          ? "bg-blue-500 text-white shadow-sm"
-                          : "bg-neutral-100 text-neutral-500 hover:bg-neutral-200"
-                      }`}
+                          ? "bg-gray-900 text-white shadow-sm"
+                          : "bg-neutral-100 text-neutral-500 hover:bg-neutral-200",
+                      )}
                     >
                       {k.label}
                     </button>
@@ -1191,7 +1293,7 @@ export default function MataPelajaranPage() {
                   <button
                     type="button"
                     onClick={() => setForm((p) => ({ ...p, kategori: "" }))}
-                    className="rounded-full px-4 py-2 text-sm font-medium text-neutral-400 transition hover:bg-neutral-100 hover:text-rose-600"
+                    className="rounded-full px-4 py-2 text-sm font-medium text-neutral-400 transition hover:bg-neutral-100 hover:text-gray-900"
                   >
                     Kosongkan
                   </button>
@@ -1212,11 +1314,12 @@ export default function MataPelajaranPage() {
                       type="button"
                       key={t}
                       onClick={() => toggleTingkat(t)}
-                      className={`h-9 w-9 rounded-full text-sm font-medium transition ${
+                      className={cn(
+                        "h-9 w-9 rounded-full text-sm font-medium transition",
                         active
-                          ? "bg-blue-500 text-white shadow-sm"
-                          : "bg-neutral-100 text-neutral-500 hover:bg-neutral-200"
-                      }`}
+                          ? "bg-gray-900 text-white shadow-sm"
+                          : "bg-neutral-100 text-neutral-500 hover:bg-neutral-200",
+                      )}
                     >
                       {t}
                     </button>
@@ -1253,7 +1356,7 @@ export default function MataPelajaranPage() {
                       value={kelasSearch}
                       onChange={(e) => setKelasSearch(e.target.value)}
                       placeholder="Cari kelas..."
-                      className="mb-2 w-full rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-1.5 text-xs focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                      className="mb-2 w-full rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-1.5 text-xs focus:border-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-900/10"
                     />
                   )}
 
@@ -1283,7 +1386,7 @@ export default function MataPelajaranPage() {
                               <span className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
                                 Tingkat {t}{" "}
                                 {selectedCount > 0 && (
-                                  <span className="text-blue-600">
+                                  <span className="text-gray-900">
                                     · {selectedCount}/{kelasTingkatIni.length}{" "}
                                     dipilih
                                   </span>
@@ -1293,7 +1396,7 @@ export default function MataPelajaranPage() {
                                 <button
                                   type="button"
                                   onClick={() => selectAllKelasByTingkat(t)}
-                                  className="text-[11px] font-medium text-neutral-500 hover:text-blue-600"
+                                  className="text-[11px] font-medium text-neutral-500 hover:text-gray-900"
                                 >
                                   Semua
                                 </button>
@@ -1303,7 +1406,7 @@ export default function MataPelajaranPage() {
                                 <button
                                   type="button"
                                   onClick={() => clearKelasByTingkat(t)}
-                                  className="text-[11px] font-medium text-neutral-500 hover:text-rose-600"
+                                  className="text-[11px] font-medium text-neutral-500 hover:text-gray-900"
                                 >
                                   Kosongkan
                                 </button>
@@ -1319,11 +1422,12 @@ export default function MataPelajaranPage() {
                                     type="button"
                                     key={k.id}
                                     onClick={() => toggleKelas(k.id)}
-                                    className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${
+                                    className={cn(
+                                      "rounded-lg px-2.5 py-1.5 text-xs font-medium transition",
                                       active
-                                        ? "bg-blue-500 text-white shadow-sm"
-                                        : "bg-neutral-100 text-neutral-500 hover:bg-neutral-200"
-                                    }`}
+                                        ? "bg-gray-900 text-white shadow-sm"
+                                        : "bg-neutral-100 text-neutral-500 hover:bg-neutral-200",
+                                    )}
                                   >
                                     {k.nama_kelas}
                                   </button>
@@ -1341,7 +1445,7 @@ export default function MataPelajaranPage() {
                       onClick={() =>
                         setForm((p) => ({ ...p, spesifik_kelas_id: [] }))
                       }
-                      className="mt-2 text-xs font-medium text-neutral-400 hover:text-rose-600"
+                      className="mt-2 text-xs font-medium text-neutral-400 hover:text-gray-900"
                     >
                       Kosongkan semua pilihan ({form.spesifik_kelas_id.length})
                     </button>
@@ -1362,7 +1466,7 @@ export default function MataPelajaranPage() {
               <button
                 type="submit"
                 disabled={saving}
-                className="flex items-center gap-1.5 rounded-full bg-neutral-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-neutral-800 disabled:opacity-50"
+                className="flex items-center gap-1.5 rounded-full bg-gray-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-black disabled:opacity-50"
               >
                 {saving && (
                   <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
@@ -1374,9 +1478,7 @@ export default function MataPelajaranPage() {
         </Modal>
       )}
 
-      {/* ---------------------------------------------------------- */}
-      {/* Modal: import preview                                      */}
-      {/* ---------------------------------------------------------- */}
+      {/* Modal: import preview */}
       {importPreview && (
         <Modal onClose={() => !importProgress && cancelImport()}>
           <div className="space-y-4">
@@ -1392,21 +1494,20 @@ export default function MataPelajaranPage() {
               </p>
             </div>
 
-            {/* Ringkasan */}
             <div className="grid grid-cols-3 gap-2">
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2">
-                <p className="text-[11px] font-medium uppercase tracking-wide text-emerald-700">
+              <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-600">
                   Siap diimport
                 </p>
-                <p className="text-lg font-semibold text-emerald-800">
+                <p className="text-lg font-semibold text-zinc-900">
                   {importPreview.valid.length}
                 </p>
               </div>
-              <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2">
-                <p className="text-[11px] font-medium uppercase tracking-wide text-rose-700">
+              <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-600">
                   Error
                 </p>
-                <p className="text-lg font-semibold text-rose-800">
+                <p className="text-lg font-semibold text-zinc-900">
                   {importPreview.errors.length}
                 </p>
               </div>
@@ -1420,7 +1521,6 @@ export default function MataPelajaranPage() {
               </div>
             </div>
 
-            {/* Preview baris valid */}
             {importPreview.valid.length > 0 && (
               <div>
                 <p className="mb-1.5 text-xs font-medium text-neutral-500">
@@ -1468,20 +1568,19 @@ export default function MataPelajaranPage() {
               </div>
             )}
 
-            {/* Error per baris */}
             {importPreview.errors.length > 0 && (
               <div>
-                <p className="mb-1.5 text-xs font-medium text-rose-600">
+                <p className="mb-1.5 text-xs font-medium text-zinc-700">
                   Baris bermasalah ({importPreview.errors.length})
                 </p>
-                <ul className="max-h-40 space-y-1.5 overflow-y-auto rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs">
+                <ul className="max-h-40 space-y-1.5 overflow-y-auto rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-xs">
                   {importPreview.errors.map((err) => (
-                    <li key={err.row} className="text-rose-700">
+                    <li key={err.row} className="text-zinc-800">
                       <span className="font-semibold">Baris {err.row}</span>
                       {err.kode !== "—" && (
-                        <span className="text-rose-500"> · {err.kode}</span>
+                        <span className="text-zinc-500"> · {err.kode}</span>
                       )}
-                      <span className="block text-rose-600/90">
+                      <span className="block text-zinc-600">
                         {err.messages.join("; ")}
                       </span>
                     </li>
@@ -1491,26 +1590,25 @@ export default function MataPelajaranPage() {
             )}
 
             {importPreview.valid.length === 0 && (
-              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-800">
+              <div className="rounded-xl border border-zinc-200 bg-zinc-50 px-3.5 py-2.5 text-xs text-zinc-800">
                 Tidak ada baris valid untuk diimport. Perbaiki file lalu coba
                 lagi.
               </div>
             )}
 
-            {/* Progress bar */}
             {importProgress && (
-              <div className="rounded-xl border border-blue-200 bg-blue-50 p-3">
+              <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3">
                 <div className="mb-1.5 flex items-center justify-between text-xs">
-                  <span className="font-medium text-blue-800">
+                  <span className="font-medium text-zinc-800">
                     Mengimport...
                   </span>
-                  <span className="text-blue-700">
+                  <span className="text-zinc-700">
                     {importProgress.done}/{importProgress.total}
                   </span>
                 </div>
-                <div className="h-2 overflow-hidden rounded-full bg-blue-100">
+                <div className="h-2 overflow-hidden rounded-full bg-zinc-200">
                   <div
-                    className="h-full rounded-full bg-blue-500 transition-all"
+                    className="h-full rounded-full bg-gray-900 transition-all"
                     style={{
                       width: `${importProgress.total === 0 ? 0 : (importProgress.done / importProgress.total) * 100}%`,
                     }}
@@ -1532,7 +1630,7 @@ export default function MataPelajaranPage() {
                 type="button"
                 onClick={confirmImport}
                 disabled={!!importProgress || importPreview.valid.length === 0}
-                className="flex items-center gap-1.5 rounded-full bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:opacity-50"
+                className="flex items-center gap-1.5 rounded-full bg-gray-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-black disabled:opacity-50"
               >
                 {importProgress && (
                   <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
@@ -1544,13 +1642,11 @@ export default function MataPelajaranPage() {
         </Modal>
       )}
 
-      {/* ---------------------------------------------------------- */}
-      {/* Modal: delete confirm                                      */}
-      {/* ---------------------------------------------------------- */}
+      {/* Modal: delete confirm */}
       {deleteTarget && (
         <Modal onClose={() => !deleting && setDeleteTarget(null)} narrow>
           <div className="space-y-4">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-rose-50 text-rose-500">
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gray-900 text-white">
               <svg
                 className="h-5 w-5"
                 viewBox="0 0 24 24"
@@ -1587,7 +1683,7 @@ export default function MataPelajaranPage() {
               <button
                 onClick={confirmDelete}
                 disabled={deleting}
-                className="flex items-center gap-1.5 rounded-full bg-rose-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-rose-700 disabled:opacity-50"
+                className="flex items-center gap-1.5 rounded-full bg-gray-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-black disabled:opacity-50"
               >
                 {deleting && (
                   <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
@@ -1601,66 +1697,10 @@ export default function MataPelajaranPage() {
 
       {/* Toast */}
       {toast && (
-        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-neutral-900 px-4 py-2.5 text-sm font-medium text-white shadow-lg">
+        <div className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full bg-gray-900 px-4 py-2.5 text-sm font-medium text-white shadow-lg">
           {toast}
         </div>
       )}
-    </div>
-  );
-}
-
-// ------------------------------------------------------------------
-// Primitives
-// ------------------------------------------------------------------
-function StatCard({ label, value }) {
-  return (
-    <div className="rounded-2xl bg-white p-4 shadow-sm">
-      <p className="text-xs font-medium uppercase tracking-wide text-neutral-400">
-        {label}
-      </p>
-      <p className="mt-1.5 text-xl font-semibold text-neutral-900">{value}</p>
-    </div>
-  );
-}
-
-function LoadingState({ label }) {
-  return (
-    <div className="flex flex-col items-center justify-center gap-3 py-32 text-neutral-400">
-      <div className="h-9 w-9 animate-spin rounded-full border-[3px] border-neutral-200 border-t-blue-500" />
-      <p className="text-sm">{label}</p>
-    </div>
-  );
-}
-
-function Field({ label, children }) {
-  return (
-    <label className="block">
-      <span className="mb-1.5 block text-xs font-medium text-neutral-500">
-        {label}
-      </span>
-      {children}
-    </label>
-  );
-}
-
-function Modal({ children, onClose, narrow }) {
-  useEffect(() => {
-    const onKey = (e) => e.key === "Escape" && onClose();
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div
-        className="absolute inset-0 bg-neutral-900/40 backdrop-blur-[2px]"
-        onClick={onClose}
-      />
-      <div
-        className={`relative w-full ${narrow ? "max-w-sm" : "max-w-lg"} rounded-2xl bg-white p-6 shadow-xl`}
-      >
-        {children}
-      </div>
     </div>
   );
 }

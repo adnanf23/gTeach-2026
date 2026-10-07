@@ -2,22 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-// Sesuaikan path import berikut dengan lokasi file pocketbase client di project-mu
 import { pb, isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
 
-// Role user yang dianggap "guru" dan bisa diploting mengajar mapel/kelas.
-// Admin & ICT sengaja tidak dimasukkan karena mereka bukan pengajar.
+/* ═══════════════════════════════════════════════════════════════
+   KONSTANTA & HELPER
+   ═══════════════════════════════════════════════════════════════ */
+
 const GURU_ROLES = ["guru walikelas", "guru pendamping", "guru mapel"];
 
-// =========================================================
-// Helper
-// =========================================================
-// Kelas mana saja yang "berhak" untuk sebuah mapel: kelas dengan tingkat
-// yang ada di mapel.target_tingkat, ATAU kelas yang ditandai secara spesifik
-// di mapel.spesifik_kelas_id. Inilah sumber kebenaran, bukan input manual.
-// Aturan: kalau spesifik_kelas_id TERISI, target_tingkat diabaikan sepenuhnya
-// (mapel hanya berlaku utk kelas yg tercantum). Kalau KOSONG, berlaku untuk
-// semua kelas yang tingkatnya cocok target_tingkat.
 function eligibleKelasForMapel(mapel, kelasList) {
   if (!mapel) return [];
   const specificIds = mapel.spesifik_kelas_id || [];
@@ -40,21 +32,8 @@ function mapelSubtitle(mapel) {
   return "";
 }
 
-// Warna avatar guru: konsisten per guru (di-hash dari id)
-const AVATAR_STYLES = [
-  "bg-indigo-100 text-indigo-700",
-  "bg-sky-100 text-sky-700",
-  "bg-emerald-100 text-emerald-700",
-  "bg-amber-100 text-amber-700",
-  "bg-rose-100 text-rose-700",
-  "bg-violet-100 text-violet-700",
-  "bg-teal-100 text-teal-700",
-];
-
-function avatarStyle(id = "") {
-  let h = 0;
-  for (const c of String(id)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return AVATAR_STYLES[h % AVATAR_STYLES.length];
+function avatarStyle() {
+  return "bg-gray-900 text-white";
 }
 
 function initials(name = "") {
@@ -64,11 +43,12 @@ function initials(name = "") {
 }
 
 const fieldClass =
-  "h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 shadow-sm transition focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20";
+  "h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-800 shadow-sm transition focus:border-gray-900 focus:outline-none focus:ring-2 focus:ring-gray-900/10";
 
-// =========================================================
-// Ikon (inline SVG, tanpa dependency tambahan)
-// =========================================================
+/* ═══════════════════════════════════════════════════════════════
+   IKON
+   ═══════════════════════════════════════════════════════════════ */
+
 const ICON_PATHS = {
   search: (
     <>
@@ -144,9 +124,10 @@ function Spinner({ className = "h-4 w-4" }) {
   );
 }
 
-// =========================================================
-// Popup notifikasi (toast)
-// =========================================================
+/* ═══════════════════════════════════════════════════════════════
+   TOAST — hitam monokrom
+   ═══════════════════════════════════════════════════════════════ */
+
 function Toast({ toast, onClose }) {
   useEffect(() => {
     if (!toast) return;
@@ -155,7 +136,6 @@ function Toast({ toast, onClose }) {
   }, [toast, onClose]);
 
   if (!toast) return null;
-  const isSuccess = toast.type === "success";
 
   return (
     <div className="pointer-events-none fixed inset-x-0 top-4 z-50 flex justify-center px-4">
@@ -163,16 +143,15 @@ function Toast({ toast, onClose }) {
         role="alert"
         className="pointer-events-auto flex w-full max-w-sm animate-[toast-in_0.25s_ease-out] items-start gap-3 rounded-2xl border border-slate-200 bg-white p-3.5 shadow-xl shadow-slate-900/10 motion-reduce:animate-none"
       >
-        <span
-          className={`mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-white ${
-            isSuccess ? "bg-emerald-500" : "bg-rose-500"
-          }`}
-        >
-          <Icon name={isSuccess ? "check" : "alert"} className="h-3.5 w-3.5" />
+        <span className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-gray-900 text-white">
+          <Icon
+            name={toast.type === "success" ? "check" : "alert"}
+            className="h-3.5 w-3.5"
+          />
         </span>
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold text-slate-900">
-            {isSuccess ? "Berhasil" : "Terjadi masalah"}
+            {toast.type === "success" ? "Berhasil" : "Terjadi masalah"}
           </p>
           <p className="mt-0.5 text-sm text-slate-500">{toast.text}</p>
         </div>
@@ -190,10 +169,13 @@ function Toast({ toast, onClose }) {
 
 const emptyForm = { guruId: "", mapelId: "" };
 
-export default function PlotingGuruPageAdmin() {
+/* ═══════════════════════════════════════════════════════════════
+   MAIN PAGE
+   ═══════════════════════════════════════════════════════════════ */
+
+export default function PlotingGuruPage() {
   const router = useRouter();
 
-  // ---------------- Auth ----------------
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [user, setUser] = useState(null);
 
@@ -208,7 +190,6 @@ export default function PlotingGuruPageAdmin() {
 
   const canManage = user && (user.role === "admin" || user.role === "ict");
 
-  // ---------------- Data master ----------------
   const [guruList, setGuruList] = useState([]);
   const [mapelList, setMapelList] = useState([]);
   const [kelasList, setKelasList] = useState([]);
@@ -253,7 +234,6 @@ export default function PlotingGuruPageAdmin() {
     loadAll();
   }, [user, loadAll]);
 
-  // Lookup cepat by id
   const guruById = useMemo(
     () => Object.fromEntries(guruList.map((g) => [g.id, g])),
     [guruList],
@@ -267,9 +247,6 @@ export default function PlotingGuruPageAdmin() {
     [kelasList],
   );
 
-  // ---------------- Sorted list ----------------
-  // Satu baris ploting_guru = satu kombinasi guru + mapel, dengan kelas_id
-  // berupa array (multi-select). Tampilannya dikelompokkan per guru.
   const sortedPloting = useMemo(() => {
     return [...plotingList].sort((a, b) => {
       const na = guruById[a.guru_id]?.nama_lengkap || "";
@@ -282,8 +259,6 @@ export default function PlotingGuruPageAdmin() {
     });
   }, [plotingList, guruById, mapelById]);
 
-  // Ploting yang kelas tersimpannya sudah beda dengan kelas yang seharusnya
-  // berlaku sekarang (mis. target_tingkat mapel berubah setelah ploting dibuat).
   const outOfSyncIds = useMemo(() => {
     const set = new Set();
     for (const r of plotingList) {
@@ -307,7 +282,6 @@ export default function PlotingGuruPageAdmin() {
     [plotingList],
   );
 
-  // ---------------- Pencarian ----------------
   const [search, setSearch] = useState("");
   const filteredPloting = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -326,7 +300,6 @@ export default function PlotingGuruPageAdmin() {
     });
   }, [sortedPloting, search, guruById, mapelById, kelasById]);
 
-  // Kelompokkan per guru untuk tampilan
   const groups = useMemo(() => {
     const map = new Map();
     for (const r of filteredPloting) {
@@ -339,9 +312,10 @@ export default function PlotingGuruPageAdmin() {
     return [...map.values()];
   }, [filteredPloting, guruById]);
 
-  // ---------------- Form modal (create / edit) ----------------
+  /* ── Form modal ─────────────────────────────────────────────── */
+
   const [modalOpen, setModalOpen] = useState(false);
-  const [editingRecord, setEditingRecord] = useState(null); // record ploting_guru asal saat mode edit
+  const [editingRecord, setEditingRecord] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [formError, setFormError] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -356,8 +330,6 @@ export default function PlotingGuruPageAdmin() {
     [eligibleKelas],
   );
 
-  // Kelas yang sudah tersimpan di record yang sedang diedit (buat preview
-  // "tetap" vs "baru ditambah" vs "akan dilepas" ketika mapel/guru berubah).
   const originalKelasIds = useMemo(
     () => new Set(editingRecord?.kelas_id || []),
     [editingRecord],
@@ -388,7 +360,6 @@ export default function PlotingGuruPageAdmin() {
     setModalOpen(false);
   }
 
-  // Tutup modal dengan tombol Escape
   useEffect(() => {
     if (!modalOpen) return;
     function onKey(e) {
@@ -417,7 +388,6 @@ export default function PlotingGuruPageAdmin() {
       return;
     }
 
-    // Cegah duplikat: satu guru + satu mapel cuma boleh punya 1 record ploting.
     const duplikat = plotingList.find(
       (r) =>
         r.guru_id === form.guruId &&
@@ -436,10 +406,6 @@ export default function PlotingGuruPageAdmin() {
       const eligibleIds = eligible.map((k) => k.id);
 
       if (editingRecord) {
-        // Kalau guru atau mapel diganti (bukan sekadar sinkron ulang kelas),
-        // cek dulu apakah ploting lama ini sudah punya Lingkup Materi / Nilai
-        // Ujian. Kalau ada, JANGAN diubah diam-diam -- academic data bisa jadi
-        // tidak nyambung lagi. Arahkan user hapus dulu lewat tombol "Hapus".
         const guruOrMapelBerubah =
           editingRecord.guru_id !== form.guruId ||
           editingRecord.mapel_id !== form.mapelId;
@@ -456,7 +422,7 @@ export default function PlotingGuruPageAdmin() {
           ]);
           if (lingkup.length > 0 || nilaiUjian.length > 0) {
             setFormError(
-              `Tidak bisa mengganti guru/mapel di sini karena masih ada ${lingkup.length} lingkup materi dan ${nilaiUjian.length} nilai ujian terkait ploting ini. Hapus dulu ploting ini lewat tombol "Hapus" di daftar (akan menampilkan ringkasan data yang ikut terhapus), lalu buat ploting baru.`,
+              `Tidak bisa mengganti guru/mapel di sini karena masih ada ${lingkup.length} lingkup materi dan ${nilaiUjian.length} nilai ujian terkait ploting ini. Hapus dulu ploting ini lewat tombol "Hapus" di daftar, lalu buat ploting baru.`,
             );
             setSaving(false);
             return;
@@ -502,16 +468,12 @@ export default function PlotingGuruPageAdmin() {
     }
   }
 
-  // ---------------- Hapus record ----------------
+  /* ── Hapus ──────────────────────────────────────────────────── */
+
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [deleting, setDeleting] = useState(false);
-  // Ringkasan data terkait (lingkup materi / nilai) yang akan ikut terhapus
-  const [deleteImpact, setDeleteImpact] = useState(null); // { id, loading, error, lingkupIds, nilaiUjianIds, nilaiHarianCount, lingkupCount, nilaiUjianCount }
+  const [deleteImpact, setDeleteImpact] = useState(null);
 
-  // Sebelum menghapus, cek dulu apakah ploting ini masih dipakai oleh Lingkup
-  // Materi / Nilai Ujian / Nilai Harian. PocketBase menolak (400) menghapus
-  // record yang masih direferensikan oleh relasi WAJIB di collection lain,
-  // jadi kita perlu bersihkan turunannya dulu sebelum menghapus ploting_guru-nya.
   async function prepareDeleteRecord(record) {
     setConfirmDeleteId(record.id);
     setDeleteImpact({ id: record.id, loading: true });
@@ -560,8 +522,6 @@ export default function PlotingGuruPageAdmin() {
         deleteImpact && deleteImpact.id === record.id ? deleteImpact : null;
 
       if (impact && !impact.error) {
-        // Urutan hapus wajib dari yang paling "bawah" dulu:
-        // nilai harian -> lingkup materi -> nilai ujian -> ploting guru.
         if (impact.lingkupIds.length > 0) {
           const lingkupFilter = impact.lingkupIds
             .map((id) => `lingkup_materi_id="${id}"`)
@@ -607,9 +567,8 @@ export default function PlotingGuruPageAdmin() {
     }
   }
 
-  // ---------------- Sinkron cepat (tanpa ganti guru/mapel) ----------------
-  // Kalau target_tingkat / spesifik_kelas_id di mapel berubah setelah ploting
-  // dibuat, tombol ini menyamakan ulang kelas_id tanpa perlu buka modal edit.
+  /* ── Sinkron kelas ──────────────────────────────────────────── */
+
   const [syncingId, setSyncingId] = useState(null);
   async function handleSyncKelas(record) {
     const mapel = mapelById[record.mapel_id];
@@ -631,14 +590,13 @@ export default function PlotingGuruPageAdmin() {
     }
   }
 
-  // =========================================================
-  // Render
-  // =========================================================
+  /* ── Render ─────────────────────────────────────────────────── */
+
   if (checkingAuth) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50">
         <div className="flex items-center gap-3 text-sm text-slate-500">
-          <Spinner className="h-5 w-5 text-indigo-600" />
+          <Spinner className="h-5 w-5 text-gray-900" />
           Memuat...
         </div>
       </div>
@@ -660,7 +618,7 @@ export default function PlotingGuruPageAdmin() {
     {
       label: "Perlu sinkron",
       value: outOfSyncIds.size,
-      tone: outOfSyncIds.size > 0 ? "text-amber-600" : "text-slate-900",
+      tone: outOfSyncIds.size > 0 ? "text-slate-900" : "text-slate-900",
     },
   ];
 
@@ -726,7 +684,7 @@ export default function PlotingGuruPageAdmin() {
           {canManage && (
             <button
               onClick={openCreateModal}
-              className="ml-auto inline-flex h-10 flex-shrink-0 items-center gap-1.5 rounded-xl bg-indigo-600 px-4 text-sm font-medium text-white shadow-sm shadow-indigo-600/20 transition hover:bg-indigo-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 active:scale-[0.98]"
+              className="ml-auto inline-flex h-10 flex-shrink-0 items-center gap-1.5 rounded-xl bg-gray-900 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-black focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900 focus-visible:ring-offset-2 active:scale-[0.98]"
             >
               <Icon name="plus" />
               Tambah ploting
@@ -734,7 +692,7 @@ export default function PlotingGuruPageAdmin() {
           )}
         </div>
 
-        {/* Daftar ploting, dikelompokkan per guru */}
+        {/* Daftar */}
         {loadingData ? (
           <div className="space-y-3">
             {Array.from({ length: 3 }).map((_, i) => (
@@ -776,7 +734,7 @@ export default function PlotingGuruPageAdmin() {
             {!search && canManage && (
               <button
                 onClick={openCreateModal}
-                className="mt-5 inline-flex h-9 items-center gap-1.5 rounded-xl bg-indigo-600 px-4 text-sm font-medium text-white transition hover:bg-indigo-700"
+                className="mt-5 inline-flex h-9 items-center gap-1.5 rounded-xl bg-gray-900 px-4 text-sm font-medium text-white transition hover:bg-black"
               >
                 <Icon name="plus" />
                 Tambah ploting
@@ -794,11 +752,8 @@ export default function PlotingGuruPageAdmin() {
                   key={group.key}
                   className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
                 >
-                  {/* Header guru */}
                   <header className="flex items-center gap-3 border-b border-slate-100 bg-slate-50/60 px-4 py-3">
-                    <div
-                      className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full text-xs font-semibold ${avatarStyle(group.key)}`}
-                    >
+                    <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-gray-900 text-xs font-semibold text-white">
                       {initials(guru?.nama_lengkap)}
                     </div>
                     <div className="min-w-0 flex-1">
@@ -823,7 +778,6 @@ export default function PlotingGuruPageAdmin() {
                     </span>
                   </header>
 
-                  {/* Baris ploting (mapel + kelas) */}
                   <div className="divide-y divide-slate-100">
                     {group.items.map((r) => {
                       const mapel = mapelById[r.mapel_id];
@@ -852,12 +806,12 @@ export default function PlotingGuruPageAdmin() {
                                     "(mapel tidak ditemukan)"}
                                 </span>
                                 {mapel?.kode_mapel && (
-                                  <span className="rounded-md bg-indigo-50 px-1.5 py-0.5 text-[11px] font-medium text-indigo-700">
+                                  <span className="rounded-md bg-gray-900 px-1.5 py-0.5 text-[11px] font-medium text-white">
                                     {mapel.kode_mapel}
                                   </span>
                                 )}
                                 {outOfSync && (
-                                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-amber-200">
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-700 ring-1 ring-zinc-200">
                                     <Icon name="alert" className="h-3 w-3" />
                                     Perlu sinkron
                                   </span>
@@ -874,7 +828,7 @@ export default function PlotingGuruPageAdmin() {
                                   <button
                                     onClick={() => handleSyncKelas(r)}
                                     disabled={syncingId === r.id}
-                                    className="mr-1 inline-flex h-8 items-center gap-1.5 rounded-lg bg-amber-50 px-2.5 text-xs font-medium text-amber-700 ring-1 ring-amber-200 transition hover:bg-amber-100 disabled:opacity-50"
+                                    className="mr-1 inline-flex h-8 items-center gap-1.5 rounded-lg bg-gray-900 px-2.5 text-xs font-medium text-white transition hover:bg-black disabled:opacity-50"
                                   >
                                     {syncingId === r.id ? (
                                       <Spinner className="h-3.5 w-3.5" />
@@ -889,7 +843,7 @@ export default function PlotingGuruPageAdmin() {
                                 )}
                                 <button
                                   onClick={() => openEditModal(r)}
-                                  className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                                  className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition hover:bg-gray-900 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900"
                                   aria-label={`Edit ploting ${mapel?.nama_mapel || ""}`}
                                   title="Edit"
                                 >
@@ -897,7 +851,7 @@ export default function PlotingGuruPageAdmin() {
                                 </button>
                                 <button
                                   onClick={() => prepareDeleteRecord(r)}
-                                  className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition hover:bg-rose-50 hover:text-rose-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
+                                  className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 transition hover:bg-gray-900 hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-900"
                                   aria-label={`Hapus ploting ${mapel?.nama_mapel || ""}`}
                                   title="Hapus"
                                 >
@@ -907,7 +861,6 @@ export default function PlotingGuruPageAdmin() {
                             )}
                           </div>
 
-                          {/* Chip daftar kelas yang tertaut */}
                           <div className="mt-2.5 flex flex-wrap gap-1.5">
                             {kelasIds.length === 0 ? (
                               <span className="text-xs italic text-slate-400">
@@ -926,22 +879,9 @@ export default function PlotingGuruPageAdmin() {
                             )}
                           </div>
 
-                          {/* Konfirmasi hapus + ringkasan dampak */}
                           {isConfirming && (
-                            <div
-                              className={`mt-3 rounded-xl border p-3 ${
-                                hasImpact || impact?.error
-                                  ? "border-rose-200 bg-rose-50"
-                                  : "border-slate-200 bg-slate-50"
-                              }`}
-                            >
-                              <p
-                                className={`text-xs leading-relaxed ${
-                                  hasImpact || impact?.error
-                                    ? "text-rose-700"
-                                    : "text-slate-600"
-                                }`}
-                              >
+                            <div className="mt-3 rounded-xl border border-zinc-200 bg-zinc-50 p-3">
+                              <p className="text-xs leading-relaxed text-zinc-700">
                                 {impact?.loading ? (
                                   <span className="inline-flex items-center gap-2">
                                     <Spinner className="h-3.5 w-3.5" />
@@ -983,7 +923,7 @@ export default function PlotingGuruPageAdmin() {
                                 <button
                                   onClick={() => handleDeleteRecord(r)}
                                   disabled={deleting || impact?.loading}
-                                  className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-rose-600 px-3 text-xs font-medium text-white transition hover:bg-rose-700 disabled:opacity-50"
+                                  className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-gray-900 px-3 text-xs font-medium text-white transition hover:bg-black disabled:opacity-50"
                                 >
                                   {deleting && (
                                     <Spinner className="h-3.5 w-3.5" />
@@ -1004,7 +944,7 @@ export default function PlotingGuruPageAdmin() {
         )}
       </div>
 
-      {/* Modal form tambah/edit (bottom sheet di HP, dialog di layar besar) */}
+      {/* Modal form */}
       {modalOpen && (
         <div
           className="fixed inset-0 z-40 flex items-end justify-center bg-slate-900/40 backdrop-blur-sm sm:items-center sm:px-4"
@@ -1042,7 +982,6 @@ export default function PlotingGuruPageAdmin() {
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4 px-5 py-4">
-              {/* Pilih guru */}
               <div>
                 <label
                   htmlFor="ploting-guru"
@@ -1068,7 +1007,6 @@ export default function PlotingGuruPageAdmin() {
                 </select>
               </div>
 
-              {/* Pilih mapel */}
               <div>
                 <label
                   htmlFor="ploting-mapel"
@@ -1098,7 +1036,6 @@ export default function PlotingGuruPageAdmin() {
                 )}
               </div>
 
-              {/* Preview kelas otomatis -- tidak ada input manual di sini */}
               {form.mapelId && (
                 <div>
                   <div className="mb-1.5 flex items-center justify-between">
@@ -1112,7 +1049,7 @@ export default function PlotingGuruPageAdmin() {
                     )}
                   </div>
                   {eligibleKelas.length === 0 ? (
-                    <div className="flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2.5 text-xs text-amber-700 ring-1 ring-amber-200">
+                    <div className="flex items-start gap-2 rounded-xl bg-zinc-100 px-3 py-2.5 text-xs text-zinc-700 ring-1 ring-zinc-200">
                       <Icon
                         name="alert"
                         className="mt-0.5 h-3.5 w-3.5 flex-shrink-0"
@@ -1132,11 +1069,11 @@ export default function PlotingGuruPageAdmin() {
                                 ? "Sudah tertaut sebelumnya"
                                 : "Akan ditambahkan"
                             }
-                            className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                            className={
                               sudahAda
-                                ? "bg-slate-200 text-slate-600"
-                                : "bg-emerald-100 text-emerald-700"
-                            }`}
+                                ? "rounded-full bg-slate-200 px-2.5 py-0.5 text-xs font-medium text-slate-600"
+                                : "rounded-full bg-gray-900 px-2.5 py-0.5 text-xs font-medium text-white"
+                            }
                           >
                             {k.nama_kelas}
                           </span>
@@ -1146,7 +1083,7 @@ export default function PlotingGuruPageAdmin() {
                         <span
                           key={`remove-${k.id}`}
                           title="Sudah tidak eligible, akan dilepas dari ploting ini"
-                          className="rounded-full bg-rose-100 px-2.5 py-0.5 text-xs font-medium text-rose-600 line-through"
+                          className="rounded-full bg-zinc-200 px-2.5 py-0.5 text-xs font-medium text-zinc-500 line-through"
                         >
                           {k.nama_kelas}
                         </span>
@@ -1161,12 +1098,12 @@ export default function PlotingGuruPageAdmin() {
                         Sudah tertaut
                       </span>
                       <span className="inline-flex items-center gap-1.5">
-                        <span className="h-2 w-2 rounded-full bg-emerald-400" />
+                        <span className="h-2 w-2 rounded-full bg-gray-900" />
                         Baru ditambahkan
                       </span>
                       {kelasAkanDilepas.length > 0 && (
                         <span className="inline-flex items-center gap-1.5">
-                          <span className="h-2 w-2 rounded-full bg-rose-400" />
+                          <span className="h-2 w-2 rounded-full bg-zinc-400" />
                           Akan dilepas
                         </span>
                       )}
@@ -1178,7 +1115,7 @@ export default function PlotingGuruPageAdmin() {
               {formError && (
                 <div
                   role="alert"
-                  className="flex items-start gap-2 rounded-xl bg-rose-50 px-3 py-2.5 text-sm text-rose-700 ring-1 ring-rose-200"
+                  className="flex items-start gap-2 rounded-xl bg-zinc-100 px-3 py-2.5 text-sm text-zinc-800 ring-1 ring-zinc-200"
                 >
                   <Icon name="alert" className="mt-0.5 h-4 w-4 flex-shrink-0" />
                   <p>{formError}</p>
@@ -1197,7 +1134,7 @@ export default function PlotingGuruPageAdmin() {
                 <button
                   type="submit"
                   disabled={saving}
-                  className="inline-flex h-10 items-center gap-2 rounded-xl bg-indigo-600 px-4 text-sm font-medium text-white shadow-sm shadow-indigo-600/20 transition hover:bg-indigo-700 disabled:opacity-60"
+                  className="inline-flex h-10 items-center gap-2 rounded-xl bg-gray-900 px-4 text-sm font-medium text-white shadow-sm transition hover:bg-black disabled:opacity-60"
                 >
                   {saving && <Spinner />}
                   {saving

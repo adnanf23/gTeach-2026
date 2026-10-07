@@ -73,6 +73,10 @@ const LoginWaliMuridPage = () => {
   const [errorMsg, setErrorMsg] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
+  // Popup penolakan akses
+  const [showBlockedModal, setShowBlockedModal] = useState(false);
+  const [blockedUsername, setBlockedUsername] = useState("");
+
   async function handleLogin(e) {
     e.preventDefault();
     setIsLoading(true);
@@ -83,13 +87,19 @@ const LoginWaliMuridPage = () => {
         .collection("wali_murid")
         .authWithPassword(username, password);
       const userRecord = authData.record;
-      const namaWali =
-        userRecord.nama_lengkap || userRecord.nama || userRecord.username;
 
       // Validasi status aktif (kalau field ada)
       if (userRecord.is_aktif === false) {
         pb.authStore.clear();
         setErrorMsg("Akun belum aktif. Silakan hubungi pihak sekolah.");
+        return;
+      }
+
+      // ✅ Validasi verified — kalau false, tolak akses
+      if (!userRecord.verified) {
+        pb.authStore.clear();
+        setBlockedUsername(userRecord.username || username);
+        setShowBlockedModal(true);
         return;
       }
 
@@ -110,13 +120,18 @@ const LoginWaliMuridPage = () => {
     }
   }
 
+  function closeBlockedModal() {
+    setShowBlockedModal(false);
+    setBlockedUsername("");
+    setPassword("");
+  }
+
   return (
     <div className="min-h-screen w-full bg-[#eef1fc] flex items-center justify-center p-4 sm:p-6 font-sans text-gray-800">
       {/* Kartu putih melayang, sama seperti sidebar di dashboard */}
       <div className="w-full max-w-[960px] bg-white rounded-[28px] shadow-[0_20px_60px_rgba(99,120,200,0.18)] p-3 grid lg:grid-cols-[1.05fr_1fr]">
         {/* PANEL KIRI */}
         <aside className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#7aa5ff] to-[#3b6ef5] text-white p-7 lg:p-10 flex flex-col justify-between min-h-[190px] lg:min-h-[560px]">
-          {/* Dekorasi lingkaran lembut */}
           <div
             aria-hidden="true"
             className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-white/10"
@@ -130,7 +145,6 @@ const LoginWaliMuridPage = () => {
             className="absolute right-10 bottom-24 h-20 w-20 rounded-full bg-white/10 hidden lg:block"
           />
 
-          {/* Logo */}
           <div className="relative flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-xl bg-white text-[#3b6ef5] flex items-center justify-center text-[17px] font-bold">
               g
@@ -143,7 +157,6 @@ const LoginWaliMuridPage = () => {
             </div>
           </div>
 
-          {/* Judul + fitur */}
           <div className="relative mt-8 lg:mt-0">
             <h1 className="text-[26px] lg:text-[38px] font-bold leading-[1.15] tracking-tight max-w-sm">
               Pantau statistik absensi dan nilai rapor murid!
@@ -281,6 +294,99 @@ const LoginWaliMuridPage = () => {
           </div>
         </main>
       </div>
+
+      {/* ═══════════ POPUP AKSES DITOLAK ═══════════ */}
+      {showBlockedModal && (
+        <div
+          className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-[fadeIn_0.2s_ease-out]"
+          onClick={closeBlockedModal}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="blocked-title"
+        >
+          <div
+            className="relative w-full max-w-sm bg-white rounded-3xl shadow-[0_25px_60px_rgba(15,23,42,0.25)] p-7 text-center animate-[popIn_0.25s_ease-out]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Icon */}
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-red-50 border border-red-100">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="30"
+                height="30"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="#dc2626"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+              </svg>
+            </div>
+
+            {/* Judul */}
+            <h3
+              id="blocked-title"
+              className="mt-5 text-[19px] font-bold text-slate-800 tracking-tight"
+            >
+              Maaf yah, akses kamu ditolak
+            </h3>
+
+            {/* Deskripsi */}
+            <p className="mt-2.5 text-[13.5px] text-slate-500 leading-relaxed">
+              Akun{" "}
+              {blockedUsername && (
+                <span className="font-mono font-semibold text-slate-700">
+                  @{blockedUsername}
+                </span>
+              )}{" "}
+              belum diverifikasi oleh pihak sekolah. Silakan hubungi wali kelas
+              atau admin untuk mengaktifkan akses.
+            </p>
+
+            {/* Info badge */}
+            <div className="mt-5 inline-flex items-center gap-2 rounded-full bg-amber-50 border border-amber-100 px-3 py-1.5">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+              <span className="text-[11px] font-semibold text-amber-700 uppercase tracking-wider">
+                Status: Belum Diverifikasi
+              </span>
+            </div>
+
+            {/* Tombol */}
+            <button
+              type="button"
+              onClick={closeBlockedModal}
+              className="mt-6 w-full py-3 rounded-xl bg-slate-800 text-white text-[13.5px] font-semibold hover:bg-slate-900 active:scale-[0.98] transition cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-800"
+            >
+              Mengerti
+            </button>
+          </div>
+
+          {/* Keyframes */}
+          <style jsx>{`
+            @keyframes fadeIn {
+              from {
+                opacity: 0;
+              }
+              to {
+                opacity: 1;
+              }
+            }
+            @keyframes popIn {
+              0% {
+                opacity: 0;
+                transform: scale(0.92) translateY(8px);
+              }
+              100% {
+                opacity: 1;
+                transform: scale(1) translateY(0);
+              }
+            }
+          `}</style>
+        </div>
+      )}
     </div>
   );
 };

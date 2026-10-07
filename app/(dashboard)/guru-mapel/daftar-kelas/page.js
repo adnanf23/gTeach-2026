@@ -13,13 +13,9 @@ function getKelasInitials(kelas) {
   const nama = kelas.nama_kelas || "";
   const tingkat = kelas.tingkat || "";
 
-  // Coba ambil format "1A", "1B", "1C" dari nama_kelas
   const match = nama.match(/(\d+[A-Za-z]+)$/);
-  if (match) {
-    return match[1].toUpperCase();
-  }
+  if (match) return match[1].toUpperCase();
 
-  // Fallback: gabungkan tingkat dan huruf pertama dari nama_kelas
   const firstChar = nama.replace(/\d+/g, "").trim().charAt(0) || "A";
   return `${tingkat}${firstChar}`;
 }
@@ -44,6 +40,136 @@ function paletteForKey(key) {
 function tahunAjaranLabel(ta) {
   if (!ta) return "-";
   return `${ta.tahun} · Sem ${ta.semester}`;
+}
+
+// =========================================================
+// Ikon (inline SVG) — disamakan dengan halaman admin catatan kasus
+// =========================================================
+const ICON_PATHS = {
+  search: (
+    <>
+      <circle cx="11" cy="11" r="7" />
+      <path d="m20 20-3.5-3.5" />
+    </>
+  ),
+  chevronRight: <path d="m9 6 6 6-6 6" />,
+  user: (
+    <>
+      <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+      <circle cx="12" cy="7" r="4" />
+    </>
+  ),
+  users: (
+    <>
+      <path d="M12 4.354a4 4 0 1 1 0 5.292M15 21H3v-1a6 6 0 0 1 12 0v1zm0 0h6v-1a6 6 0 0 0-9-5.197M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0z" />
+    </>
+  ),
+  book: (
+    <>
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" />
+    </>
+  ),
+  school: (
+    <>
+      <path d="M14 22v-4a2 2 0 1 0-4 0v4" />
+      <path d="m18 10 4 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-8l4-2" />
+      <path d="M18 5v17" />
+      <path d="m4 6 8-4 8 4" />
+      <path d="M6 5v17" />
+      <circle cx="12" cy="9" r="2" />
+    </>
+  ),
+};
+
+function Icon({ name, className = "h-4 w-4" }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      {ICON_PATHS[name]}
+    </svg>
+  );
+}
+
+// =========================================================
+// StatsOverview — 3 kartu (gradient + 2 putih) ala Catatan Kasus
+// =========================================================
+function StatsOverview({ totalKelas, totalMapel, totalSiswa, loading }) {
+  if (loading) {
+    return (
+      <div className="grid gap-3 sm:grid-cols-3">
+        {[0, 1, 2].map((i) => (
+          <div
+            key={i}
+            className="h-32 animate-pulse rounded-2xl border border-slate-200 bg-white"
+          />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-3 sm:grid-cols-3">
+      {/* Total Kelas — gradient biru */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-blue-600 via-blue-600 to-blue-700 p-5 text-white shadow-sm">
+        <div className="pointer-events-none absolute -right-8 -bottom-10 h-40 w-40 rounded-full bg-white/5" />
+        <div className="relative">
+          <div className="flex items-center gap-2 text-blue-100">
+            <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/15">
+              <Icon name="school" className="h-4 w-4" />
+            </span>
+            <p className="text-xs font-medium">Total kelas</p>
+          </div>
+          <p className="mt-2 text-4xl font-semibold tabular-nums tracking-tight">
+            {totalKelas}
+          </p>
+          <p className="mt-3 text-xs text-blue-100">
+            Kelas tempat Anda mengajar
+          </p>
+        </div>
+      </div>
+
+      {/* Mata Pelajaran Diampu */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex items-center gap-2 text-slate-500">
+          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+            <Icon name="book" className="h-4 w-4" />
+          </span>
+          <p className="text-xs font-medium">Mata pelajaran diampu</p>
+        </div>
+        <p className="mt-2 text-4xl font-semibold tabular-nums tracking-tight text-slate-900">
+          {totalMapel}
+        </p>
+        <p className="mt-3 text-xs text-slate-500">
+          Total mapel yang Anda ampu
+        </p>
+      </div>
+
+      {/* Total Siswa Terjangkau */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex items-center gap-2 text-slate-500">
+          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+            <Icon name="users" className="h-4 w-4" />
+          </span>
+          <p className="text-xs font-medium">Total siswa terjangkau</p>
+        </div>
+        <p className="mt-2 text-4xl font-semibold tabular-nums tracking-tight text-slate-900">
+          {totalSiswa}
+        </p>
+        <p className="mt-3 text-xs text-slate-500">
+          Siswa dari seluruh kelas Anda
+        </p>
+      </div>
+    </div>
+  );
 }
 
 export default function DataKelasListPage() {
@@ -79,7 +205,6 @@ export default function DataKelasListPage() {
   }, [router]);
 
   // 2. Ambil semua ploting_guru milik guru ini, lalu "flatten" kelas_id
-  //    (multi-select, maxSelect 100) jadi daftar kartu per kelas.
   useEffect(() => {
     if (!authChecked || unauthorized || !user?.id) return;
     let isMounted = true;
@@ -94,7 +219,6 @@ export default function DataKelasListPage() {
           requestKey: null,
         });
 
-        // kelasId -> { kelas, mapelList: [mapel, ...] }
         const kelasMap = {};
         for (const p of plotingRecords) {
           const kelasArr = Array.isArray(p.expand?.kelas_id)
@@ -119,7 +243,6 @@ export default function DataKelasListPage() {
 
         const kelasIds = Object.keys(kelasMap);
 
-        // Ambil jumlah siswa per kelas secara ringan (cuma totalItems, bukan getFullList)
         const counts = await Promise.all(
           kelasIds.map((kid) =>
             pb
@@ -182,6 +305,11 @@ export default function DataKelasListPage() {
     return set.size;
   }, [kelasCards]);
 
+  const totalSiswa = useMemo(
+    () => kelasCards.reduce((a, c) => a + c.siswaCount, 0),
+    [kelasCards],
+  );
+
   // ---------------- Render ----------------
 
   if (!authChecked) {
@@ -204,74 +332,57 @@ export default function DataKelasListPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-8">
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-lg font-bold text-slate-800">Data Kelas</h1>
-          <p className="text-xs text-slate-500 mt-1">
+    <section className="mx-auto max-w-6xl space-y-6 px-4 py-8 lg:p-10">
+      {/* ============ HEADER — gradient hero ============ */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-blue-600 via-blue-600 to-blue-700 p-6 text-white shadow-lg md:p-8">
+        <div className="pointer-events-none absolute -right-10 -bottom-20 h-80 w-80 rounded-full bg-white/5" />
+        <div className="relative z-10 space-y-1">
+          <span className="block text-xs font-semibold uppercase tracking-widest text-blue-200">
+            Data Kelas
+          </span>
+          <h1 className="text-2xl font-extrabold uppercase tracking-wide md:text-3xl">
+            Kelas Mengajar
+          </h1>
+          <p className="text-sm text-blue-100">
             Kelas tempat Anda mengajar sebagai guru mata pelajaran.
           </p>
         </div>
-
-        {!loading && kelasCards.length > 0 && (
-          <div className="relative w-full sm:w-64">
-            <input
-              type="text"
-              placeholder="Cari nama kelas / mapel..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2 pl-9 text-xs outline-none focus:border-blue-500 transition shadow-sm"
-            />
-            <svg
-              className="absolute left-3 top-3 h-3.5 w-3.5 text-slate-400"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-              />
-            </svg>
-          </div>
-        )}
       </div>
 
       {error && (
-        <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
           {error}
         </div>
       )}
 
+      {/* ============ STATS — 3 kartu (gradient + 2 putih) ============ */}
       {!loading && kelasCards.length > 0 && (
-        <div className="mb-6 rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 p-5 text-white shadow-sm">
-          <div className="flex flex-wrap gap-6">
-            <div>
-              <p className="text-[10px] uppercase tracking-wider text-blue-100 font-semibold">
-                Total Kelas
-              </p>
-              <p className="text-2xl font-bold mt-0.5">{kelasCards.length}</p>
-            </div>
-            <div>
-              <p className="text-[10px] uppercase tracking-wider text-blue-100 font-semibold">
-                Mata Pelajaran Diampu
-              </p>
-              <p className="text-2xl font-bold mt-0.5">{totalMapelUnik}</p>
-            </div>
-            <div>
-              <p className="text-[10px] uppercase tracking-wider text-blue-100 font-semibold">
-                Total Siswa Terjangkau
-              </p>
-              <p className="text-2xl font-bold mt-0.5">
-                {kelasCards.reduce((a, c) => a + c.siswaCount, 0)}
-              </p>
-            </div>
-          </div>
+        <StatsOverview
+          totalKelas={kelasCards.length}
+          totalMapel={totalMapelUnik}
+          totalSiswa={totalSiswa}
+          loading={loading}
+        />
+      )}
+
+      {/* ============ SEARCH ============ */}
+      {!loading && kelasCards.length > 0 && (
+        <div className="relative">
+          <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400">
+            <Icon name="search" />
+          </span>
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Cari nama kelas / mapel..."
+            aria-label="Cari nama kelas atau mapel"
+            className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm text-slate-800 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+          />
         </div>
       )}
 
+      {/* ============ GRID ============ */}
       {loading ? (
         <LoadingGrid />
       ) : kelasCards.length === 0 ? (
@@ -294,49 +405,66 @@ export default function DataKelasListPage() {
                 onClick={() =>
                   router.push(`/guru-mapel/daftar-kelas/${kelas.id}`)
                 }
-                className="text-left rounded-2xl border border-slate-100 bg-white p-4 shadow-sm hover:border-blue-200 hover:shadow-md transition"
+                className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-all duration-300 hover:border-blue-600 hover:bg-blue-600 hover:shadow-lg hover:shadow-blue-200 active:scale-[0.98]"
               >
-                <div className="flex items-center gap-3">
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-600 font-bold text-white uppercase text-sm shadow-sm">
-                    {getKelasInitials(kelas)}
-                  </div>
+                <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <h3 className="text-sm font-bold text-slate-800 truncate">
+                    <h3 className="truncate text-base font-semibold text-slate-900 transition-colors duration-300 group-hover:text-white">
                       {kelas.nama_kelas}
                     </h3>
-                    <p className="text-[11px] text-slate-400 mt-0.5">
-                      Tingkat {kelas.tingkat || "-"} ·{" "}
+                    <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 transition-colors duration-300 group-hover:text-blue-100">
+                      <span className="flex items-center gap-1">
+                        <Icon
+                          name="user"
+                          className="h-3.5 w-3.5 text-slate-400 transition-colors duration-300 group-hover:text-blue-200"
+                        />
+                        Tingkat {kelas.tingkat || "-"}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Icon
+                          name="users"
+                          className="h-3.5 w-3.5 text-slate-400 transition-colors duration-300 group-hover:text-blue-200"
+                        />
+                        {siswaCount} siswa
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[11px] text-slate-400 transition-colors duration-300 group-hover:text-blue-200">
                       {tahunAjaran
                         ? tahunAjaranLabel(tahunAjaran)
                         : "Tahun ajaran —"}
                     </p>
                   </div>
+
+                  <span className="flex h-8 min-w-8 flex-shrink-0 items-center justify-center rounded-lg bg-slate-100 px-1.5 text-[11px] font-semibold text-slate-600 transition-colors duration-300 group-hover:bg-white/20 group-hover:text-white">
+                    {getKelasInitials(kelas)}
+                  </span>
                 </div>
 
-                <div className="mt-3 flex flex-wrap gap-1.5">
+                <div className="mt-4 flex flex-wrap items-center gap-1.5 border-t border-slate-100 pt-3 transition-colors duration-300 group-hover:border-white/20">
                   {mapelList.map((m) => {
                     const palette = paletteForKey(m.id || m.nama_mapel);
                     return (
                       <span
                         key={m.id}
-                        className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ${palette.chip}`}
+                        className={`inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold ${palette.chip} transition-colors duration-300 group-hover:bg-white/20 group-hover:text-white group-hover:ring-0`}
                       >
                         {m.nama_mapel}
                       </span>
                     );
                   })}
+                  <span className="ml-auto text-slate-300 transition-all duration-300 group-hover:translate-x-1.5 group-hover:text-white">
+                    <Icon name="chevronRight" className="h-4 w-4" />
+                  </span>
                 </div>
 
-                <div className="mt-3 pt-2.5 border-t border-slate-50 flex items-center justify-between text-[10px] text-slate-400 font-medium">
-                  <span>{siswaCount} siswa</span>
-                  <span>{mapelList.length} mapel diampu</span>
-                </div>
+                {/* Shimmer ala catatan kasus */}
+                <div className="pointer-events-none absolute inset-0 -translate-x-full bg-gradient-to-r from-white/0 via-white/15 to-white/0 transition-transform duration-700 group-hover:translate-x-full" />
               </button>
             );
           })}
         </div>
       )}
-    </div>
+    </section>
   );
 }
 

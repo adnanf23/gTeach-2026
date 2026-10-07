@@ -79,7 +79,7 @@ function TenagaCard({ label, person }) {
   return (
     <div className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
       <div className="flex items-center gap-3">
-        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-indigo-100 text-sm font-semibold text-indigo-700">
+        <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-blue-100 text-sm font-semibold text-blue-700">
           {getInitials(person.nama_lengkap)}
         </div>
         <div>
@@ -147,9 +147,6 @@ export default function DetailKelasPage() {
 
   const loadAll = useCallback(async () => {
     if (!id) {
-      // id kosong biasanya berarti file ini nggak ditaruh di folder route
-      // dinamis (contoh: app/.../data-kelas/[id]/page.js). Tampilkan pesan
-      // yang jelas alih-alih membiarkan halaman nyangkut di spinner selamanya.
       setLoading(false);
       setErrorMsg(
         "ID kelas tidak ditemukan di URL. Pastikan halaman ini diakses lewat route dinamis, misalnya /data-kelas/[id].",
@@ -170,10 +167,6 @@ export default function DetailKelasPage() {
           sort: "nama_siswa",
           requestKey: null,
         }),
-        // kelas_id di ploting_guru sekarang multi-select (maxSelect 100 — satu guru
-        // bisa diploting ke beberapa kelas paralel sekaligus dengan Lingkup Materi
-        // yang sama), jadi filter pakai "~" (array contains), lalu divalidasi ulang
-        // manual di JS biar aman dari kemungkinan false-positive substring match.
         pb.collection("ploting_guru").getFullList({
           filter: `kelas_id~"${id}"`,
           expand: "guru_id,mapel_id",
@@ -242,7 +235,7 @@ export default function DetailKelasPage() {
           <p className="font-medium text-slate-700">Kelas tidak ditemukan.</p>
           <button
             onClick={() => router.push("/data-kelas")}
-            className="mt-3 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+            className="mt-3 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
           >
             Kembali ke Data Kelas
           </button>
@@ -255,20 +248,34 @@ export default function DetailKelasPage() {
   const pendamping = kelas?.expand?.pendamping_id || null;
   const tahunAjaran = kelas?.expand?.tahun_ajaran_id || null;
 
+  const kelasBadge = (kelas?.nama_kelas || "").match(/(\d+[A-Za-z]+)$/);
+  const badgeLabel = kelasBadge
+    ? kelasBadge[1].toUpperCase()
+    : `${kelas?.tingkat || ""}${(kelas?.nama_kelas || "")
+        .replace(/\d+/g, "")
+        .trim()
+        .charAt(0)
+        .toUpperCase()}`;
+
   return (
     <div className="min-h-screen bg-slate-50 pb-16">
       <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6">
         {/* Breadcrumb */}
-        <button
-          onClick={() => router.push("/guru-mapel/daftar-kelas")}
-          className="mb-4 flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700"
+        <nav
+          aria-label="Breadcrumb"
+          className="mb-4 flex flex-wrap items-center gap-1.5 text-xs"
         >
-          <span aria-hidden>←</span> Data Kelas
+          <button
+            onClick={() => router.push("/guru-mapel/daftar-kelas")}
+            className="text-slate-400 transition hover:text-blue-700"
+          >
+            Data Kelas
+          </button>
           <span className="text-slate-300">/</span>
-          <span className="font-medium text-slate-700">
+          <span className="font-semibold text-blue-700">
             {kelas?.nama_kelas}
           </span>
-        </button>
+        </nav>
 
         {errorMsg && (
           <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-2 text-sm text-rose-700">
@@ -276,65 +283,70 @@ export default function DetailKelasPage() {
           </div>
         )}
 
-        {/* Hero card */}
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-indigo-600 via-indigo-600 to-indigo-500 p-6 text-white shadow-lg shadow-indigo-200/60">
-          <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10" />
-          <div className="pointer-events-none absolute -bottom-16 right-16 h-32 w-32 rounded-full bg-white/10" />
+        {/* ============ HERO CARD ============ */}
+        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-blue-600 via-blue-600 to-blue-700 p-6 text-white shadow-lg md:p-8">
+          {/* dekorasi */}
+          <div className="pointer-events-none absolute -right-10 -bottom-20 h-80 w-80 rounded-full bg-white/5" />
 
-          <div className="relative flex flex-wrap items-start justify-between gap-6">
-            <div className="flex items-start gap-4">
-              <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-2xl bg-white/15 text-base font-bold backdrop-blur-sm">
-                {(kelas?.nama_kelas || "").split(" ")[0]}
+          <div className="relative z-10">
+            {/* Baris atas: identitas + jumlah siswa */}
+            <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex min-w-0 items-start gap-4">
+                <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-2xl bg-white/15 text-base font-bold backdrop-blur-sm">
+                  {badgeLabel || "-"}
+                </div>
+                <div className="min-w-0">
+                  <span className="block text-[11px] font-semibold uppercase tracking-widest text-blue-200">
+                    Tingkat {kelas?.tingkat ?? "-"}
+                  </span>
+                  <h1 className="truncate text-2xl font-extrabold uppercase tracking-wide md:text-3xl">
+                    {kelas?.nama_kelas}
+                  </h1>
+                  <p className="mt-1 text-xs text-blue-100">
+                    {tahunAjaranLabel(tahunAjaran)}
+                  </p>
+                </div>
               </div>
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-indigo-100">
-                  Tingkat {kelas?.tingkat ?? "-"}
+
+              <div className="flex-shrink-0 rounded-2xl bg-white/10 px-5 py-3 text-right backdrop-blur-sm ring-1 ring-white/15">
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-blue-100">
+                  Jumlah Siswa
                 </p>
-                <h2 className="text-2xl font-bold leading-tight">
-                  {kelas?.nama_kelas}
-                </h2>
-                <p className="mt-0.5 text-xs text-indigo-200">
-                  {tahunAjaranLabel(tahunAjaran)}
+                <p className="text-3xl font-bold leading-tight tabular-nums">
+                  {siswaList.length}
                 </p>
+                <p className="text-[11px] text-blue-200">siswa terdaftar</p>
               </div>
             </div>
 
-            <div className="rounded-xl bg-white/10 px-5 py-3 text-right backdrop-blur-sm">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-indigo-100">
-                Jumlah Siswa
-              </p>
-              <p className="text-3xl font-bold leading-tight">
-                {siswaList.length}
-              </p>
-              <p className="text-[11px] text-indigo-200">siswa terdaftar</p>
-            </div>
-          </div>
+            {/* Baris bawah: tenaga pengajar */}
+            <div className="mt-6 grid gap-3 border-t border-white/20 pt-5 sm:grid-cols-2">
+              <div className="flex items-center gap-3 rounded-xl bg-white/10 p-3 backdrop-blur-sm">
+                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-white/20 text-xs font-semibold">
+                  {getInitials(walikelas?.nama_lengkap)}
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-blue-200">
+                    Wali Kelas
+                  </p>
+                  <p className="truncate text-sm font-semibold">
+                    {walikelas?.nama_lengkap || "Belum diatur"}
+                  </p>
+                </div>
+              </div>
 
-          <div className="relative mt-6 grid gap-4 border-t border-white/20 pt-4 sm:grid-cols-2">
-            <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-white/20 text-xs font-semibold">
-                {getInitials(walikelas?.nama_lengkap)}
-              </div>
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-indigo-200">
-                  Wali Kelas
-                </p>
-                <p className="text-sm font-semibold">
-                  {walikelas?.nama_lengkap || "Belum diatur"}
-                </p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-white/20 text-xs font-semibold">
-                {getInitials(pendamping?.nama_lengkap)}
-              </div>
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-indigo-200">
-                  Guru Pendamping
-                </p>
-                <p className="text-sm font-semibold">
-                  {pendamping?.nama_lengkap || "Belum diatur"}
-                </p>
+              <div className="flex items-center gap-3 rounded-xl bg-white/10 p-3 backdrop-blur-sm">
+                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-white/20 text-xs font-semibold">
+                  {getInitials(pendamping?.nama_lengkap)}
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-blue-200">
+                    Guru Pendamping
+                  </p>
+                  <p className="truncate text-sm font-semibold">
+                    {pendamping?.nama_lengkap || "Belum diatur"}
+                  </p>
+                </div>
               </div>
             </div>
           </div>
@@ -408,7 +420,7 @@ export default function DetailKelasPage() {
               value={searchSiswa}
               onChange={(e) => setSearchSiswa(e.target.value)}
               placeholder="Cari nama, NIS, atau NISN..."
-              className="mb-4 w-full max-w-xs rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="mb-4 w-full max-w-xs rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
 
             <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">

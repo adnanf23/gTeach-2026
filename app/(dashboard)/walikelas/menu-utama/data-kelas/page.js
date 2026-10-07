@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { pb, isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
 
@@ -29,9 +29,12 @@ export default function KelasSayaPage() {
   const [kelasList, setKelasList] = useState([]);
   const [siswaByKelas, setSiswaByKelas] = useState({});
   const [mapelByKelas, setMapelByKelas] = useState({});
-  // Map: siswaId -> array of wali_murid records (username)
+  // Map: siswaId -> array of wali_murid records
   const [waliMuridBySiswa, setWaliMuridBySiswa] = useState({});
   const [searchTerm, setSearchTerm] = useState("");
+
+  // State untuk toggle sedang loading per waliId
+  const [togglingWaliId, setTogglingWaliId] = useState(null);
 
   // Sub-menu Utama: 'overview', 'siswa', atau 'mapel'
   const [activeTab, setActiveTab] = useState("overview");
@@ -102,7 +105,6 @@ export default function KelasSayaPage() {
               sort: "nama_siswa",
               requestKey: null,
             }),
-            // Mapel yang eksplisit di-assign ke salah satu kelas guru ini.
             pb
               .collection("mata_pelajaran")
               .getFullList({
@@ -112,7 +114,6 @@ export default function KelasSayaPage() {
                 requestKey: null,
               })
               .catch(() => []),
-            // Kandidat mapel "umum" untuk tingkat-tingkat kelas guru ini.
             pb
               .collection("mata_pelajaran")
               .getFullList({
@@ -128,7 +129,6 @@ export default function KelasSayaPage() {
         const siswaIds = siswaRecords.map((s) => s.id);
         let waliMuridRecords = [];
         if (siswaIds.length > 0) {
-          // Chunk agar filter tidak terlalu panjang
           const CHUNK = 50;
           const chunks = [];
           for (let i = 0; i < siswaIds.length; i += CHUNK) {
@@ -140,7 +140,8 @@ export default function KelasSayaPage() {
                 .collection("wali_murid")
                 .getFullList({
                   filter: chunk.map((id) => `siswa_id ~ "${id}"`).join(" || "),
-                  fields: "id,username,siswa_id",
+                  // ✅ Tambah field verified
+                  fields: "id,username,siswa_id,verified",
                   requestKey: null,
                 })
                 .catch(() => []),
@@ -167,10 +168,6 @@ export default function KelasSayaPage() {
           groupedSiswa[kid].push(s);
         }
 
-        // Aturan final (disederhanakan): spesifik_kelas_id terisi -> mapel
-        // HANYA untuk kelas yang tercantum, target_tingkat diabaikan.
-        // spesifik_kelas_id kosong -> berlaku untuk semua kelas yang
-        // tingkatnya cocok dengan target_tingkat.
         const umumMapel = kandidatUmumMapel.filter((m) => {
           const ids = Array.isArray(m.spesifik_kelas_id)
             ? m.spesifik_kelas_id
@@ -233,7 +230,48 @@ export default function KelasSayaPage() {
     };
   }, [authChecked, unauthorized, user]);
 
-  // Handler ganti tab yang aman tanpa tabrakan state pencarian
+  // ─── Toggle verified wali murid (inline di tabel) ─────────────────────────
+  const handleToggleWaliVerified = useCallback(
+    async (waliId, nextVal) => {
+      if (togglingWaliId) return; // cegah klik ganda
+      setTogglingWaliId(waliId);
+
+      // Optimistic update
+      setWaliMuridBySiswa((prev) => {
+        const next = { ...prev };
+        for (const sid of Object.keys(next)) {
+          next[sid] = next[sid].map((w) =>
+            w.id === waliId ? { ...w, verified: nextVal } : w,
+          );
+        }
+        return next;
+      });
+
+      try {
+        await pb.collection("wali_murid").update(waliId, {
+          verified: nextVal,
+        });
+      } catch (err) {
+        console.error("Gagal update verified:", err);
+        // Rollback
+        setWaliMuridBySiswa((prev) => {
+          const next = { ...prev };
+          for (const sid of Object.keys(next)) {
+            next[sid] = next[sid].map((w) =>
+              w.id === waliId ? { ...w, verified: !nextVal } : w,
+            );
+          }
+          return next;
+        });
+        setError("Gagal mengubah status verifikasi akun wali murid.");
+      } finally {
+        setTogglingWaliId(null);
+      }
+    },
+    [togglingWaliId],
+  );
+
+  // Handler ganti tab
   const handleTabChange = (tabName) => {
     setActiveTab(tabName);
     setSearchTerm("");
@@ -268,7 +306,6 @@ export default function KelasSayaPage() {
       </div>
 
       <div className="mb-6 flex flex-col gap-4 border-b border-slate-200 pb-4 sm:flex-row sm:items-center sm:justify-between sm:pb-2">
-        {/* Container Tab Navigation */}
         <div className="flex flex-row items-center gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1 no-scrollbar w-full sm:w-auto relative z-20">
           <button
             type="button"
@@ -346,7 +383,6 @@ export default function KelasSayaPage() {
           </button>
         </div>
 
-        {/* Input Pencarian Konten */}
         {activeTab !== "overview" && kelasList.length > 0 && (
           <div className="relative w-full sm:w-64 z-10">
             <input
@@ -564,7 +600,7 @@ export default function KelasSayaPage() {
                       </p>
                     ) : (
                       <div className="overflow-x-auto rounded-xl border border-slate-100 shadow-sm">
-                        <table className="w-full min-w-[720px] text-xs">
+                        <table className="w-full min-w-[760px] text-xs">
                           <thead>
                             <tr className="bg-slate-50 text-left uppercase tracking-wider text-slate-400 text-[10px] font-semibold border-b border-slate-100">
                               <th className="px-4 py-2.5 text-center w-12">
@@ -578,7 +614,9 @@ export default function KelasSayaPage() {
                               <th className="px-4 py-2.5 text-center w-16">
                                 L/P
                               </th>
-                              <th className="px-4 py-2.5">Akun Wali Murid</th>
+                              <th className="px-4 py-2.5">
+                                Akun Wali Murid (Verified)
+                              </th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100 text-slate-600 bg-white">
@@ -620,16 +658,47 @@ export default function KelasSayaPage() {
                                         Belum ada akun
                                       </span>
                                     ) : (
-                                      <div className="flex flex-wrap gap-1">
-                                        {waliList.map((w) => (
-                                          <span
-                                            key={w.id}
-                                            className="inline-block rounded bg-slate-100 px-2 py-0.5 text-[10px] font-mono font-semibold text-slate-700"
-                                            title={`ID: ${w.id}`}
-                                          >
-                                            {w.username || "(tanpa username)"}
-                                          </span>
-                                        ))}
+                                      <div className="flex flex-col gap-1.5">
+                                        {waliList.map((w) => {
+                                          const isOn = !!w.verified;
+                                          const isBusy =
+                                            togglingWaliId === w.id;
+                                          return (
+                                            <div
+                                              key={w.id}
+                                              className="inline-flex items-center gap-2 rounded-md border border-slate-100 bg-slate-50/60 px-2 py-1"
+                                            >
+                                              <span
+                                                className="font-mono font-semibold text-[10px] text-slate-700"
+                                                title={`ID: ${w.id}`}
+                                              >
+                                                {w.username ||
+                                                  "(tanpa username)"}
+                                              </span>
+                                              <span
+                                                className={`text-[9px] font-bold uppercase tracking-wider ${
+                                                  isOn
+                                                    ? "text-emerald-600"
+                                                    : "text-slate-400"
+                                                }`}
+                                              >
+                                                {isOn
+                                                  ? "Verified"
+                                                  : "Unverified"}
+                                              </span>
+                                              <ToggleSwitch
+                                                checked={isOn}
+                                                disabled={isBusy}
+                                                onChange={() =>
+                                                  handleToggleWaliVerified(
+                                                    w.id,
+                                                    !isOn,
+                                                  )
+                                                }
+                                              />
+                                            </div>
+                                          );
+                                        })}
                                       </div>
                                     )}
                                   </td>
@@ -705,6 +774,29 @@ export default function KelasSayaPage() {
         </div>
       )}
     </div>
+  );
+}
+
+// ─── Toggle Switch ────────────────────────────────────────────────────────
+
+function ToggleSwitch({ checked, onChange, disabled }) {
+  return (
+    <button
+      type="button"
+      onClick={onChange}
+      disabled={disabled}
+      aria-pressed={checked}
+      title={checked ? "Klik untuk unverify" : "Klik untuk verify"}
+      className={`relative inline-flex items-center w-9 h-[18px] rounded-full transition-colors duration-200 ${
+        checked ? "bg-emerald-500" : "bg-slate-300"
+      } ${disabled ? "opacity-50 cursor-wait" : "cursor-pointer"}`}
+    >
+      <span
+        className={`absolute top-0.5 left-0.5 w-3.5 h-3.5 bg-white rounded-full shadow transition-transform duration-200 ${
+          checked ? "translate-x-[18px]" : "translate-x-0"
+        }`}
+      />
+    </button>
   );
 }
 

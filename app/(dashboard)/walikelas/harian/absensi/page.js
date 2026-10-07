@@ -429,6 +429,10 @@ export default function AbsensiPageWalas() {
       const existingByStudent = {};
       for (const r of existingNow) existingByStudent[r.siswa_id] = r;
 
+      // Hitung berapa yang create vs update untuk log
+      let createdCount = 0;
+      let updatedCount = 0;
+
       await Promise.all(
         detailRows.map(async (row) => {
           const existing = existingByStudent[row.siswaId];
@@ -440,18 +444,7 @@ export default function AbsensiPageWalas() {
                 { status: row.status },
                 { requestKey: null },
               );
-            await createSystemLog({
-              type: "succes",
-              msg: `User '${user.nama_lengkap} (${user.role})' berhasil update absensi.`,
-              endpoint: `/walikelas/absensi`,
-              statusCode: 200,
-              payload: {
-                kelas_id: kelas.id,
-                siswa_id: row.siswaId,
-                tanggal: dateStr,
-                status: row.status,
-              },
-            });
+            updatedCount++;
           } else {
             await pb.collection("absensi").create(
               {
@@ -462,21 +455,26 @@ export default function AbsensiPageWalas() {
               },
               { requestKey: null },
             );
-            await createSystemLog({
-              type: "succes",
-              msg: `User '${user.nama_lengkap} (${user.role})' berhasil melakukan absensi.`,
-              endpoint: `/walikelas/absensi`,
-              statusCode: 200,
-              payload: {
-                kelas_id: kelas.id,
-                siswa_id: row.siswaId,
-                tanggal: dateStr,
-                status: row.status,
-              },
-            });
+            createdCount++;
           }
         }),
       );
+
+      // Satu log saja untuk keseluruhan submit
+      await createSystemLog({
+        type: "succes",
+        msg: `User '${user.nama_lengkap} (${user.role})' berhasil menyimpan absensi kelas '${kelas.nama_kelas}'.`,
+        endpoint: `/walikelas/absensi`,
+        statusCode: 200,
+        payload: {
+          kelas_id: kelas.id,
+          nama_kelas: kelas.nama_kelas,
+          tanggal: dateStr,
+          jumlah_siswa_diabsen: detailRows.length,
+          jumlah_dibuat: createdCount,
+          jumlah_diupdate: updatedCount,
+        },
+      });
 
       setMessage({ type: "success", text: "Absensi berhasil disimpan." });
       await loadMonth();
@@ -488,10 +486,15 @@ export default function AbsensiPageWalas() {
       });
       await createSystemLog({
         type: "warning",
-        msg: `User '${user.nama_lengkap} (${user.role})' gagal melakukan absensi.`,
+        msg: `User '${user.nama_lengkap} (${user.role})' gagal menyimpan absensi kelas '${kelas.nama_kelas}'.`,
         endpoint: `/walikelas/absensi`,
         statusCode: 200,
-        payload: { kelas_id: kelas.id, tanggal: dateStr },
+        payload: {
+          kelas_id: kelas.id,
+          nama_kelas: kelas.nama_kelas,
+          tanggal: dateStr,
+          jumlah_siswa_diabsen: detailRows.length,
+        },
       });
     } finally {
       setSaving(false);
