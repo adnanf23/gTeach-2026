@@ -1,17 +1,16 @@
 "use client";
 
-// app/wali-murid/rapor/page.js
-// Preview rapor (tabel) + download PDF.
-// Perhitungan nilai akhir per mapel memakai skema YANG SAMA dengan
-// halaman walikelas / leger: rata-rata berbobot dari Formatif, Sumatif,
-// UTS (AHB), UAS (ASAS), dan Kehadiran — bobot dari collection
-// `presentase_penilaian`. Sumber "periode" adalah pengaturan_ujian yang
-// akses_rapor = true. Header (nama sekolah, alamat, kepala sekolah, tanggal)
-// dari pengaturan_rapor bila tersedia, fallback ke SEKOLAH_DEFAULT.
+// app/walikelas/rapor/page.js
+// Pratinjau rapor SELURUH siswa di kelas walikelas, cukup "next next".
+// - Periode diambil dari pengaturan_ujian (akses_rapor = true)
+// - Navigasi: tombol Sebelumnya / Berikutnya, picker siswa (bisa dicari),
+//   atau tombol keyboard ← →
+// - Rapor siswa berikutnya & sebelumnya di-prefetch, jadi pindah siswa terasa instan
+// - Tampilan kertas F4, zoom, dan unduh PDF sama seperti halaman rapor wali murid
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { pb } from "@/lib/pocketbase";
+import { getCurrentUser, pb } from "@/lib/pocketbase";
 
 /* ───────────── konfigurasi ───────────── */
 const SEKOLAH_DEFAULT = {
@@ -24,7 +23,6 @@ const SEKOLAH_DEFAULT = {
 const TEXT_TINGGI = "Ananda menunjukkan pemahaman dalam";
 const TEXT_RENDAH = "Ananda membutuhkan bimbingan dalam";
 
-// Jenis ujian (sama dengan halaman walikelas / leger)
 const JENIS_UTS = "ahb";
 const JENIS_UAS = "asas";
 
@@ -36,8 +34,6 @@ const NAMA_BOBOT = {
   uas: "Ujian Akhir Semester",
   kehadiran: "Kehadiran",
 };
-
-/* ───────────── konfigurasi halaman ───────────── */
 const MAX_MAPEL_HAL1 = 8; // mapel ke-9 dst pindah ke halaman 2
 
 /* ───────────── urutan mapel ───────────── */
@@ -75,14 +71,6 @@ const urutanMapel = (mapel) => {
 /* ───────────── helpers ───────────── */
 const toArray = (v) => (Array.isArray(v) ? v : v ? [v] : []);
 
-function average(arr) {
-  const nums = arr.filter(
-    (v) => typeof v === "number" && !isNaN(v) && v !== -1,
-  );
-  if (nums.length === 0) return null;
-  return nums.reduce((a, b) => a + b, 0) / nums.length;
-}
-
 const semesterLabel = (s) => {
   const n = Number(s);
   return n === 1 ? "I (Satu)" : n === 2 ? "II (Dua)" : String(s ?? "-");
@@ -107,11 +95,16 @@ const faseDari = (tingkat) => {
   return t <= 2 ? "A" : t <= 4 ? "B" : "C";
 };
 
+// PocketBase menyimpan tanggal sebagai "2026-10-17 00:00:00.000Z" (pakai spasi).
+// Safari/iOS gagal membaca format itu, jadi spasi diganti "T".
+const parseTgl = (d) => new Date(String(d).replace(" ", "T"));
+
 const formatTanggal = (d) =>
-  (d ? new Date(d) : new Date()).toLocaleDateString("id-ID", {
+  (d ? parseTgl(d) : new Date()).toLocaleDateString("id-ID", {
     day: "numeric",
     month: "long",
     year: "numeric",
+    timeZone: "UTC", // tanggal_rapor disimpan 00:00 UTC; hindari mundur 1 hari
   });
 
 const slug = (s) =>
@@ -128,9 +121,18 @@ const sortUjian = (list) =>
     return kb.localeCompare(ka);
   });
 
+const judulRapor = (ujian, semester) => {
+  const jenis = String(ujian?.jenis_ujian || "").toLowerCase();
+  const nama =
+    jenis === JENIS_UAS
+      ? "ASESMEN SUMATIF AKHIR SEMESTER (ASAS)"
+      : "ASESMEN HARIAN BERSAMA (AHB)";
+  return `${nama} ${Number(semester) === 2 ? "GENAP" : "GANJIL"}`;
+};
+
 /* ───────────── hook: auto-fit kertas ke lebar container ───────────── */
 /* F4/Folio: 215mm × 330mm. Lebar konten px @96dpi ≈ 812px. */
-function useFitScale(contentWidthPx = 812 /* 215mm @96dpi */, active = true) {
+function useFitScale(contentWidthPx = 812, active = true) {
   const outerRef = useRef(null);
   const wrapRef = useRef(null);
   const innerRef = useRef(null);
@@ -140,7 +142,6 @@ function useFitScale(contentWidthPx = 812 /* 215mm @96dpi */, active = true) {
   const [bleed, setBleed] = useState(null);
 
   useEffect(() => {
-    // pratinjau baru dirender setelah data siap → jalankan ulang saat `active` berubah
     if (!active) return;
     const outer = outerRef.current;
     const wrap = wrapRef.current;
@@ -183,7 +184,6 @@ function useFitScale(contentWidthPx = 812 /* 215mm @96dpi */, active = true) {
 }
 
 /* ───────────── hook: tinggi elemen fixed di dasar layar (mis. bottom-nav) ───────────── */
-/* Bar aksi dinaikkan otomatis supaya tidak tertutup / tenggelam di belakangnya. */
 function useBottomInset(active) {
   const [inset, setInset] = useState(0);
 
@@ -227,37 +227,48 @@ function useBottomInset(active) {
   return inset;
 }
 
-/* ───────────── nilai akhir per mapel untuk SATU siswa ─────────────
-   Skema identik dengan halaman walikelas / leger:
-   nilai akhir = rata-rata berbobot Formatif, Sumatif, UTS (AHB),
-   UAS (ASAS), dan Kehadiran. Bobot diambil dari `presentase_penilaian`.
-   Kehadiran = (hadir / total absensi siswa) × 100.
-   ------------------------------------------------------------------- */
-async function hitungNilaiAkhirSiswa(siswa, kelas) {
-  const kelasId = kelas.id;
-  const tingkat = String(kelas.tingkat);
-  const sid = siswa.id;
+/* ───────────── nilai akhir per mapel (logika sama dengan halaman leger) ───────────── */
+function average(arr) {
+  const nums = arr.filter(
+    (v) => typeof v === "number" && !isNaN(v) && v !== -1,
+  );
+  if (nums.length === 0) return null;
+  return nums.reduce((a, b) => a + b, 0) / nums.length;
+}
 
-  const [mapelKhusus, mapelTingkat, plotingData, presentaseData, ujianData] =
-    await Promise.all([
-      pb.collection("mata_pelajaran").getFullList({
-        filter: `spesifik_kelas_id ~ "${kelasId}"`,
-        requestKey: null,
-      }),
-      pb.collection("mata_pelajaran").getFullList({
-        filter: `target_tingkat ~ "${tingkat}"`,
-        requestKey: null,
-      }),
-      pb.collection("ploting_guru").getFullList({
-        filter: `kelas_id ~ "${kelasId}"`,
-        requestKey: null,
-      }),
-      pb.collection("presentase_penilaian").getFullList({ requestKey: null }),
-      pb.collection("pengaturan_ujian").getFullList({
-        filter: `status_akses = "buka" && (target_kelas_id ~ "${kelasId}" || target_tingkat ~ "${tingkat}")`,
-        requestKey: null,
-      }),
-    ]);
+async function hitungNilaiAkhir(kelasData, siswaData) {
+  const tingkat = String(kelasData.tingkat);
+
+  const [
+    mapelKhusus,
+    mapelTingkat,
+    plotingData,
+    presentaseData,
+    ujianData,
+    absensiData,
+  ] = await Promise.all([
+    pb.collection("mata_pelajaran").getFullList({
+      filter: `spesifik_kelas_id ~ "${kelasData.id}"`,
+      requestKey: null,
+    }),
+    pb.collection("mata_pelajaran").getFullList({
+      filter: `target_tingkat ~ "${tingkat}"`,
+      requestKey: null,
+    }),
+    pb.collection("ploting_guru").getFullList({
+      filter: `kelas_id ~ "${kelasData.id}"`,
+      requestKey: null,
+    }),
+    pb.collection("presentase_penilaian").getFullList({ requestKey: null }),
+    pb.collection("pengaturan_ujian").getFullList({
+      filter: `status_akses = "buka" && (target_kelas_id ~ "${kelasData.id}" || target_tingkat ~ "${tingkat}")`,
+      requestKey: null,
+    }),
+    pb.collection("absensi").getFullList({
+      filter: `kelas_id ~ "${kelasData.id}"`,
+      requestKey: null,
+    }),
+  ]);
 
   // Mapel: hanya kategori umum, sesuai restriksi kelas, dedup berdasarkan nama
   const combined = [...mapelKhusus, ...mapelTingkat];
@@ -268,7 +279,7 @@ async function hitungNilaiAkhirSiswa(siswa, kelas) {
     const spesifik = m.spesifik_kelas_id;
     const punyaRestriksi = Array.isArray(spesifik) && spesifik.length > 0;
     if (!punyaRestriksi) return true;
-    return spesifik.includes(kelasId);
+    return spesifik.includes(kelasData.id);
   });
 
   const punyaGuru = new Set();
@@ -300,16 +311,17 @@ async function hitungNilaiAkhirSiswa(siswa, kelas) {
   const bobotUas = getBobot(NAMA_BOBOT.uas);
   const bobotKehadiran = getBobot(NAMA_BOBOT.kehadiran);
 
-  // Kehadiran (semua absensi siswa)
-  const absensiData = await pb.collection("absensi").getFullList({
-    filter: `siswa_id = "${sid}"`,
-    requestKey: null,
+  // Kehadiran
+  const kehadiranMap = {};
+  siswaData.forEach((s) => {
+    const records = absensiData.filter((a) => a.siswa_id === s.id);
+    if (records.length === 0) {
+      kehadiranMap[s.id] = null;
+      return;
+    }
+    const hadir = records.filter((a) => a.status === "hadir").length;
+    kehadiranMap[s.id] = (hadir / records.length) * 100;
   });
-  let kehadiran = null;
-  if (absensiData.length > 0) {
-    const hadir = absensiData.filter((a) => a.status === "hadir").length;
-    kehadiran = (hadir / absensiData.length) * 100;
-  }
 
   // UTS / UAS
   const utsIds = ujianData
@@ -330,13 +342,13 @@ async function hitungNilaiAkhirSiswa(siswa, kelas) {
   }
   const ujianMap = {};
   nilaiUjianData.forEach((n) => {
-    if (n.siswa_id !== sid) return;
-    ujianMap[n.pengaturan_ujian_id] = n.nilai;
+    if (!ujianMap[n.pengaturan_ujian_id]) ujianMap[n.pengaturan_ujian_id] = {};
+    ujianMap[n.pengaturan_ujian_id][n.siswa_id] = n.nilai;
   });
-  const avgUjian = (ids) =>
+  const avgUjian = (ids, siswaId) =>
     average(
       ids
-        .map((uid) => ujianMap[uid])
+        .map((uid) => ujianMap[uid]?.[siswaId])
         .filter((v) => typeof v === "number" && !isNaN(v) && v !== -1),
     );
 
@@ -365,11 +377,11 @@ async function hitungNilaiAkhirSiswa(siswa, kelas) {
 
   const [nfData, nsData] = await Promise.all([
     pb.collection("nilai_formatif").getFullList({
-      filter: `kelas_id = "${kelasId}" && siswa_id = "${sid}"`,
+      filter: `kelas_id = "${kelasData.id}"`,
       requestKey: null,
     }),
     pb.collection("nilai_sumatif").getFullList({
-      filter: `kelas_id = "${kelasId}" && siswa_id = "${sid}"`,
+      filter: `kelas_id = "${kelasData.id}"`,
       requestKey: null,
     }),
   ]);
@@ -378,11 +390,13 @@ async function hitungNilaiAkhirSiswa(siswa, kelas) {
   nfData.forEach((n) => {
     const mapelId = tpToMapel[n.tp_id];
     if (!mapelId) return;
-    if (!formatifValues[mapelId]) formatifValues[mapelId] = [];
+    if (!formatifValues[mapelId]) formatifValues[mapelId] = {};
+    if (!formatifValues[mapelId][n.siswa_id])
+      formatifValues[mapelId][n.siswa_id] = [];
     ["k1", "k2", "k3", "k4"].forEach((k) => {
       const val = n[k];
       if (typeof val === "number" && !isNaN(val) && val !== -1) {
-        formatifValues[mapelId].push(val);
+        formatifValues[mapelId][n.siswa_id].push(val);
       }
     });
   });
@@ -391,69 +405,70 @@ async function hitungNilaiAkhirSiswa(siswa, kelas) {
   nsData.forEach((n) => {
     const mapelId = lpToMapel[n.lm_id];
     if (!mapelId) return;
-    if (!sumatifValues[mapelId]) sumatifValues[mapelId] = [];
+    if (!sumatifValues[mapelId]) sumatifValues[mapelId] = {};
+    if (!sumatifValues[mapelId][n.siswa_id])
+      sumatifValues[mapelId][n.siswa_id] = [];
     if (typeof n.nilai === "number" && !isNaN(n.nilai) && n.nilai !== -1) {
-      sumatifValues[mapelId].push(n.nilai);
+      sumatifValues[mapelId][n.siswa_id].push(n.nilai);
     }
   });
 
-  // Nilai akhir per mapel (rata-rata berbobot) — sama dengan leger
+  // Nilai akhir per mapel per siswa (rata-rata berbobot)
   const nilaiAkhir = {};
   mapelList.forEach((m) => {
-    const others = [
-      { value: average(formatifValues[m.id] || []), bobot: bobotFormatif },
-      { value: average(sumatifValues[m.id] || []), bobot: bobotSumatif },
-      { value: avgUjian(utsIds), bobot: bobotUts },
-      { value: avgUjian(uasIds), bobot: bobotUas },
-    ].filter(
-      (k) =>
-        k.value !== null &&
-        k.value !== undefined &&
-        !isNaN(k.value) &&
-        k.bobot > 0,
-    );
+    nilaiAkhir[m.id] = {};
+    siswaData.forEach((s) => {
+      const others = [
+        {
+          value: average(formatifValues[m.id]?.[s.id] || []),
+          bobot: bobotFormatif,
+        },
+        {
+          value: average(sumatifValues[m.id]?.[s.id] || []),
+          bobot: bobotSumatif,
+        },
+        { value: avgUjian(utsIds, s.id), bobot: bobotUts },
+        { value: avgUjian(uasIds, s.id), bobot: bobotUas },
+      ].filter(
+        (k) =>
+          k.value !== null &&
+          k.value !== undefined &&
+          !isNaN(k.value) &&
+          k.bobot > 0,
+      );
 
-    const komponen = [...others];
-    if (
-      others.length > 0 &&
-      kehadiran !== null &&
-      kehadiran !== undefined &&
-      !isNaN(kehadiran) &&
-      bobotKehadiran > 0
-    ) {
-      komponen.push({ value: kehadiran, bobot: bobotKehadiran });
-    }
+      const komponen = [...others];
+      const hadirVal = kehadiranMap[s.id];
+      if (
+        others.length > 0 &&
+        hadirVal !== null &&
+        hadirVal !== undefined &&
+        !isNaN(hadirVal) &&
+        bobotKehadiran > 0
+      ) {
+        komponen.push({ value: hadirVal, bobot: bobotKehadiran });
+      }
 
-    const totalBobot = komponen.reduce((a, k) => a + k.bobot, 0);
-    nilaiAkhir[m.id] =
-      totalBobot === 0
-        ? null
-        : komponen.reduce((a, k) => a + k.value * k.bobot, 0) / totalBobot;
+      const totalBobot = komponen.reduce((a, k) => a + k.bobot, 0);
+      nilaiAkhir[m.id][s.id] =
+        totalBobot === 0
+          ? null
+          : komponen.reduce((a, k) => a + k.value * k.bobot, 0) / totalBobot;
+    });
   });
 
   return { mapelList, nilaiAkhir };
 }
 
-/* ───────────── susun data rapor ───────────── */
-async function buildRapor(siswa, ujian, pengaturanRapor = null) {
+/* ───────────── susun data rapor satu siswa ───────────── */
+async function buildRapor(
+  siswa,
+  { kelas, ujian, mapelList, nilaiAkhirMap, capaianMap, pengaturanRapor },
+) {
   const ta = ujian.expand?.tahun_ajaran_id;
-  const kelas = siswa.expand?.kelas_id;
   const sid = siswa.id;
-  const kelasId = toArray(siswa.kelas_id)[0] || null;
 
-  // 1) Nilai akhir per mapel (logika sama dengan halaman walikelas / leger)
-  const { mapelList, nilaiAkhir } = kelas
-    ? await hitungNilaiAkhirSiswa(siswa, kelas)
-    : { mapelList: [], nilaiAkhir: {} };
-
-  // 2) Data pendukung tampilan rapor
-  const [capaianRes, absenRes, ekskulRes, catatanRes] = await Promise.all([
-    kelasId
-      ? pb.collection("capaian_kompetensi").getFullList({
-          filter: `kelas_id = "${kelasId}"`,
-          requestKey: null,
-        })
-      : Promise.resolve([]),
+  const [absenRes, ekskulRes, catatanRes] = await Promise.all([
     ta?.Mulai && ta?.Akhir
       ? pb.collection("absensi").getFullList({
           filter: `siswa_id = "${sid}" && tanggal >= "${ta.Mulai}" && tanggal <= "${ta.Akhir}"`,
@@ -464,26 +479,18 @@ async function buildRapor(siswa, ujian, pengaturanRapor = null) {
       filter: `siswa_id = "${sid}"`,
       requestKey: null,
     }),
-    kelasId
-      ? pb.collection("catatan_siswa").getFullList({
-          filter: `siswa_id = "${sid}" && kelas_id = "${kelasId}"`,
-          sort: "-created",
-          requestKey: null,
-        })
-      : Promise.resolve([]),
+    pb.collection("catatan_siswa").getFullList({
+      filter: `siswa_id = "${sid}" && kelas_id = "${kelas.id}"`,
+      sort: "-created",
+      requestKey: null,
+    }),
   ]);
 
-  const capaianPerMapel = new Map();
-  capaianRes.forEach((c) => {
-    const mid = toArray(c.mapel_id)[0];
-    if (!mid) return;
-    capaianPerMapel.set(mid, c);
-  });
-
+  // Nilai akhir = nilai akhir per mapel dari perhitungan leger
   const nilai = mapelList
     .map((mapel) => {
-      const cap = capaianPerMapel.get(mapel.id);
-      const v = nilaiAkhir[mapel.id];
+      const cap = capaianMap.get(mapel.id);
+      const v = nilaiAkhirMap[mapel.id]?.[sid];
       return {
         mapel: mapel.Label || mapel.nama_mapel || mapel.nama || "-",
         urutan: urutanMapel(mapel),
@@ -506,7 +513,7 @@ async function buildRapor(siswa, ujian, pengaturanRapor = null) {
           const isi =
             c.catatan || c.isi || c.deskripsi || c.keterangan || c.pesan || "";
           const tgl = c.tanggal
-            ? new Date(c.tanggal).toLocaleDateString("id-ID", {
+            ? parseTgl(c.tanggal).toLocaleDateString("id-ID", {
                 day: "numeric",
                 month: "short",
                 year: "numeric",
@@ -521,8 +528,9 @@ async function buildRapor(siswa, ujian, pengaturanRapor = null) {
     : "-";
 
   return {
+    judul: judulRapor(ujian, ta?.semester),
     semester: ta?.semester,
-    tahun_ajaran: ta?.tahun,
+    tahun_ajaran: pengaturanRapor?.tahun_ajaran || ta?.tahun,
     kelas: kelas?.tingkat,
     fase: faseDari(kelas?.tingkat),
     wali_kelas: kelas?.expand?.walikelas_id?.nama_lengkap || "-",
@@ -531,7 +539,6 @@ async function buildRapor(siswa, ujian, pengaturanRapor = null) {
     nama_sekolah: pengaturanRapor?.nama_sekolah || SEKOLAH_DEFAULT.nama,
     alamat: pengaturanRapor?.alamat || SEKOLAH_DEFAULT.alamat,
     kota: SEKOLAH_DEFAULT.kota,
-    // Tanggal: utamakan pengaturan_rapor.tanggal_rapor
     tanggal_rapor: pengaturanRapor?.tanggal_rapor || null,
     catatan: catatanTeks,
     sakit: hitung("sakit"),
@@ -597,7 +604,6 @@ const RaporPreview = ({ siswa, rapor, innerRef }) => {
         { nama: "-", keterangan: "-" },
       ];
 
-  // pecah nilai: hal 1 maksimal 8 mapel, sisanya ke hal 2
   const nilaiHal1 = nilai.slice(0, MAX_MAPEL_HAL1);
   const nilaiHal2 = nilai.slice(MAX_MAPEL_HAL1);
 
@@ -613,7 +619,7 @@ const RaporPreview = ({ siswa, rapor, innerRef }) => {
         <h1 className="rapor-title">
           LAPORAN HASIL BELAJAR
           <br />
-          ASESMEN HARIAN BERSAMA (AHB) GANJIL
+          {rapor.judul}
         </h1>
 
         <table className="rapor-plain">
@@ -644,7 +650,6 @@ const RaporPreview = ({ siswa, rapor, innerRef }) => {
               <td className="sep">:</td>
               <td className="val2">{semesterLabel(rapor.semester)}</td>
             </tr>
-            {/* ── Tahun Pelajaran: 1 baris, kolom kanan digeser ── */}
             <tr>
               <td className="lbl">Alamat</td>
               <td className="sep">:</td>
@@ -742,8 +747,6 @@ const RaporPreview = ({ siswa, rapor, innerRef }) => {
               <p>……………………….</p>
             </div>
             <div className="ttd-col">
-              {/* ── Tanggal rapor murni dari DB (pengaturan_rapor.tanggal_rapor).
-                     Kalau kosong → titik-titik, biar jelas belum diisi admin. ── */}
               <p className="text-left">
                 {rapor.kota || SEKOLAH_DEFAULT.kota},{" "}
                 {rapor.tanggal_rapor
@@ -774,6 +777,27 @@ const ZOOM_BTN_CLS =
   "text-gray-700 active:bg-gray-200 hover:bg-gray-100 " +
   "disabled:opacity-40 disabled:hover:bg-transparent disabled:active:bg-transparent";
 
+const Chevron = ({ dir = "right" }) => (
+  <svg
+    width="18"
+    height="18"
+    viewBox="0 0 20 20"
+    fill="none"
+    aria-hidden="true"
+    className="shrink-0"
+  >
+    <path
+      d={
+        dir === "right" ? "M7.5 4.5l5.5 5.5-5.5 5.5" : "M12.5 4.5L7 10l5.5 5.5"
+      }
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
 const StateCard = ({ tone = "muted", title, children }) => (
   <div
     role={tone === "error" ? "alert" : undefined}
@@ -800,6 +824,15 @@ const StateCard = ({ tone = "muted", title, children }) => (
   </div>
 );
 
+const Spinner = ({ children }) => (
+  <div
+    className={`no-print flex items-center justify-center gap-2 rounded-2xl bg-white py-12 text-[13px] text-gray-400 ${CARD_SHADOW}`}
+  >
+    <div className="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-transparent" />
+    {children}
+  </div>
+);
+
 /* ───────────── picker kustom (bottom sheet / dialog) ───────────── */
 const PilihanSheet = ({
   label,
@@ -808,18 +841,35 @@ const PilihanSheet = ({
   options, // [{ id, title, subtitle, badge }]
   disabled,
   placeholder = "Pilih…",
+  searchable = false,
   className = "",
 }) => {
   const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const activeRef = useRef(null);
   const selected = options.find((o) => o.id === value);
+
+  const shown = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    if (!s) return options;
+    return options.filter((o) =>
+      `${o.title} ${o.subtitle || ""}`.toLowerCase().includes(s),
+    );
+  }, [options, q]);
 
   useEffect(() => {
     if (!open) return;
+    setQ("");
+    const t = setTimeout(
+      () => activeRef.current?.scrollIntoView({ block: "center" }),
+      60,
+    );
     const onKey = (e) => e.key === "Escape" && setOpen(false);
     document.addEventListener("keydown", onKey);
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
+      clearTimeout(t);
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = prev;
     };
@@ -894,11 +944,28 @@ const PilihanSheet = ({
                 </button>
               </div>
 
+              {searchable && (
+                <div className="px-4 pb-2">
+                  <input
+                    type="text"
+                    value={q}
+                    onChange={(e) => setQ(e.target.value)}
+                    placeholder="Cari nama atau NIS…"
+                    className="h-10 w-full rounded-xl bg-gray-50 px-3 text-[14px] text-gray-800 ring-1 ring-gray-200 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#3b6ef5]/60"
+                  />
+                </div>
+              )}
+
               <ul className="flex-1 space-y-2 overflow-y-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-1">
-                {options.map((o) => {
+                {shown.length === 0 && (
+                  <li className="py-8 text-center text-[13px] text-gray-400">
+                    Tidak ada yang cocok.
+                  </li>
+                )}
+                {shown.map((o) => {
                   const aktif = o.id === value;
                   return (
-                    <li key={o.id}>
+                    <li key={o.id} ref={aktif ? activeRef : null}>
                       <button
                         type="button"
                         onClick={() => {
@@ -959,26 +1026,207 @@ const PilihanSheet = ({
 };
 
 /* ───────────── halaman ───────────── */
-export default function RaporPage() {
+export default function RaporWalikelasPage() {
+  const user = getCurrentUser();
+  const userId = user?.id;
+
+  const [kelas, setKelas] = useState(null);
   const [siswaList, setSiswaList] = useState([]);
-  const [siswaId, setSiswaId] = useState("");
+  const [capaianMap, setCapaianMap] = useState(() => new Map());
+  const [nilaiAkhirData, setNilaiAkhirData] = useState({
+    mapelList: [],
+    nilaiAkhir: {},
+  });
+  const [index, setIndex] = useState(0);
+
   const [ujianList, setUjianList] = useState([]);
   const [ujianId, setUjianId] = useState("");
-  const [pengaturanRapor, setPengaturanRapor] = useState(null);
-  const [rapor, setRapor] = useState(null);
+  const [pengaturan, setPengaturan] = useState(null); // { ujianId, data }
+
   const [loading, setLoading] = useState(true);
-  const [loadingRapor, setLoadingRapor] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState("");
 
+  // cache rapor per siswa: key = `${ujianId}:${siswaId}`
+  const cacheRef = useRef({});
+  const inflightRef = useRef(new Set());
+  const currentKeyRef = useRef("");
+  const [, setTick] = useState(0);
+
   const sheetRef = useRef(null);
-  const fit = useFitScale(812, !!rapor && !loadingRapor); // 215mm @ 96dpi (F4)
-  const bottomInset = useBottomInset(!!rapor && !loadingRapor);
+  const headRef = useRef(null);
 
-  // zoom manual: null = auto-fit, angka = faktor tambahan (1.25, 1.5, 2, …)
+  /* ───── data dasar: kelas, siswa, capaian, periode ───── */
+  useEffect(() => {
+    if (!userId) {
+      setLoading(false);
+      return;
+    }
+    (async () => {
+      try {
+        const kelasData = await pb
+          .collection("kelas")
+          .getFirstListItem(
+            `walikelas_id = "${userId}" || pendamping_id = "${userId}"`,
+            { expand: "walikelas_id", requestKey: null },
+          );
+
+        const [siswaData, ujianData, capaianData] = await Promise.all([
+          pb.collection("siswa").getFullList({
+            filter: `kelas_id = "${kelasData.id}"`,
+            sort: "nama_siswa",
+            requestKey: null,
+          }),
+          pb.collection("pengaturan_ujian").getFullList({
+            filter: `akses_rapor = true`,
+            expand: "tahun_ajaran_id",
+            requestKey: null,
+          }),
+          pb.collection("capaian_kompetensi").getFullList({
+            filter: `kelas_id = "${kelasData.id}"`,
+            requestKey: null,
+          }),
+        ]);
+
+        const cMap = new Map();
+        capaianData.forEach((c) => {
+          const mid = toArray(c.mapel_id)[0];
+          if (mid) cMap.set(mid, c);
+        });
+
+        // Nilai akhir per mapel (bobot dari presentase_penilaian, sama dengan leger)
+        const hasil = await hitungNilaiAkhir(kelasData, siswaData);
+
+        const sorted = sortUjian(ujianData);
+        setNilaiAkhirData(hasil);
+        setKelas(kelasData);
+        setSiswaList(siswaData);
+        setCapaianMap(cMap);
+        setUjianList(sorted);
+        setUjianId(sorted[0]?.id || "");
+      } catch (e) {
+        if (e?.status !== 404 && !e?.isAbort) {
+          console.error(e);
+          setError("Gagal memuat data kelas.");
+        }
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [userId]);
+
+  const siswa = siswaList[index] || null;
+  const ujian = useMemo(
+    () => ujianList.find((u) => u.id === ujianId) || null,
+    [ujianList, ujianId],
+  );
+
+  /* ───── pengaturan_rapor untuk periode terpilih ───── */
+  useEffect(() => {
+    if (!ujian) {
+      setPengaturan(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      let pr = null;
+      try {
+        // Field relasi di schema bernama `ujian_id` → pengaturan_ujian
+        pr = await pb
+          .collection("pengaturan_rapor")
+          .getFirstListItem(`ujian_id ~ "${ujian.id}"`, { requestKey: null });
+      } catch {
+        pr = null; // belum diatur admin → pakai default sekolah
+      }
+      if (!cancelled) setPengaturan({ ujianId: ujian.id, data: pr });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [ujian]);
+
+  const pengaturanSiap = !!ujian && pengaturan?.ujianId === ujian.id;
+
+  /* ───── rapor siswa aktif (dari cache) ───── */
+  const raporKey = siswa && ujian ? `${ujian.id}:${siswa.id}` : "";
+  currentKeyRef.current = raporKey;
+  const rapor = raporKey ? cacheRef.current[raporKey] : null;
+
+  /* ───── susun rapor siswa aktif + prefetch tetangganya ───── */
+  useEffect(() => {
+    if (!kelas || !ujian || !pengaturanSiap || !siswaList.length) return;
+    setError("");
+
+    const ensure = (s) => {
+      if (!s) return;
+      const key = `${ujian.id}:${s.id}`;
+      if (cacheRef.current[key] || inflightRef.current.has(key)) return;
+      inflightRef.current.add(key);
+      buildRapor(s, {
+        kelas,
+        ujian,
+        mapelList: nilaiAkhirData.mapelList,
+        nilaiAkhirMap: nilaiAkhirData.nilaiAkhir,
+        capaianMap,
+        pengaturanRapor: pengaturan.data,
+      })
+        .then((d) => {
+          cacheRef.current[key] = d;
+          setTick((t) => t + 1);
+        })
+        .catch((e) => {
+          console.error(e);
+          if (key === currentKeyRef.current) setError("Gagal menyusun rapor.");
+        })
+        .finally(() => inflightRef.current.delete(key));
+    };
+
+    ensure(siswaList[index]);
+    ensure(siswaList[index + 1]);
+    ensure(siswaList[index - 1]);
+  }, [
+    kelas,
+    ujian,
+    pengaturan,
+    pengaturanSiap,
+    siswaList,
+    index,
+    capaianMap,
+    nilaiAkhirData,
+  ]);
+
+  /* ───── navigasi siswa ───── */
+  const total = siswaList.length;
+
+  const step = useCallback(
+    (delta) => {
+      setIndex((i) => Math.min(total - 1, Math.max(0, i + delta)));
+      const el = headRef.current;
+      if (el && el.getBoundingClientRect().top < 0) {
+        el.scrollIntoView({ block: "start" });
+      }
+    },
+    [total],
+  );
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const tag = e.target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (e.key === "ArrowRight") step(1);
+      else if (e.key === "ArrowLeft") step(-1);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [step]);
+
+  /* ───── fit + zoom ───── */
+  const fit = useFitScale(812, !!rapor);
+  const bottomInset = useBottomInset(!!siswa && !!ujian);
+
+  // zoom manual: null = auto-fit, angka = faktor tambahan
   const [zoom, setZoom] = useState(null);
-
-  // pinch-to-zoom refs
   const pinchRef = useRef({ startDist: 0, startZoom: 1 });
   const zoomValRef = useRef(null);
   useEffect(() => {
@@ -994,132 +1242,8 @@ export default function RaporPage() {
   const zoomOut = () => setZoom((z) => Math.max(0.25, (z ?? 1) / 1.25));
   const zoomReset = () => setZoom(null);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const me = pb.authStore.record || pb.authStore.model;
-        const ids = toArray(me?.siswa_id);
-        if (!ids.length) return;
-        const res = await pb.collection("siswa").getFullList({
-          filter: ids.map((id) => `id = "${id}"`).join(" || "),
-          expand: "kelas_id.walikelas_id",
-          sort: "nama_siswa",
-          requestKey: null,
-        });
-        setSiswaList(res);
-        if (res[0]) setSiswaId(res[0].id);
-      } catch (e) {
-        console.error(e);
-        setError("Gagal memuat data siswa.");
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, []);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await pb.collection("pengaturan_ujian").getFullList({
-          filter: `akses_rapor = true`,
-          expand: "tahun_ajaran_id",
-          requestKey: null,
-        });
-        const sorted = sortUjian(res);
-        setUjianList(sorted);
-        setUjianId(sorted[0]?.id || "");
-      } catch (e) {
-        console.error(e);
-        setError("Gagal memuat periode rapor.");
-      }
-    })();
-  }, []);
-
-  const siswa = useMemo(
-    () => siswaList.find((s) => s.id === siswaId),
-    [siswaList, siswaId],
-  );
-  const ujian = useMemo(
-    () => ujianList.find((u) => u.id === ujianId),
-    [ujianList, ujianId],
-  );
-
-  const ujianOptions = useMemo(
-    () =>
-      ujianList.map((u, i) => {
-        const ta = u.expand?.tahun_ajaran_id;
-        return {
-          id: u.id,
-          title: u.nama_ujian || "Rapor",
-          subtitle: `Semester ${semesterLabel(ta?.semester)} · ${ta?.tahun ?? "-"}`,
-          badge: i === 0 ? "Terbaru" : null,
-        };
-      }),
-    [ujianList],
-  );
-
-  const siswaOptions = useMemo(
-    () => siswaList.map((s) => ({ id: s.id, title: s.nama_siswa })),
-    [siswaList],
-  );
-
-  // Ambil pengaturan_rapor yang terkait dengan ujian terpilih.
-  // Coba relasi `ujian` dulu, fallback ke `ujian_id`.
-  useEffect(() => {
-    if (!ujian) {
-      setPengaturanRapor(null);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      let pr = null;
-      try {
-        pr = await pb
-          .collection("pengaturan_rapor")
-          .getFirstListItem(`ujian = "${ujian.id}"`, { requestKey: null });
-      } catch {
-        try {
-          pr = await pb
-            .collection("pengaturan_rapor")
-            .getFirstListItem(`ujian_id = "${ujian.id}"`, { requestKey: null });
-        } catch {
-          pr = null;
-        }
-      }
-      if (cancelled) return;
-      console.log("[rapor] pengaturan_rapor:", pr);
-      setPengaturanRapor(pr);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [ujian]);
-
-  useEffect(() => {
-    if (!siswa || !ujian) {
-      setRapor(null);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      setLoadingRapor(true);
-      setError("");
-      try {
-        const data = await buildRapor(siswa, ujian, pengaturanRapor);
-        if (!cancelled) setRapor(data);
-      } catch (e) {
-        console.error(e);
-        if (!cancelled) setError("Gagal menyusun rapor.");
-      } finally {
-        if (!cancelled) setLoadingRapor(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [siswa, ujian, pengaturanRapor]);
-
   // Pinch-to-zoom (2 jari) + Ctrl/⌘ + scroll untuk trackpad
+  const adaRapor = !!rapor;
   useEffect(() => {
     const el = fit.wrapRef.current;
     if (!el) return;
@@ -1129,7 +1253,6 @@ export default function RaporPage() {
 
     const apply = (value) => {
       const clamped = Math.min(4, Math.max(0.25, value));
-      // dekat 100% → kembali ke mode auto-fit
       setZoom(Math.abs(clamped - 1) < 0.04 ? null : clamped);
     };
 
@@ -1141,18 +1264,15 @@ export default function RaporPage() {
         };
       }
     };
-
     const onTouchMove = (e) => {
       if (e.touches.length !== 2 || !pinchRef.current.startDist) return;
-      e.preventDefault(); // cegah zoom bawaan browser
+      e.preventDefault();
       const ratio = dist(e.touches) / pinchRef.current.startDist;
       apply(pinchRef.current.startZoom * ratio);
     };
-
     const onTouchEnd = (e) => {
       if (e.touches.length < 2) pinchRef.current.startDist = 0;
     };
-
     const onWheel = (e) => {
       if (!e.ctrlKey && !e.metaKey) return;
       e.preventDefault();
@@ -1172,8 +1292,9 @@ export default function RaporPage() {
       el.removeEventListener("touchcancel", onTouchEnd);
       el.removeEventListener("wheel", onWheel);
     };
-  }, [fit.wrapRef, siswa, rapor, loadingRapor]);
+  }, [fit.wrapRef, adaRapor]);
 
+  /* ───── unduh PDF siswa aktif ───── */
   const handleDownloadPdf = async () => {
     if (!rapor || !siswa || !sheetRef.current) return;
     setDownloading(true);
@@ -1184,15 +1305,13 @@ export default function RaporPage() {
 
       const pages = Array.from(sheetRef.current.querySelectorAll(".page"));
 
-      // Dimuat saat dibutuhkan (hindari error SSR)
       const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
         import("html2canvas"),
         import("jspdf"),
       ]);
 
       // Render dari salinan di luar layar: bebas dari transform/zoom preview,
-      // ukuran selalu tepat 215mm × 330mm (F4). Margin 8mm sudah ada di
-      // dalam .page (padding), jadi PDF tidak menambah margin lagi.
+      // ukuran selalu tepat 215mm × 330mm (F4).
       const stage = document.createElement("div");
       stage.style.cssText =
         "position:absolute;left:-10000px;top:0;width:215mm;background:#fff;";
@@ -1248,7 +1367,65 @@ export default function RaporPage() {
     }
   };
 
+  /* ───── opsi picker ───── */
+  const ujianOptions = useMemo(
+    () =>
+      ujianList.map((u, i) => {
+        const ta = u.expand?.tahun_ajaran_id;
+        return {
+          id: u.id,
+          title: u.nama_ujian || "Rapor",
+          subtitle: `Semester ${semesterLabel(ta?.semester)} · ${ta?.tahun ?? "-"}`,
+          badge: i === 0 ? "Terbaru" : null,
+        };
+      }),
+    [ujianList],
+  );
+
+  const siswaOptions = useMemo(
+    () =>
+      siswaList.map((s, i) => ({
+        id: s.id,
+        title: `${i + 1}. ${s.nama_siswa}`,
+        subtitle: s.nis ? `NIS ${s.nis}` : undefined,
+      })),
+    [siswaList],
+  );
+
+  const pilihSiswa = (id) => {
+    const i = siswaList.findIndex((s) => s.id === id);
+    if (i >= 0) setIndex(i);
+  };
+
+  /* ───── render ───── */
+  if (loading) {
+    return (
+      <>
+        <style>{CSS}</style>
+        <Spinner>Memuat data kelas…</Spinner>
+      </>
+    );
+  }
+
+  if (!kelas) {
+    return (
+      <>
+        <style>{CSS}</style>
+        {error ? (
+          <StateCard tone="error">{error}</StateCard>
+        ) : (
+          <StateCard title="Kelas tidak ditemukan">
+            Akun Anda belum terdaftar sebagai wali kelas atau pendamping kelas
+            mana pun.
+          </StateCard>
+        )}
+      </>
+    );
+  }
+
   const adaPeriode = ujianList.length > 0;
+  const tampilkanBar = !!siswa && !!ujian;
+  const menyusun = !!siswa && !!ujian && !rapor && !error;
 
   return (
     <>
@@ -1257,26 +1434,18 @@ export default function RaporPage() {
       {/* Judul */}
       <header className="no-print mb-3">
         <h1 className="text-[18px] font-semibold text-gray-900">
-          Rapor Ananda
+          Pratinjau Rapor Siswa
         </h1>
         <p className="mt-0.5 text-[12px] text-gray-500">
-          Pilih periode, lihat pratinjau, lalu unduh PDF.
+          {kelas.nama_kelas} · {total} siswa. Tekan Berikutnya (atau tombol
+          panah ← →) untuk berpindah siswa.
         </p>
       </header>
 
-      {/* Filter: 1 kolom di mobile, 2 kolom di layar ≥ sm */}
+      {/* Filter */}
       <section
         className={`no-print mb-4 grid gap-3 rounded-2xl bg-white p-3 sm:grid-cols-2 ${CARD_SHADOW}`}
       >
-        {siswaList.length > 1 && (
-          <PilihanSheet
-            label="Anak"
-            value={siswaId}
-            onChange={setSiswaId}
-            options={siswaOptions}
-          />
-        )}
-
         <PilihanSheet
           label="Periode rapor"
           value={ujianId}
@@ -1284,94 +1453,105 @@ export default function RaporPage() {
           options={ujianOptions}
           disabled={!adaPeriode}
           placeholder="Belum ada rapor"
-          className={siswaList.length > 1 ? "" : "sm:col-span-2"}
+        />
+        <PilihanSheet
+          label="Siswa"
+          value={siswa?.id || ""}
+          onChange={pilihSiswa}
+          options={siswaOptions}
+          disabled={!total}
+          placeholder="Belum ada siswa"
+          searchable
         />
       </section>
 
       {/* Status */}
-      {(loading || loadingRapor) && (
-        <div
-          className={`no-print flex items-center justify-center gap-2 rounded-2xl bg-white py-12 text-[13px] text-gray-400 ${CARD_SHADOW}`}
-        >
-          <div className="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-transparent" />
-          Memuat rapor…
-        </div>
-      )}
       {error && <StateCard tone="error">{error}</StateCard>}
-      {!loading && !error && !siswa && (
-        <StateCard title="Data anak belum terhubung">
-          Akun Anda belum terhubung dengan data anak. Hubungi wali kelas atau
-          admin.
+      {!error && !total && (
+        <StateCard title="Belum ada siswa">
+          Kelas ini belum memiliki data siswa.
         </StateCard>
       )}
-      {!loading && !loadingRapor && !error && siswa && !adaPeriode && (
+      {!error && total > 0 && !adaPeriode && (
         <StateCard title="Rapor belum dibuka">
-          Rapor {siswa.nama_siswa} belum dibuka oleh admin.
+          Belum ada periode rapor yang dibuka oleh admin.
         </StateCard>
       )}
+      {menyusun && <Spinner>Menyusun rapor…</Spinner>}
 
-      {/* Pratinjau + bar aksi */}
-      {siswa && rapor && !loadingRapor && (
+      {/* Pratinjau */}
+      {tampilkanBar && (
         <div
           className="no-print"
-          style={{ paddingBottom: `calc(5.5rem + ${bottomInset}px)` }}
+          style={{ paddingBottom: `calc(9.5rem + ${bottomInset}px)` }}
         >
-          <div className="mb-2 px-1">
-            <p className="text-[13px] font-medium text-gray-800">
-              {siswa.nama_siswa}
-            </p>
+          <div ref={headRef} className="mb-2 scroll-mt-20 px-1">
+            <div className="flex items-center gap-2">
+              <p className="min-w-0 truncate text-[13px] font-medium text-gray-800">
+                {siswa.nama_siswa}
+              </p>
+              {rapor && rapor.nilai.every((n) => n.nilai === "-") && (
+                <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
+                  Belum ada nilai
+                </span>
+              )}
+            </div>
             <p className="text-[12px] text-gray-500">
-              Semester {semesterLabel(rapor.semester)} · TP{" "}
-              {rapor.tahun_ajaran || "-"}
+              Siswa {index + 1} dari {total}
+              {rapor
+                ? ` · Semester ${semesterLabel(rapor.semester)} · TP ${rapor.tahun_ajaran || "-"}`
+                : ""}
             </p>
             <p className="mt-1 text-[11px] text-gray-400 sm:hidden">
               Cubit dengan dua jari untuk memperbesar.
             </p>
           </div>
 
-          {/* Meja kerja: latar netral supaya lembar putih terlihat sebagai kertas */}
-          <div
-            ref={fit.outerRef}
-            className="rapor-fit-outer bg-[#dfe3ec] py-2 sm:rounded-2xl sm:p-4"
-            style={
-              fit.bleed
-                ? { width: fit.bleed.w, marginLeft: fit.bleed.ml }
-                : undefined
-            }
-          >
+          {rapor && (
             <div
-              ref={fit.wrapRef}
-              className="rapor-fit-wrap"
-              style={{
-                height: fit.height
-                  ? `${fit.height * (effectiveScale / fit.scale)}px`
-                  : undefined,
-                overflow: zoom != null && zoom > 1 ? "auto" : "hidden",
-                touchAction: "pan-x pan-y",
-              }}
+              ref={fit.outerRef}
+              className="rapor-fit-outer bg-[#dfe3ec] py-2 sm:rounded-2xl sm:p-4"
+              style={
+                fit.bleed
+                  ? { width: fit.bleed.w, marginLeft: fit.bleed.ml }
+                  : undefined
+              }
             >
               <div
-                ref={fit.innerRef}
-                className="rapor-fit-inner"
-                style={{ transform: `scale(${effectiveScale})` }}
+                ref={fit.wrapRef}
+                className="rapor-fit-wrap"
+                style={{
+                  height: fit.height
+                    ? `${fit.height * (effectiveScale / fit.scale)}px`
+                    : undefined,
+                  overflow: zoom != null && zoom > 1 ? "auto" : "hidden",
+                  touchAction: "pan-x pan-y",
+                }}
               >
-                <div className={`rapor-paper ${zoom != null ? "zoomed" : ""}`}>
-                  <RaporPreview
-                    siswa={siswa}
-                    rapor={rapor}
-                    innerRef={sheetRef}
-                  />
+                <div
+                  ref={fit.innerRef}
+                  className="rapor-fit-inner"
+                  style={{ transform: `scale(${effectiveScale})` }}
+                >
+                  <div
+                    className={`rapor-paper ${zoom != null ? "zoomed" : ""}`}
+                  >
+                    <RaporPreview
+                      siswa={siswa}
+                      rapor={rapor}
+                      innerRef={sheetRef}
+                    />
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
+          )}
 
-          {/* Bar aksi: fixed + portal ke <body> supaya tidak terpengaruh
-                overflow/transform layout induk. Otomatis naik di atas bottom-nav. */}
+          {/* Bar aksi: fixed + portal ke <body>. Otomatis naik di atas bottom-nav. */}
           {createPortal(
             <div
               data-rapor-bar
-              className="no-print fixed z-50 mx-auto flex max-w-3xl items-center gap-2 rounded-2xl bg-white/95 p-2 shadow-[0_8px_30px_rgba(15,23,42,0.18)] backdrop-blur"
+              className="no-print fixed z-50 mx-auto max-w-3xl space-y-2 rounded-2xl bg-white/95 p-2 shadow-[0_8px_30px_rgba(15,23,42,0.18)] backdrop-blur"
               style={{
                 left: 12,
                 right: 12,
@@ -1380,38 +1560,69 @@ export default function RaporPage() {
                   : "max(0.75rem, env(safe-area-inset-bottom))",
               }}
             >
-              <div className="flex items-center">
+              {/* Baris 1: pindah siswa */}
+              <div className="flex items-center gap-2">
                 <button
-                  onClick={zoomOut}
-                  aria-label="Perkecil"
-                  className={ZOOM_BTN_CLS}
+                  onClick={() => step(-1)}
+                  disabled={index <= 0}
+                  aria-label="Siswa sebelumnya"
+                  className="flex h-11 flex-1 items-center justify-center gap-1 rounded-xl bg-gray-100 text-[14px] font-medium text-gray-700 transition hover:bg-gray-200 active:bg-gray-300 disabled:opacity-40 disabled:hover:bg-gray-100"
                 >
-                  −
+                  <Chevron dir="left" />
+                  Sebelumnya
                 </button>
-                <button
-                  onClick={zoomReset}
-                  disabled={zoom == null}
-                  aria-label="Atur ulang zoom"
-                  className="h-11 min-w-[48px] rounded-xl px-1 text-[12px] font-medium text-gray-700 hover:bg-gray-100 active:bg-gray-200 disabled:opacity-60 disabled:hover:bg-transparent"
+                <div
+                  className="min-w-[56px] text-center text-[12px] font-medium tabular-nums text-gray-500"
+                  aria-live="polite"
                 >
-                  {zoom == null ? "Auto" : `${Math.round(zoom * 100)}%`}
-                </button>
+                  {index + 1} / {total}
+                </div>
                 <button
-                  onClick={zoomIn}
-                  aria-label="Perbesar"
-                  className={ZOOM_BTN_CLS}
+                  onClick={() => step(1)}
+                  disabled={index >= total - 1}
+                  aria-label="Siswa berikutnya"
+                  className="flex h-11 flex-1 items-center justify-center gap-1 rounded-xl bg-[#3b6ef5] text-[14px] font-medium text-white shadow-[0_8px_18px_rgba(59,110,245,0.30)] transition hover:bg-[#2f5ee0] active:bg-[#2f5ee0] disabled:opacity-40 disabled:shadow-none disabled:hover:bg-[#3b6ef5]"
                 >
-                  +
+                  Berikutnya
+                  <Chevron dir="right" />
                 </button>
               </div>
 
-              <button
-                onClick={handleDownloadPdf}
-                disabled={downloading}
-                className="h-11 flex-1 rounded-xl bg-[#3b6ef5] px-4 text-[14px] font-medium text-white shadow-[0_8px_18px_rgba(59,110,245,0.30)] transition active:bg-[#2f5ee0] hover:bg-[#2f5ee0] disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
-              >
-                {downloading ? "Menyiapkan PDF…" : "Unduh PDF"}
-              </button>
+              {/* Baris 2: zoom + unduh */}
+              <div className="flex items-center gap-2">
+                <div className="flex items-center">
+                  <button
+                    onClick={zoomOut}
+                    aria-label="Perkecil"
+                    className={ZOOM_BTN_CLS}
+                  >
+                    −
+                  </button>
+                  <button
+                    onClick={zoomReset}
+                    disabled={zoom == null}
+                    aria-label="Atur ulang zoom"
+                    className="h-11 min-w-[48px] rounded-xl px-1 text-[12px] font-medium text-gray-700 hover:bg-gray-100 active:bg-gray-200 disabled:opacity-60 disabled:hover:bg-transparent"
+                  >
+                    {zoom == null ? "Auto" : `${Math.round(zoom * 100)}%`}
+                  </button>
+                  <button
+                    onClick={zoomIn}
+                    aria-label="Perbesar"
+                    className={ZOOM_BTN_CLS}
+                  >
+                    +
+                  </button>
+                </div>
+
+                <button
+                  onClick={handleDownloadPdf}
+                  disabled={downloading || !rapor}
+                  className="h-11 flex-1 rounded-xl bg-white px-4 text-[14px] font-medium text-[#3b6ef5] ring-1 ring-[#3b6ef5]/40 transition hover:bg-[#3b6ef5]/5 active:bg-[#3b6ef5]/10 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {downloading ? "Menyiapkan PDF…" : "Unduh PDF"}
+                </button>
+              </div>
             </div>,
             document.body,
           )}
@@ -1426,7 +1637,6 @@ const CSS = `
     /* ── Wrapper auto-fit + zoom ── */
     .rapor-fit-outer { width: 100%; }
 
-    /* Mobile: lebar kontainer & kertas = lebar layar dihitung di useFitScale */
     @media screen and (max-width: 639px) {
       .rapor-sheet { gap: 8mm; }
       .rapor-paper.zoomed { outline: none; }
@@ -1448,13 +1658,12 @@ const CSS = `
     .rapor-paper {
       width: 215mm;
       min-width: 215mm;
-      padding: 0;                 /* tidak ada padding — kertas = .page */
-      background: transparent;    /* hilangkan latar abu-biru */
+      padding: 0;
+      background: transparent;
       color: #000000;
       box-shadow: none;
       border-radius: 0;
     }
-    /* Outline tegas saat user zoom manual */
     .rapor-paper.zoomed {
       outline: 2px solid rgba(59,110,245,.55);
       outline-offset: 6px;
@@ -1464,7 +1673,7 @@ const CSS = `
     .rapor-sheet {
       display: flex;
       flex-direction: column;
-      gap: 12mm;                  /* GAP antar halaman */
+      gap: 12mm;
     }
 
     .rapor-sheet,
@@ -1494,9 +1703,9 @@ const CSS = `
     /* ── Tiap halaman = satu lembar kertas F4 ── */
     .page {
       display: block;
-      width: 215mm;               /* full F4 width */
-      height: 330mm;              /* full F4 height */
-      padding: 8mm;               /* margin cetak di dalam kertas */
+      width: 215mm;
+      height: 330mm;
+      padding: 8mm;
       overflow: hidden;
       background: #ffffff;
       position: relative;
@@ -1505,7 +1714,6 @@ const CSS = `
         0 8px 24px rgba(15,23,42,.10);
       border-radius: 2px;
     }
-    /* baris ke-2 dst tidak perlu margin lagi karena sudah pakai gap di .rapor-sheet */
     .page + .page { margin-top: 0; }
 
     .rapor-title {
@@ -1518,12 +1726,6 @@ const CSS = `
       -webkit-text-fill-color: #000000;
     }
 
-    /* ── Identitas: kolom kanan (Kelas/Fase/Semester/TP) digeser ke kanan ──
-       Cara kerja:
-       • .val  = 52%  → kolom kiri "makan" ruang lebih banyak
-       • .lbl2 = 120px → label kanan punya lebar tetap
-       • Hasil: blok kanan (Kelas/Fase/Semester/TP) mulai di ±58% lebar tabel
-    */
     .rapor-plain {
       width: 100%;
       border-collapse: collapse;
@@ -1537,12 +1739,12 @@ const CSS = `
       color: #000000;
       -webkit-text-fill-color: #000000;
       background: transparent;
-      white-space: nowrap;      /* cegah "Tahun Pelajaran" pecah 2 baris */
+      white-space: nowrap;
     }
     .rapor-plain .lbl  { width: 80px; }
     .rapor-plain .sep  { width: 12px; }
-    .rapor-plain .val  { width: 60%; }        /* kiri lebih lebar → kanan geser */
-    .rapor-plain .lbl2 { width: 120px; }      /* label kanan lebar tetap */
+    .rapor-plain .val  { width: 60%; }
+    .rapor-plain .lbl2 { width: 120px; }
     .rapor-plain .val2 { white-space: nowrap; }
 
     .rapor-table {
@@ -1642,7 +1844,7 @@ const CSS = `
       background: transparent;
     }
 
-    /* Ketidakhadiran: tabel kecil di kiri, garis antar baris, tanpa garis vertikal */
+    /* Ketidakhadiran: tabel kecil di kiri */
     .rapor-table.absen {
       width: 80mm;
       margin: 20px 0 0;
@@ -1653,8 +1855,6 @@ const CSS = `
       border: 0;
       border-bottom: 1px solid #000000;
       height: 6mm;
-      /* line-height + padding-bottom: html2canvas menggeser teks ke bawah
-        bila hanya mengandalkan vertical-align */
       line-height: 18px;
       padding: 0 8px 3px;
     }
@@ -1707,7 +1907,7 @@ const CSS = `
     thead { display: table-header-group; }
 
     @page {
-      size: 215mm 330mm; /* F4 / Folio */
+      size: 215mm 330mm;
       margin: 8mm;
     }
     @media print {
@@ -1725,7 +1925,6 @@ const CSS = `
         min-width: 0 !important;
       }
 
-      /* Di print: tiap .page auto-pecah ke halaman fisik */
       .rapor-paper {
         width: auto;
         min-width: 0;

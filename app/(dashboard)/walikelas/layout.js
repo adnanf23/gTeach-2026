@@ -48,6 +48,9 @@ const icons = {
   shield:
     "M8 1.5l5 2v4c0 3-2 5.5-5 7-3-1.5-5-4-5-7v-4l5-2zM6 8l1.5 1.5L10.5 6.5",
   chevron: "M6 4l4 4-4 4",
+  // ── Icon baru untuk Preview Rapor (dokumen dengan mata / pratinjau) ──
+  preview:
+    "M2 3h9l3 3v7H2V3z M11 3v3h3 M8 8.5a2 2 0 100 4 2 2 0 000-4z M4.5 10.5C5.5 9.3 6.7 8.7 8 8.7s2.5.6 3.5 1.8",
 };
 
 // ── Struktur navigasi: array of groups ──
@@ -150,6 +153,12 @@ const NAV_GROUPS = [
         label: "Catatan Siswa",
         href: "/walikelas/rapor/catatan-siswa",
         icon: "catatan",
+      },
+      {
+        key: "preview_rapor",
+        label: "Preview Rapor",
+        href: "/walikelas/rapor/preview-rapor",
+        icon: "preview",
       },
     ],
   },
