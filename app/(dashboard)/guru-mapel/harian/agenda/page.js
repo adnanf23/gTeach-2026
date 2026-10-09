@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { pb, isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
 import { createSystemLog } from "@/lib/logger";
@@ -75,7 +75,6 @@ const METODE_PEMBELAJARAN = {
 };
 
 // Daftar jam pelajaran sesuai dengan skema database
-// Nilai yang tersedia: "1 dan 2", "3 dan 4", "5 dan 6", "7 dan 8"
 const JAM_PELAJARAN = [
   { value: "1 dan 2", label: "Jam ke-1 & 2" },
   { value: "3 dan 4", label: "Jam ke-3 & 4" },
@@ -130,6 +129,203 @@ function Toast({ toast, onClose }) {
 }
 
 // =========================================================
+// Custom Dropdown: Pindah Kelas Cepat
+// =========================================================
+function KelasDropdown({ kelasList, selectedKelas, onSelect }) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const wrapRef = useRef(null);
+  const inputRef = useRef(null);
+
+  // Tutup saat klik di luar
+  useEffect(() => {
+    if (!open) return;
+    function handleClickOutside(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) {
+        setOpen(false);
+        setSearch("");
+      }
+    }
+    function handleEsc(e) {
+      if (e.key === "Escape") {
+        setOpen(false);
+        setSearch("");
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleEsc);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleEsc);
+    };
+  }, [open]);
+
+  // Fokuskan input pencarian saat dropdown dibuka
+  useEffect(() => {
+    if (open) {
+      const t = setTimeout(() => inputRef.current?.focus(), 50);
+      return () => clearTimeout(t);
+    }
+  }, [open]);
+
+  const sorted = useMemo(
+    () =>
+      kelasList
+        .slice()
+        .sort((a, b) => a.nama_kelas.localeCompare(b.nama_kelas)),
+    [kelasList],
+  );
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return sorted;
+    const q = search.toLowerCase();
+    return sorted.filter((k) => k.nama_kelas.toLowerCase().includes(q));
+  }, [sorted, search]);
+
+  const handleChoose = (k) => {
+    onSelect(k.id);
+    setOpen(false);
+    setSearch("");
+  };
+
+  return (
+    <div ref={wrapRef} className="relative">
+      {/* Trigger */}
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={`group flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition ${
+          open
+            ? "border-indigo-400 bg-indigo-100 text-indigo-800 ring-1 ring-indigo-400"
+            : "border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+        }`}
+        title="Pindah kelas cepat"
+      >
+        <svg
+          className="h-3.5 w-3.5"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M19 21v-2a4 4 0 00-4-4H9a4 4 0 00-4 4v2"
+          />
+          <circle cx="12" cy="7" r="4" />
+        </svg>
+        <span className="max-w-[100px] truncate sm:max-w-[140px]">
+          {selectedKelas?.nama_kelas || "Pilih Kelas"}
+        </span>
+        <svg
+          className={`h-3 w-3 transition-transform duration-200 ${
+            open ? "rotate-180" : ""
+          }`}
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={3}
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M19 9l-7 7-7-7"
+          />
+        </svg>
+      </button>
+
+      {/* Popover */}
+      {open && (
+        <div className="absolute left-0 z-40 mt-2 w-64 origin-top-left overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl animate-[dropdown-in_0.15s_ease-out]">
+          {/* Search bar */}
+          {sorted.length > 5 && (
+            <div className="border-b border-slate-100 p-2">
+              <div className="relative">
+                <svg
+                  className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z"
+                  />
+                </svg>
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Cari kelas..."
+                  className="w-full rounded-md border border-slate-200 bg-slate-50 py-1.5 pl-8 pr-2 text-xs outline-none transition focus:border-indigo-400 focus:bg-white focus:ring-1 focus:ring-indigo-400"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* List kelas */}
+          <div className="max-h-64 overflow-y-auto py-1">
+            {filtered.length === 0 ? (
+              <p className="px-3 py-4 text-center text-xs text-slate-400">
+                Tidak ada kelas yang cocok
+              </p>
+            ) : (
+              filtered.map((k) => {
+                const isActive = selectedKelas?.id === k.id;
+                return (
+                  <button
+                    key={k.id}
+                    type="button"
+                    onClick={() => handleChoose(k)}
+                    className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs transition ${
+                      isActive
+                        ? "bg-indigo-50 font-semibold text-indigo-700"
+                        : "text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    <div className="flex min-w-0 flex-col">
+                      <span className="truncate">{k.nama_kelas}</span>
+                      {typeof k.siswaCount === "number" && (
+                        <span
+                          className={`text-[10px] ${
+                            isActive ? "text-indigo-500" : "text-slate-400"
+                          }`}
+                        >
+                          {k.siswaCount} siswa · Tingkat {k.tingkat || "—"}
+                        </span>
+                      )}
+                    </div>
+                    {isActive && (
+                      <svg
+                        className="h-4 w-4 flex-shrink-0 text-indigo-600"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth={3}
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M5 13l4 4L19 7"
+                        />
+                      </svg>
+                    )}
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// =========================================================
 // Modal Form Agenda (Lengkap sesuai database)
 // =========================================================
 function AgendaModal({
@@ -143,7 +339,6 @@ function AgendaModal({
 }) {
   const [loading, setLoading] = useState(false);
 
-  // State terpisah untuk setiap field
   const [deskripsi, setDeskripsi] = useState("");
   const [topik, setTopik] = useState("");
   const [jamMapel, setJamMapel] = useState("");
@@ -151,12 +346,10 @@ function AgendaModal({
   const [siswaTidakHadir, setSiswaTidakHadir] = useState("");
   const [date, setDate] = useState(defaultDate || toISODate(new Date()));
 
-  // Reset form ketika modal dibuka
   useEffect(() => {
     if (!isOpen) return;
 
     if (initialData) {
-      // Mode Edit
       setDeskripsi(initialData.deskripsi || "");
       setTopik(initialData.topik || "");
       setJamMapel(initialData.jam_mapel || "");
@@ -164,7 +357,6 @@ function AgendaModal({
       setSiswaTidakHadir(initialData.siswa_tidak_hadir || "");
       setDate(initialData.date || defaultDate || toISODate(new Date()));
     } else {
-      // Mode Tambah Baru
       setDeskripsi("");
       setTopik("");
       setJamMapel("");
@@ -220,7 +412,6 @@ function AgendaModal({
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Informasi Mapel & Kelas */}
           <div className="rounded-lg bg-slate-50 px-4 py-3 text-sm text-slate-600">
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-semibold text-slate-800">{mapelNama}</span>
@@ -229,7 +420,6 @@ function AgendaModal({
             </div>
           </div>
 
-          {/* Topik Pembelajaran */}
           <div>
             <label
               htmlFor="topik"
@@ -247,7 +437,6 @@ function AgendaModal({
             />
           </div>
 
-          {/* Deskripsi Kegiatan */}
           <div>
             <label
               htmlFor="deskripsi"
@@ -266,7 +455,6 @@ function AgendaModal({
             />
           </div>
 
-          {/* Jam Pelajaran */}
           <div>
             <label
               htmlFor="jam_mapel"
@@ -295,7 +483,6 @@ function AgendaModal({
             </p>
           </div>
 
-          {/* Metode Pembelajaran */}
           <div>
             <label
               htmlFor="metode"
@@ -320,7 +507,6 @@ function AgendaModal({
             </select>
           </div>
 
-          {/* Siswa Tidak Hadir */}
           <div>
             <label
               htmlFor="siswa_tidak_hadir"
@@ -338,7 +524,6 @@ function AgendaModal({
             />
           </div>
 
-          {/* Tanggal */}
           <div>
             <label
               htmlFor="date"
@@ -408,17 +593,14 @@ function PilihMapelStep({ mapelOptions, onPilih }) {
                 onClick={() => onPilih(m)}
                 className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-all duration-300 hover:border-blue-600 hover:shadow-lg hover:shadow-blue-200 hover:bg-blue-600 active:scale-[0.98]"
               >
-                {/* Kode mapel sebagai badge */}
                 <div className="absolute top-3 right-12 text-[10px] font-medium text-slate-400 group-hover:text-blue-200 transition-colors duration-300">
                   {m.kode_mapel || "MPL"}
                 </div>
 
-                {/* Nama mapel - putih saat hover */}
                 <h3 className="text-base font-semibold text-slate-900 group-hover:text-white transition-colors duration-300">
                   {m.nama_mapel}
                 </h3>
 
-                {/* Jumlah kelas yang diampu */}
                 <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500 group-hover:text-blue-100 transition-colors duration-300">
                   <span className="flex items-center gap-1">
                     <svg
@@ -439,7 +621,6 @@ function PilihMapelStep({ mapelOptions, onPilih }) {
                   </span>
                 </div>
 
-                {/* Arrow indicator */}
                 <div className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 group-hover:text-white group-hover:translate-x-1.5 transition-all duration-300">
                   <svg
                     className="w-5 h-5"
@@ -456,7 +637,6 @@ function PilihMapelStep({ mapelOptions, onPilih }) {
                   </svg>
                 </div>
 
-                {/* Efek shimmer/kilau saat hover */}
                 <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/15 to-white/0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 pointer-events-none" />
               </button>
             ))}
@@ -472,7 +652,6 @@ function PilihMapelStep({ mapelOptions, onPilih }) {
 function PilihKelasStep({ mapel, kelasOptions, loading, onPilih, onBack }) {
   return (
     <div className="mx-auto max-w-5xl px-4 py-6">
-      {/* Header dengan breadcrumb */}
       <div className="mb-6">
         <button
           onClick={onBack}
@@ -506,7 +685,6 @@ function PilihKelasStep({ mapel, kelasOptions, loading, onPilih, onBack }) {
         </div>
       </div>
 
-      {/* Grid card kelas */}
       {loading ? (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {[1, 2, 3].map((i) => (
@@ -532,7 +710,6 @@ function PilihKelasStep({ mapel, kelasOptions, loading, onPilih, onBack }) {
                 onClick={() => onPilih(k)}
                 className="group relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-all duration-300 hover:border-blue-600 hover:shadow-lg hover:shadow-blue-200 hover:bg-blue-600 active:scale-[0.98]"
               >
-                {/* Badge tingkat di pojok kanan atas */}
                 <div className="absolute top-3 right-12 text-[10px] font-medium text-slate-400 group-hover:text-blue-200 transition-colors duration-300">
                   {k.tingkat || "—"}
                 </div>
@@ -577,7 +754,6 @@ function PilihKelasStep({ mapel, kelasOptions, loading, onPilih, onBack }) {
                   </span>
                 </div>
 
-                {/* Arrow indicator */}
                 <div className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-300 group-hover:text-white group-hover:translate-x-1.5 transition-all duration-300">
                   <svg
                     className="w-5 h-5"
@@ -594,7 +770,6 @@ function PilihKelasStep({ mapel, kelasOptions, loading, onPilih, onBack }) {
                   </svg>
                 </div>
 
-                {/* Efek shimmer */}
                 <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/15 to-white/0 -translate-x-full group-hover:translate-x-full transition-transform duration-700 pointer-events-none" />
               </button>
             ))}
@@ -611,20 +786,16 @@ export default function AgendaMengajarGuruMapelPage() {
   const router = useRouter();
   const today = useMemo(() => startOfDay(new Date()), []);
 
-  // Auth
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [user, setUser] = useState(null);
 
-  // Ploting guru (sumber mapel + kelas yang diampu)
   const [plotingList, setPlotingList] = useState([]);
   const [loadingPloting, setLoadingPloting] = useState(true);
 
-  // Step: "mapel" | "kelas" | "kalender"
   const [step, setStep] = useState("mapel");
   const [selectedMapel, setSelectedMapel] = useState(null);
   const [selectedKelas, setSelectedKelas] = useState(null);
 
-  // Kalender
   const [viewDate, setViewDate] = useState(
     () => new Date(today.getFullYear(), today.getMonth(), 1),
   );
@@ -632,18 +803,14 @@ export default function AgendaMengajarGuruMapelPage() {
   const [loadingCalendar, setLoadingCalendar] = useState(false);
   const [message, setMessage] = useState(null);
 
-  // Detail
   const [selectedDate, setSelectedDate] = useState(null);
   const [detailItems, setDetailItems] = useState([]);
 
-  // Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
   const [modalDefaultDate, setModalDefaultDate] = useState(null);
 
-  // =========================================================
   // Auth
-  // =========================================================
   useEffect(() => {
     if (!isAuthenticated()) {
       router.replace("/login");
@@ -653,9 +820,7 @@ export default function AgendaMengajarGuruMapelPage() {
     setCheckingAuth(false);
   }, [router]);
 
-  // =========================================================
-  // Ambil ploting_guru milik user (mapel + kelas yang diampu)
-  // =========================================================
+  // Fetch ploting
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
@@ -687,9 +852,7 @@ export default function AgendaMengajarGuruMapelPage() {
     };
   }, [user?.id]);
 
-  // =========================================================
-  // Daftar mapel unik yang diampu guru ini, dengan jumlah kelas
-  // =========================================================
+  // Mapel unik
   const mapelOptions = useMemo(() => {
     const map = new Map();
     for (const r of plotingList) {
@@ -712,9 +875,7 @@ export default function AgendaMengajarGuruMapelPage() {
     }));
   }, [plotingList]);
 
-  // =========================================================
-  // Ambil kelas + hitung jumlah siswa per kelas
-  // =========================================================
+  // Kelas + jumlah siswa
   const [kelasOptionsWithCount, setKelasOptionsWithCount] = useState([]);
   const [loadingKelasOptions, setLoadingKelasOptions] = useState(false);
 
@@ -728,7 +889,6 @@ export default function AgendaMengajarGuruMapelPage() {
     async function fetchKelasWithCount() {
       setLoadingKelasOptions(true);
       try {
-        // Kumpulkan kelas unik dari ploting yang mapel_id-nya sesuai
         const kelasSet = new Map();
         for (const r of plotingList) {
           if (r.mapel_id !== selectedMapel.id) continue;
@@ -741,7 +901,6 @@ export default function AgendaMengajarGuruMapelPage() {
           a.nama_kelas.localeCompare(b.nama_kelas),
         );
 
-        // Hitung jumlah siswa per kelas
         const withCount = await Promise.all(
           kelasList.map(async (k) => {
             try {
@@ -773,9 +932,7 @@ export default function AgendaMengajarGuruMapelPage() {
     };
   }, [selectedMapel, plotingList]);
 
-  // =========================================================
-  // Load Month Agenda (difilter mapel + kelas)
-  // =========================================================
+  // Load month
   const loadMonth = useCallback(async () => {
     if (!selectedKelas || !selectedMapel) return;
 
@@ -817,25 +974,18 @@ export default function AgendaMengajarGuruMapelPage() {
     if (step === "kalender") loadMonth();
   }, [loadMonth, step]);
 
-  // =========================================================
-  // Day Summary
-  // =========================================================
   function daySummary(date) {
     const key = toISODate(date);
     const items = monthAgenda[key] || [];
     return items.length > 0 ? { total: items.length } : null;
   }
 
-  // =========================================================
-  // Open Detail
-  // =========================================================
   async function openDetail(date) {
     setSelectedDate(date);
     setMessage(null);
     const key = toISODate(date);
     const items = monthAgenda[key] || [];
 
-    // Refresh data dengan expand lengkap
     const refreshedItems = await Promise.all(
       items.map(async (item) => {
         try {
@@ -852,7 +1002,6 @@ export default function AgendaMengajarGuruMapelPage() {
       }),
     );
 
-    // Sort berdasarkan urutan jam yang benar
     const sortedItems = refreshedItems.sort((a, b) => {
       const indexA = JAM_ORDER.indexOf(a.jam_mapel);
       const indexB = JAM_ORDER.indexOf(b.jam_mapel);
@@ -862,12 +1011,8 @@ export default function AgendaMengajarGuruMapelPage() {
     setDetailItems(sortedItems);
   }
 
-  // =========================================================
-  // CRUD Operations with Validation
-  // =========================================================
   const handleCreate = async (data) => {
     try {
-      // Validasi: Cek apakah sudah ada agenda dengan mapel dan jam yang sama di tanggal yang sama
       const existing = await pb.collection("agenda_mengajar").getFullList({
         filter: `kelas_id="${selectedKelas.id}" && mapel_id="${selectedMapel.id}" && date="${data.date}" && jam_mapel="${data.jam_mapel}"`,
         requestKey: null,
@@ -881,7 +1026,6 @@ export default function AgendaMengajarGuruMapelPage() {
         return;
       }
 
-      // Cek apakah jam tersebut sudah digunakan oleh mapel lain di tanggal yang sama
       const existingJam = await pb.collection("agenda_mengajar").getFullList({
         filter: `kelas_id="${selectedKelas.id}" && date="${data.date}" && jam_mapel="${data.jam_mapel}"`,
         requestKey: null,
@@ -971,7 +1115,6 @@ export default function AgendaMengajarGuruMapelPage() {
   const handleUpdate = async (data) => {
     if (!editingItem) return;
     try {
-      // Validasi: Cek apakah ada agenda lain dengan mapel dan jam yang sama
       const existing = await pb.collection("agenda_mengajar").getFullList({
         filter: `kelas_id="${selectedKelas.id}" && mapel_id="${selectedMapel.id}" && date="${data.date}" && jam_mapel="${data.jam_mapel}" && id != "${editingItem.id}"`,
         requestKey: null,
@@ -985,7 +1128,6 @@ export default function AgendaMengajarGuruMapelPage() {
         return;
       }
 
-      // Cek apakah jam tersebut sudah digunakan oleh mapel lain
       const existingJam = await pb.collection("agenda_mengajar").getFullList({
         filter: `kelas_id="${selectedKelas.id}" && date="${data.date}" && jam_mapel="${data.jam_mapel}" && id != "${editingItem.id}"`,
         requestKey: null,
@@ -1069,9 +1211,6 @@ export default function AgendaMengajarGuruMapelPage() {
     }
   };
 
-  // =========================================================
-  // Navigation
-  // =========================================================
   function goToMonth(offset) {
     setViewDate(
       (prev) => new Date(prev.getFullYear(), prev.getMonth() + offset, 1),
@@ -1104,6 +1243,19 @@ export default function AgendaMengajarGuruMapelPage() {
     setStep("kalender");
   }
 
+  // Pindah kelas cepat dari dalam kalender
+  function switchKelas(newKelasId) {
+    if (!newKelasId || newKelasId === selectedKelas?.id) return;
+    const k = kelasOptionsWithCount.find((x) => x.id === newKelasId);
+    if (!k) return;
+
+    setSelectedKelas(k);
+    setSelectedDate(null);
+    setDetailItems([]);
+    setMonthAgenda({});
+    // viewDate tidak direset agar tetap di bulan yang sama
+  }
+
   function backKeMapel() {
     setStep("mapel");
     setSelectedMapel(null);
@@ -1117,9 +1269,6 @@ export default function AgendaMengajarGuruMapelPage() {
     setDetailItems([]);
   }
 
-  // =========================================================
-  // Build Calendar Grid
-  // =========================================================
   const cells = useMemo(() => {
     const year = viewDate.getFullYear();
     const month = viewDate.getMonth();
@@ -1134,9 +1283,6 @@ export default function AgendaMengajarGuruMapelPage() {
     return arr;
   }, [viewDate]);
 
-  // =========================================================
-  // Render
-  // =========================================================
   if (checkingAuth || loadingPloting) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50">
@@ -1151,6 +1297,10 @@ export default function AgendaMengajarGuruMapelPage() {
         @keyframes toast-in {
           from { opacity: 0; transform: translateY(-8px); }
           to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes dropdown-in {
+          from { opacity: 0; transform: translateY(-4px) scale(0.97); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
         }
       `}</style>
       <Toast toast={message} onClose={() => setMessage(null)} />
@@ -1191,7 +1341,7 @@ export default function AgendaMengajarGuruMapelPage() {
           {/* Kartu kalender */}
           <div className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="text-base font-semibold text-slate-900 sm:text-sm md:text-base">
                   {BULAN[viewDate.getMonth()]} {viewDate.getFullYear()}
                 </span>
@@ -1201,9 +1351,14 @@ export default function AgendaMengajarGuruMapelPage() {
                 >
                   Hari ini
                 </button>
-                <span className="ml-2 rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-medium text-indigo-700">
-                  {selectedKelas.nama_kelas}
-                </span>
+
+                {/* === Custom dropdown pindah kelas === */}
+                <KelasDropdown
+                  kelasList={kelasOptionsWithCount}
+                  selectedKelas={selectedKelas}
+                  onSelect={switchKelas}
+                />
+
                 <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600">
                   {selectedMapel.nama_mapel}
                 </span>
@@ -1351,7 +1506,6 @@ export default function AgendaMengajarGuruMapelPage() {
                     >
                       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                         <div className="flex-1 space-y-1.5">
-                          {/* Header dengan nomor urut, mapel, dan jam */}
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-indigo-100 text-xs font-semibold text-indigo-700">
                               {index + 1}
@@ -1373,21 +1527,17 @@ export default function AgendaMengajarGuruMapelPage() {
                             )}
                           </div>
 
-                          {/* Topik */}
                           {item.topik && (
                             <p className="text-sm font-semibold text-slate-800">
                               📚 {item.topik}
                             </p>
                           )}
 
-                          {/* Deskripsi */}
                           <p className="text-sm text-slate-700">
                             {item.deskripsi}
                           </p>
 
-                          {/* Detail tambahan */}
                           <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
-                            {/* Metode */}
                             {item.metode && (
                               <span className="flex items-center gap-1">
                                 <span className="text-slate-400">Metode:</span>
@@ -1398,7 +1548,6 @@ export default function AgendaMengajarGuruMapelPage() {
                               </span>
                             )}
 
-                            {/* Siswa Tidak Hadir */}
                             {item.siswa_tidak_hadir && (
                               <span className="flex items-center gap-1">
                                 <span className="text-slate-400">
@@ -1411,7 +1560,6 @@ export default function AgendaMengajarGuruMapelPage() {
                             )}
                           </div>
 
-                          {/* Timestamp */}
                           <div className="flex flex-wrap items-center gap-3 text-[10px] text-slate-400">
                             <span>
                               Dibuat:{" "}
@@ -1441,7 +1589,6 @@ export default function AgendaMengajarGuruMapelPage() {
                           </div>
                         </div>
 
-                        {/* Action Buttons */}
                         <div className="flex items-center gap-2">
                           <button
                             onClick={() => {
