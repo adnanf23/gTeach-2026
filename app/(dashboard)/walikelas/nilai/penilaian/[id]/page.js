@@ -92,6 +92,93 @@ function readCellString(cell) {
   return String(v).trim();
 }
 
+// ---------- Util impor Excel (3 sheet) ----------
+function normNis(v) {
+  return String(v ?? "")
+    .replace(/\D/g, "")
+    .trim();
+}
+
+function normText(v) {
+  return String(v ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function isFilledNilai(v) {
+  return typeof v === "number" && !isNaN(v) && v !== -1;
+}
+
+function findSheet(workbook, keyword) {
+  return (
+    workbook.worksheets.find((ws) =>
+      String(ws.name || "")
+        .toLowerCase()
+        .includes(keyword),
+    ) || null
+  );
+}
+
+// Cari baris header yang memuat kolom "NIS" (dipakai sheet sumatif & ujian)
+function findHeaderRow(sheet, maxRow = 6) {
+  for (let r = 1; r <= maxRow; r++) {
+    let found = false;
+    sheet.getRow(r).eachCell({ includeEmpty: false }, (cell) => {
+      if (readCellString(cell).toLowerCase() === "nis") found = true;
+    });
+    if (found) return r;
+  }
+  return -1;
+}
+
+// Baca kolom nilai (setelah kolom NO, NAMA, NIS) dari baris header
+function readValueColumns(sheet, headerRowNum) {
+  const row = sheet.getRow(headerRowNum);
+  let nisCol = -1;
+  let namaCol = -1;
+  row.eachCell({ includeEmpty: false }, (cell, col) => {
+    const t = readCellString(cell).toLowerCase();
+    if (t === "nis" && nisCol === -1) nisCol = col;
+    if ((t === "nama" || t.startsWith("nama ")) && namaCol === -1)
+      namaCol = col;
+  });
+  if (nisCol === -1) nisCol = 3;
+  if (namaCol === -1) namaCol = 2;
+
+  const startCol = Math.max(nisCol, namaCol) + 1;
+  const columns = [];
+  row.eachCell({ includeEmpty: false }, (cell, col) => {
+    if (col < startCol) return;
+    const name = readCellString(cell);
+    if (!name) return;
+    if (/^(rata|l\/p$|kelas$|nisn$|jenis kelamin)/i.test(name)) return;
+    columns.push({ col, name });
+  });
+  return { nisCol, namaCol, columns };
+}
+
+// Jalankan banyak task async dengan batas concurrency
+async function runPool(tasks, limit = 6) {
+  let idx = 0;
+  const workers = Array.from(
+    { length: Math.min(limit, tasks.length) },
+    async () => {
+      while (idx < tasks.length) {
+        const task = tasks[idx++];
+        await task();
+      }
+    },
+  );
+  await Promise.all(workers);
+}
+
+const IMPORT_SECTIONS = [
+  { key: "formatif", label: "Formatif", createdLabel: "TP dibuat" },
+  { key: "sumatif", label: "Sumatif", createdLabel: "LM dibuat" },
+  { key: "ujian", label: "Ujian", createdLabel: null },
+];
+
 // ================================================================
 // STYLE BERSAMA
 // ================================================================
@@ -360,13 +447,15 @@ export default function PenilaianMapelPage() {
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
-  // TEMPLATE & IMPORT
+  // TEMPLATE & IMPORT (3 sheet: formatif, sumatif, ujian)
   const [showTemplateDialog, setShowTemplateDialog] = useState(false);
   const [templateTpCount, setTemplateTpCount] = useState(1);
   const [templateKCount, setTemplateKCount] = useState(4);
+  const [templateLmExtra, setTemplateLmExtra] = useState(3);
   const [downloadingTemplate, setDownloadingTemplate] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState(null);
+  const [tableVersion, setTableVersion] = useState(0);
   const importInputRef = useRef(null);
 
   // SCAN KERTAS
@@ -1477,6 +1566,7 @@ export default function PenilaianMapelPage() {
       }
 
       setNilaiFormatif(nilaiMap);
+      setTableVersion((v) => v + 1);
       setScanResult({ saved: savedCount, skipped: skippedCount, errors });
       setScanStep("done");
       showToast(`${savedCount} nilai berhasil disimpan`, "success");
@@ -1500,7 +1590,7 @@ export default function PenilaianMapelPage() {
     }
   }
 
-  // ================= DOWNLOAD TEMPLATE =================
+  // ================= DOWNLOAD TEMPLATE (3 SHEET) =================
   async function handleDownloadTemplate() {
     try {
       setDownloadingTemplate(true);
@@ -1508,16 +1598,13 @@ export default function PenilaianMapelPage() {
       const GREEN = "FFD9EAD3";
       const CYAN = "FFE0FFFF";
       const YELLOW = "FFFFFF00";
+      const ORANGE = "FFFFE0B2";
 
       const workbook = new ExcelJS.Workbook();
       workbook.creator = "Sistem Penilaian";
       workbook.created = new Date();
 
-      const kLabels = SEMUA_KRITERIA.slice(0, templateKCount);
-      const tpLabels = DAFTAR_NO_TP.slice(0, templateTpCount);
-      const totalCols = 3 + templateTpCount * templateKCount;
-
-      const sheet = workbook.addWorksheet("TEMPLATE FORMATIF");
+      const infoMapel = `${mapel?.nama_mapel || ""} - ${kelas?.nama_kelas || ""}`;
 
       const addBorder = (cell) => {
         cell.border = {
@@ -1527,11 +1614,11 @@ export default function PenilaianMapelPage() {
           right: { style: "thin", color: { argb: "FF000000" } },
         };
       };
-      const styleHeaderCell = (cell, horizontal = "center") => {
+      const styleHeaderCell = (cell, horizontal = "center", color = GREEN) => {
         cell.fill = {
           type: "pattern",
           pattern: "solid",
-          fgColor: { argb: GREEN },
+          fgColor: { argb: color },
         };
         cell.font = { bold: true, color: { argb: "FF000000" }, size: 11 };
         cell.alignment = { horizontal, vertical: "middle", wrapText: true };
@@ -1560,13 +1647,23 @@ export default function PenilaianMapelPage() {
         cell.font = { bold: true };
         addBorder(cell);
       };
+      const styleTitle = (sheet, text, totalCols) => {
+        sheet.mergeCells(1, 1, 1, totalCols);
+        const titleCell = sheet.getCell(1, 1);
+        titleCell.value = text;
+        titleCell.font = { bold: true, size: 14 };
+        titleCell.alignment = { horizontal: "center", vertical: "middle" };
+        sheet.getRow(1).height = 26;
+      };
 
-      sheet.mergeCells(1, 1, 1, totalCols);
-      const titleCell = sheet.getCell(1, 1);
-      titleCell.value = `TEMPLATE NILAI FORMATIF - ${mapel?.nama_mapel || ""} - ${kelas?.nama_kelas || ""}`;
-      titleCell.font = { bold: true, size: 14 };
-      titleCell.alignment = { horizontal: "center", vertical: "middle" };
-      sheet.getRow(1).height = 26;
+      // ---------- SHEET 1: FORMATIF ----------
+      const kLabels = SEMUA_KRITERIA.slice(0, templateKCount);
+      const tpLabels = DAFTAR_NO_TP.slice(0, templateTpCount);
+      const totalCols = 3 + templateTpCount * templateKCount;
+
+      const sheet = workbook.addWorksheet("FORMATIF");
+
+      styleTitle(sheet, `TEMPLATE NILAI FORMATIF - ${infoMapel}`, totalCols);
 
       const hr1 = sheet.getRow(2);
       hr1.getCell(1).value = "NO";
@@ -1645,12 +1742,87 @@ export default function PenilaianMapelPage() {
 
       sheet.views = [{ state: "frozen", xSplit: 3, ySplit: 3 }];
 
+      // ---------- SHEET 2 & 3: SUMATIF + UJIAN (header 1 baris) ----------
+      // headers: array nama kolom; string kosong = kolom kosong (oranye)
+      // getValue(siswa, colIdx) -> nilai atau null
+      function buildSimpleSheet(name, title, headers, getValue) {
+        const ws = workbook.addWorksheet(name);
+        const cols = 3 + headers.length;
+        styleTitle(ws, title, cols);
+
+        const hr = ws.getRow(2);
+        hr.getCell(1).value = "NO";
+        hr.getCell(2).value = "NAMA SISWA";
+        hr.getCell(3).value = "NIS";
+        headers.forEach((h, i) => {
+          hr.getCell(4 + i).value = h || null;
+        });
+        for (let c = 1; c <= cols; c++) {
+          const isBlankHeader = c >= 4 && !headers[c - 4];
+          styleHeaderCell(
+            hr.getCell(c),
+            c === 2 ? "left" : "center",
+            isBlankHeader ? ORANGE : GREEN,
+          );
+        }
+        hr.height = 36;
+
+        siswaList.forEach((s, idx) => {
+          const r = ws.getRow(3 + idx);
+          r.getCell(1).value = idx + 1;
+          r.getCell(2).value = s.nama_siswa;
+          r.getCell(3).value = s.nis || "";
+          styleBodyCell(r.getCell(1));
+          styleBodyCell(r.getCell(2), "left");
+          styleBodyCell(r.getCell(3));
+
+          headers.forEach((_, i) => {
+            const cell = r.getCell(4 + i);
+            const v = getValue(s, i);
+            if (isFilledNilai(v)) {
+              cell.value = Number(v);
+              styleFilledCell(cell);
+            } else {
+              cell.value = null;
+              styleInputCell(cell);
+            }
+          });
+        });
+
+        ws.getColumn(1).width = 6;
+        ws.getColumn(2).width = 28;
+        ws.getColumn(3).width = 14;
+        for (let c = 4; c <= cols; c++) ws.getColumn(c).width = 18;
+        ws.views = [{ state: "frozen", xSplit: 3, ySplit: 2 }];
+      }
+
+      // SUMATIF: kolom = LM yang sudah ada + kolom header kosong untuk LM baru
+      const lmHeaders = [
+        ...lpList.map((lp) => lp.nama || ""),
+        ...Array.from({ length: templateLmExtra }, () => ""),
+      ];
+      buildSimpleSheet(
+        "SUMATIF",
+        `TEMPLATE NILAI SUMATIF - ${infoMapel}  |  Isi nama LM baru di header oranye untuk membuat LM otomatis saat impor`,
+        lmHeaders,
+        (s, i) =>
+          i < lpList.length ? nilaiSumatif[s.id]?.[lpList[i].id]?.nilai : null,
+      );
+
+      // UJIAN: kolom = ujian aktif untuk kelas ini
+      buildSimpleSheet(
+        "UJIAN",
+        `TEMPLATE NILAI UJIAN - ${infoMapel}  |  Nama ujian pada header harus sesuai dengan ujian aktif`,
+        ujianAktif.map((u) => u.nama_ujian || ""),
+        (s, i) => nilaiUjian[ujianAktif[i]?.id]?.[s.id]?.nilai,
+      );
+
       const buffer = await workbook.xlsx.writeBuffer();
       const blob = new Blob([buffer], {
         type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       });
       const fileName =
-        `Template_Formatif_${mapel?.nama_mapel || "Mapel"}_${kelas?.nama_kelas || "Kelas"}.xlsx`.replace(
+        `Template_Nilai_${mapel?.nama_mapel || "Mapel"}_${kelas?.nama_kelas || "Kelas"}.xlsx`.replace(
           /\s+/g,
           "_",
         );
@@ -1665,8 +1837,509 @@ export default function PenilaianMapelPage() {
     }
   }
 
-  // ================= IMPORT NILAI FORMATIF =================
-  async function handleImportFormatif(file) {
+  // ================= IMPORT NILAI (3 SHEET) =================
+
+  // Pencarian siswa: NIS dulu, lalu nama (case-insensitive)
+  function makeSiswaFinder() {
+    const byNis = new Map();
+    const byNama = new Map();
+    siswaList.forEach((s) => {
+      const n = normNis(s.nis);
+      if (n && !byNis.has(n)) byNis.set(n, s);
+      const nm = normText(s.nama_siswa);
+      if (nm && !byNama.has(nm)) byNama.set(nm, s);
+    });
+    return (nama, nis) => {
+      const n = normNis(nis);
+      if (n && byNis.has(n)) return byNis.get(n);
+      const nm = normText(nama);
+      return nm ? byNama.get(nm) || null : null;
+    };
+  }
+
+  // ---------- Sheet FORMATIF ----------
+  async function importFormatifSheet(sheet, findSiswa) {
+    const result = { saved: 0, skipped: 0, created: 0, empty: 0, errors: [] };
+
+    let tpHeaderRow = -1;
+    for (let r = 1; r <= 5; r++) {
+      const row = sheet.getRow(r);
+      let found = false;
+      row.eachCell({ includeEmpty: false }, (cell) => {
+        const val = String(cell.value || "").trim();
+        if (/^TP\s*\d+$/i.test(val)) found = true;
+      });
+      if (found) {
+        tpHeaderRow = r;
+        break;
+      }
+    }
+    if (tpHeaderRow === -1) {
+      throw new Error("Header TP tidak ditemukan pada sheet FORMATIF.");
+    }
+    const kHeaderRow = tpHeaderRow + 1;
+    const dataStartRow = tpHeaderRow + 2;
+
+    const headerRow1 = sheet.getRow(tpHeaderRow);
+    const headerRow2 = sheet.getRow(kHeaderRow);
+
+    const tpCells = [];
+    headerRow1.eachCell({ includeEmpty: false }, (cell, colNumber) => {
+      const val = readCellString(cell);
+      const m = val.match(/^TP\s*(\d+)$/i);
+      if (m) {
+        tpCells.push({
+          tpNo: `TP ${parseInt(m[1], 10)}`,
+          startCol: colNumber,
+        });
+      }
+    });
+    tpCells.sort((a, b) => a.startCol - b.startCol);
+    if (tpCells.length === 0) {
+      throw new Error("Kolom TP tidak ditemukan pada header.");
+    }
+
+    for (let i = 0; i < tpCells.length; i++) {
+      if (i < tpCells.length - 1) {
+        tpCells[i].endCol = tpCells[i + 1].startCol - 1;
+      } else {
+        let lastCol = tpCells[i].startCol;
+        headerRow2.eachCell({ includeEmpty: false }, (_, colNumber) => {
+          if (colNumber > lastCol) lastCol = colNumber;
+        });
+        tpCells[i].endCol = lastCol;
+      }
+    }
+
+    const colMap = [];
+    for (const tp of tpCells) {
+      for (let c = tp.startCol; c <= tp.endCol; c++) {
+        const kVal = readCellString(headerRow2.getCell(c)).toLowerCase();
+        if (SEMUA_KRITERIA.includes(kVal)) {
+          colMap.push({ col: c, tpNo: tp.tpNo, kField: kVal });
+        }
+      }
+    }
+    if (colMap.length === 0) {
+      throw new Error("Kolom kriteria (K1-K4) tidak ditemukan.");
+    }
+
+    const tpMap = new Map();
+    tpList.forEach((tp) => tpMap.set(tp.no_tp, tp));
+    const nilaiMap = JSON.parse(JSON.stringify(nilaiFormatif || {}));
+
+    // 1) Kumpulkan rencana simpan (belum menyentuh database)
+    const plan = [];
+    const tpWithValue = new Set();
+    const lastRow = sheet.rowCount;
+    for (let rowNum = dataStartRow; rowNum <= lastRow; rowNum++) {
+      const row = sheet.getRow(rowNum);
+      const namaSiswa = readCellString(row.getCell(2));
+      const nis = readCellString(row.getCell(3));
+      if (!namaSiswa && !nis) continue;
+
+      const siswa = findSiswa(namaSiswa, nis);
+      if (!siswa) {
+        result.errors.push(
+          `Baris ${rowNum}: Siswa "${namaSiswa || nis}" tidak ditemukan.`,
+        );
+        continue;
+      }
+
+      const byTp = new Map();
+      for (const cm of colMap) {
+        let val = readCellNumber(row.getCell(cm.col));
+        if (val !== null && isNaN(val)) val = null;
+        if (val !== null && (val < 0 || val > 100)) {
+          result.errors.push(
+            `Baris ${rowNum} ${cm.tpNo}-${cm.kField.toUpperCase()}: nilai ${val} di luar 0-100 (diabaikan).`,
+          );
+          val = null;
+        }
+        if (val !== null) tpWithValue.add(cm.tpNo);
+        if (!byTp.has(cm.tpNo)) byTp.set(cm.tpNo, []);
+        // value null = sel kosong -> disimpan -1 bila record belum ada
+        byTp.get(cm.tpNo).push({ kField: cm.kField, value: val });
+      }
+      for (const [tpNo, values] of byTp.entries()) {
+        plan.push({ rowNum, siswa, tpNo, values });
+      }
+    }
+
+    // TP yang diproses: sudah ada di sistem, atau punya minimal 1 nilai di file
+    // (kolom TP kosong total yang belum ada di sistem diabaikan)
+    const activePlan = plan.filter(
+      (p) => tpMap.has(p.tpNo) || tpWithValue.has(p.tpNo),
+    );
+
+    // 2) Buat TP yang dibutuhkan
+    const failedTp = new Set();
+    const neededTp = [...new Set(activePlan.map((p) => p.tpNo))];
+    for (const tpNo of neededTp) {
+      if (tpMap.has(tpNo)) continue;
+      try {
+        const created = await pb.collection("tujuan_pembelajaran").create(
+          {
+            no_tp: tpNo,
+            mapel_id: mapelId,
+            kelas_id: kelas.id,
+          },
+          { requestKey: null },
+        );
+        tpMap.set(tpNo, created);
+        result.created++;
+      } catch (err) {
+        failedTp.add(tpNo);
+        result.errors.push(
+          `Gagal membuat ${tpNo}: ${err?.message || "unknown error"}`,
+        );
+      }
+    }
+
+    // 3) Simpan nilai (paralel terbatas, nilai yang sudah ada tidak ditimpa)
+    const tasks = activePlan
+      .filter((p) => !failedTp.has(p.tpNo))
+      .map((p) => async () => {
+        const { siswa, rowNum, tpNo, values } = p;
+        const tp = tpMap.get(tpNo);
+        if (!nilaiMap[siswa.id]) nilaiMap[siswa.id] = {};
+        const existingRec = nilaiMap[siswa.id][tp.id];
+
+        const toSave = {};
+        let cleared = 0;
+        for (const { kField, value } of values) {
+          const cur = existingRec?.[kField];
+          if (value === null) {
+            // Sel kosong di Excel: nilai lama di DB ikut dikosongkan (-1)
+            if (existingRec?.recordId && cur !== -1) {
+              toSave[kField] = -1;
+              cleared++;
+            }
+            continue;
+          }
+          if (cur === undefined || cur === null || cur === -1) {
+            toSave[kField] = value;
+          } else {
+            result.skipped++;
+          }
+        }
+        // Record sudah ada & tidak ada nilai baru -> tidak ada yang perlu disimpan.
+        // Record belum ada -> tetap dibuat (kriteria kosong = -1).
+        if (Object.keys(toSave).length === 0 && existingRec?.recordId) return;
+
+        try {
+          if (existingRec?.recordId) {
+            const payload = {
+              k1: existingRec.k1 ?? -1,
+              k2: existingRec.k2 ?? -1,
+              k3: existingRec.k3 ?? -1,
+              k4: existingRec.k4 ?? -1,
+            };
+            for (const [k, v] of Object.entries(toSave)) payload[k] = v;
+            const saved = await pb
+              .collection("nilai_formatif")
+              .update(existingRec.recordId, payload, { requestKey: null });
+            nilaiMap[siswa.id][tp.id] = { recordId: saved.id, ...payload };
+          } else {
+            const payload = {
+              tp_id: tp.id,
+              siswa_id: siswa.id,
+              kelas_id: kelas.id,
+              k1: -1,
+              k2: -1,
+              k3: -1,
+              k4: -1,
+            };
+            for (const [k, v] of Object.entries(toSave)) payload[k] = v;
+            const saved = await pb
+              .collection("nilai_formatif")
+              .create(payload, { requestKey: null });
+            nilaiMap[siswa.id][tp.id] = {
+              recordId: saved.id,
+              k1: payload.k1,
+              k2: payload.k2,
+              k3: payload.k3,
+              k4: payload.k4,
+            };
+            result.empty += values.filter((v) => v.value === null).length;
+          }
+          result.saved += Object.keys(toSave).length - cleared;
+          result.empty += cleared;
+        } catch (err) {
+          result.errors.push(
+            `Baris ${rowNum} ${tpNo}: ${err?.message || "gagal menyimpan"}`,
+          );
+        }
+      });
+    await runPool(tasks);
+
+    setTpList((prev) => {
+      const map = new Map(prev.map((t) => [t.no_tp, t]));
+      for (const [no, tp] of tpMap.entries()) {
+        if (!map.has(no)) map.set(no, tp);
+      }
+      return Array.from(map.values()).sort((a, b) => tpNumber(a) - tpNumber(b));
+    });
+    setNilaiFormatif(nilaiMap);
+
+    return result;
+  }
+
+  // ---------- Sheet SUMATIF (header = nama LM, otomatis dibuat bila belum ada) ----------
+  async function importSumatifSheet(sheet, findSiswa) {
+    const result = { saved: 0, skipped: 0, created: 0, empty: 0, errors: [] };
+
+    const headerRowNum = findHeaderRow(sheet);
+    if (headerRowNum === -1) {
+      throw new Error("Header kolom NIS tidak ditemukan pada sheet SUMATIF.");
+    }
+    const { nisCol, namaCol, columns } = readValueColumns(sheet, headerRowNum);
+    if (columns.length === 0) {
+      throw new Error("Tidak ada kolom LM pada header sheet SUMATIF.");
+    }
+
+    // Petakan header -> LM (buat baru bila belum ada)
+    const lpMap = new Map();
+    lpList.forEach((lp) => lpMap.set(normText(lp.nama), lp));
+
+    const colLm = [];
+    const usedLmIds = new Set();
+    const newLms = [];
+    for (const c of columns) {
+      const key = normText(c.name);
+      let lm = lpMap.get(key);
+      if (!lm) {
+        try {
+          lm = await pb.collection("lingkup_materi").create(
+            {
+              nama: c.name.trim(),
+              mapel_id: mapelId,
+              kelas_id: kelas.id,
+              guru_id: user?.id,
+            },
+            { requestKey: null },
+          );
+          lpMap.set(key, lm);
+          newLms.push(lm);
+          result.created++;
+        } catch (err) {
+          result.errors.push(
+            `Gagal membuat LM "${c.name}": ${err?.message || "unknown error"}`,
+          );
+          continue;
+        }
+      }
+      if (usedLmIds.has(lm.id)) {
+        result.errors.push(`Header "${c.name}" duplikat, kolom dilewati.`);
+        continue;
+      }
+      usedLmIds.add(lm.id);
+      colLm.push({ col: c.col, lm });
+    }
+    if (newLms.length > 0) {
+      setLpList((prev) => [...prev, ...newLms]);
+    }
+
+    const nilaiMap = JSON.parse(JSON.stringify(nilaiSumatif || {}));
+    const tasks = [];
+    const lastRow = sheet.rowCount;
+
+    for (let rowNum = headerRowNum + 1; rowNum <= lastRow; rowNum++) {
+      const row = sheet.getRow(rowNum);
+      const namaSiswa = readCellString(row.getCell(namaCol));
+      const nis = readCellString(row.getCell(nisCol));
+      if (!namaSiswa && !nis) continue;
+
+      const siswa = findSiswa(namaSiswa, nis);
+      if (!siswa) {
+        result.errors.push(
+          `Baris ${rowNum}: Siswa "${namaSiswa || nis}" tidak ditemukan.`,
+        );
+        continue;
+      }
+
+      for (const { col, lm } of colLm) {
+        let val = readCellNumber(row.getCell(col));
+        if (val !== null && isNaN(val)) val = null;
+        if (val !== null && (val < 0 || val > 100)) {
+          result.errors.push(
+            `Baris ${rowNum} "${lm.nama}": nilai ${val} di luar 0-100 (diabaikan).`,
+          );
+          val = null;
+        }
+        // sel kosong -> -1 (hanya bila record belum ada)
+        const nilaiBaru = val === null ? -1 : val;
+
+        tasks.push(async () => {
+          const existing = nilaiMap[siswa.id]?.[lm.id];
+          if (val === null) {
+            // sudah -1 -> tidak perlu apa-apa; selain itu dikosongkan jadi -1
+            if (existing?.recordId && existing.nilai === -1) return;
+          } else if (isFilledNilai(existing?.nilai)) {
+            result.skipped++;
+            return;
+          }
+          try {
+            let saved;
+            if (existing?.recordId) {
+              saved = await pb
+                .collection("nilai_sumatif")
+                .update(
+                  existing.recordId,
+                  { nilai: nilaiBaru },
+                  { requestKey: null },
+                );
+            } else {
+              saved = await pb.collection("nilai_sumatif").create(
+                {
+                  lm_id: lm.id,
+                  siswa_id: siswa.id,
+                  kelas_id: kelas.id,
+                  nilai: nilaiBaru,
+                },
+                { requestKey: null },
+              );
+            }
+            if (!nilaiMap[siswa.id]) nilaiMap[siswa.id] = {};
+            nilaiMap[siswa.id][lm.id] = {
+              recordId: saved.id,
+              nilai: nilaiBaru,
+            };
+            if (val === null) result.empty++;
+            else result.saved++;
+          } catch (err) {
+            result.errors.push(
+              `Baris ${rowNum} "${lm.nama}": ${err?.message || "gagal menyimpan"}`,
+            );
+          }
+        });
+      }
+    }
+
+    await runPool(tasks);
+    setNilaiSumatif(nilaiMap);
+    return result;
+  }
+
+  // ---------- Sheet UJIAN (header = nama ujian aktif) ----------
+  async function importUjianSheet(sheet, findSiswa) {
+    const result = { saved: 0, skipped: 0, created: 0, empty: 0, errors: [] };
+
+    const headerRowNum = findHeaderRow(sheet);
+    if (headerRowNum === -1) {
+      throw new Error("Header kolom NIS tidak ditemukan pada sheet UJIAN.");
+    }
+    const { nisCol, namaCol, columns } = readValueColumns(sheet, headerRowNum);
+    if (columns.length === 0) {
+      throw new Error("Tidak ada kolom ujian pada header sheet UJIAN.");
+    }
+
+    const ujianMap = new Map();
+    ujianAktif.forEach((u) => {
+      const key = normText(u.nama_ujian);
+      if (!ujianMap.has(key)) ujianMap.set(key, u);
+    });
+
+    const colUjian = [];
+    const usedUjianIds = new Set();
+    for (const c of columns) {
+      const ujian = ujianMap.get(normText(c.name));
+      if (!ujian) {
+        result.errors.push(
+          `Ujian "${c.name}" tidak ditemukan / belum aktif untuk kelas ini, kolom dilewati.`,
+        );
+        continue;
+      }
+      if (usedUjianIds.has(ujian.id)) {
+        result.errors.push(`Header "${c.name}" duplikat, kolom dilewati.`);
+        continue;
+      }
+      usedUjianIds.add(ujian.id);
+      colUjian.push({ col: c.col, ujian });
+    }
+
+    const nilaiMap = JSON.parse(JSON.stringify(nilaiUjian || {}));
+    const tasks = [];
+    const lastRow = sheet.rowCount;
+
+    for (let rowNum = headerRowNum + 1; rowNum <= lastRow; rowNum++) {
+      const row = sheet.getRow(rowNum);
+      const namaSiswa = readCellString(row.getCell(namaCol));
+      const nis = readCellString(row.getCell(nisCol));
+      if (!namaSiswa && !nis) continue;
+
+      const siswa = findSiswa(namaSiswa, nis);
+      if (!siswa) {
+        result.errors.push(
+          `Baris ${rowNum}: Siswa "${namaSiswa || nis}" tidak ditemukan.`,
+        );
+        continue;
+      }
+
+      for (const { col, ujian } of colUjian) {
+        let val = readCellNumber(row.getCell(col));
+        if (val !== null && isNaN(val)) val = null;
+        if (val !== null && (val < 0 || val > 100)) {
+          result.errors.push(
+            `Baris ${rowNum} "${ujian.nama_ujian}": nilai ${val} di luar 0-100 (diabaikan).`,
+          );
+          val = null;
+        }
+        // sel kosong -> -1 (hanya bila record belum ada)
+        const nilaiBaru = val === null ? -1 : val;
+
+        tasks.push(async () => {
+          const existing = nilaiMap[ujian.id]?.[siswa.id];
+          if (val === null) {
+            // sudah -1 -> tidak perlu apa-apa; selain itu dikosongkan jadi -1
+            if (existing?.recordId && existing.nilai === -1) return;
+          } else if (isFilledNilai(existing?.nilai)) {
+            result.skipped++;
+            return;
+          }
+          try {
+            let saved;
+            if (existing?.recordId) {
+              saved = await pb
+                .collection("nilai_ujian")
+                .update(
+                  existing.recordId,
+                  { nilai: nilaiBaru },
+                  { requestKey: null },
+                );
+            } else {
+              saved = await pb.collection("nilai_ujian").create(
+                {
+                  siswa_id: siswa.id,
+                  pengaturan_ujian_id: ujian.id,
+                  mapel_id: mapelId,
+                  nilai: nilaiBaru,
+                },
+                { requestKey: null },
+              );
+            }
+            if (!nilaiMap[ujian.id]) nilaiMap[ujian.id] = {};
+            nilaiMap[ujian.id][siswa.id] = {
+              recordId: saved.id,
+              nilai: nilaiBaru,
+            };
+            if (val === null) result.empty++;
+            else result.saved++;
+          } catch (err) {
+            result.errors.push(
+              `Baris ${rowNum} "${ujian.nama_ujian}": ${err?.message || "gagal menyimpan"}`,
+            );
+          }
+        });
+      }
+    }
+
+    await runPool(tasks);
+    setNilaiUjian(nilaiMap);
+    return result;
+  }
+
+  async function handleImportNilai(file) {
     if (!file) return;
     try {
       setImporting(true);
@@ -1676,233 +2349,50 @@ export default function PenilaianMapelPage() {
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load(arrayBuffer);
 
-      const sheet = workbook.worksheets[0];
-      if (!sheet) throw new Error("Sheet tidak ditemukan pada file.");
+      let shFormatif = findSheet(workbook, "formatif");
+      const shSumatif = findSheet(workbook, "sumatif");
+      const shUjian = findSheet(workbook, "ujian");
 
-      let tpHeaderRow = -1;
-      for (let r = 1; r <= 5; r++) {
-        const row = sheet.getRow(r);
-        let found = false;
-        row.eachCell({ includeEmpty: false }, (cell) => {
-          const val = String(cell.value || "").trim();
-          if (/^TP\s*\d+$/i.test(val)) found = true;
-        });
-        if (found) {
-          tpHeaderRow = r;
-          break;
-        }
+      // Kompatibilitas template lama (1 sheet formatif tanpa nama khusus)
+      if (!shFormatif && !shSumatif && !shUjian && workbook.worksheets[0]) {
+        shFormatif = workbook.worksheets[0];
       }
-      if (tpHeaderRow === -1) {
-        throw new Error(
-          "Format template tidak dikenali. Header TP tidak ditemukan.",
-        );
-      }
-      const kHeaderRow = tpHeaderRow + 1;
-      const dataStartRow = tpHeaderRow + 2;
-
-      const headerRow1 = sheet.getRow(tpHeaderRow);
-      const headerRow2 = sheet.getRow(kHeaderRow);
-
-      const tpCells = [];
-      headerRow1.eachCell({ includeEmpty: false }, (cell, colNumber) => {
-        const val = readCellString(cell);
-        const m = val.match(/^TP\s*(\d+)$/i);
-        if (m) {
-          tpCells.push({
-            tpNo: `TP ${parseInt(m[1], 10)}`,
-            startCol: colNumber,
-          });
-        }
-      });
-      tpCells.sort((a, b) => a.startCol - b.startCol);
-      if (tpCells.length === 0) {
-        throw new Error("Kolom TP tidak ditemukan pada header.");
+      if (!shFormatif && !shSumatif && !shUjian) {
+        throw new Error("Sheet FORMATIF, SUMATIF, atau UJIAN tidak ditemukan.");
       }
 
-      for (let i = 0; i < tpCells.length; i++) {
-        if (i < tpCells.length - 1) {
-          tpCells[i].endCol = tpCells[i + 1].startCol - 1;
-        } else {
-          let lastCol = tpCells[i].startCol;
-          headerRow2.eachCell({ includeEmpty: false }, (_, colNumber) => {
-            if (colNumber > lastCol) lastCol = colNumber;
-          });
-          tpCells[i].endCol = lastCol;
+      const findSiswa = makeSiswaFinder();
+      const summary = { formatif: null, sumatif: null, ujian: null };
+
+      const jobs = [
+        ["formatif", shFormatif, importFormatifSheet],
+        ["sumatif", shSumatif, importSumatifSheet],
+        ["ujian", shUjian, importUjianSheet],
+      ];
+
+      for (const [key, sheet, runImport] of jobs) {
+        if (!sheet) continue;
+        try {
+          summary[key] = await runImport(sheet, findSiswa);
+        } catch (err) {
+          console.error(`Gagal impor sheet ${key}:`, err);
+          summary[key] = {
+            saved: 0,
+            skipped: 0,
+            created: 0,
+            empty: 0,
+            errors: [err?.message || "Gagal memproses sheet"],
+          };
         }
       }
 
-      const colMap = [];
-      for (const tp of tpCells) {
-        for (let c = tp.startCol; c <= tp.endCol; c++) {
-          const kVal = readCellString(headerRow2.getCell(c)).toLowerCase();
-          if (SEMUA_KRITERIA.includes(kVal)) {
-            colMap.push({ col: c, tpNo: tp.tpNo, kField: kVal });
-          }
-        }
-      }
-      if (colMap.length === 0) {
-        throw new Error("Kolom kriteria (K1-K4) tidak ditemukan.");
-      }
-
-      const tpMap = new Map();
-      tpList.forEach((tp) => tpMap.set(tp.no_tp, tp));
-
-      const nilaiMap = JSON.parse(JSON.stringify(nilaiFormatif || {}));
-
-      let createdTpCount = 0;
-      let savedCount = 0;
-      let skippedCount = 0;
-      const errors = [];
-
-      const lastRow = sheet.actualRowCount || sheet.rowCount;
-
-      for (let rowNum = dataStartRow; rowNum <= lastRow; rowNum++) {
-        const row = sheet.getRow(rowNum);
-        const namaSiswa = readCellString(row.getCell(2));
-        const nis = readCellString(row.getCell(3));
-
-        if (!namaSiswa && !nis) continue;
-
-        let siswa = null;
-        if (nis) {
-          siswa = siswaList.find(
-            (s) =>
-              String(s.nis || "")
-                .replace(/\D/g, "")
-                .trim() === String(nis).replace(/\D/g, "").trim(),
-          );
-        }
-        if (!siswa && namaSiswa) {
-          siswa = siswaList.find(
-            (s) =>
-              String(s.nama_siswa || "")
-                .trim()
-                .toLowerCase() === namaSiswa.toLowerCase(),
-          );
-        }
-        if (!siswa) {
-          errors.push(
-            `Baris ${rowNum}: Siswa "${namaSiswa || nis}" tidak ditemukan.`,
-          );
-          continue;
-        }
-
-        const byTp = new Map();
-        for (const cm of colMap) {
-          const val = readCellNumber(row.getCell(cm.col));
-          if (val === null || isNaN(val)) continue;
-          if (val < 0 || val > 100) {
-            errors.push(
-              `Baris ${rowNum} ${cm.tpNo}-${cm.kField.toUpperCase()}: nilai ${val} di luar 0-100 (dilewati).`,
-            );
-            continue;
-          }
-          if (!byTp.has(cm.tpNo)) byTp.set(cm.tpNo, []);
-          byTp.get(cm.tpNo).push({ kField: cm.kField, value: val });
-        }
-
-        for (const [tpNo, values] of byTp.entries()) {
-          let tp = tpMap.get(tpNo);
-          if (!tp) {
-            try {
-              const created = await pb.collection("tujuan_pembelajaran").create(
-                {
-                  no_tp: tpNo,
-                  mapel_id: mapelId,
-                  kelas_id: kelas.id,
-                },
-                { requestKey: null },
-              );
-              tp = created;
-              tpMap.set(tpNo, tp);
-              createdTpCount++;
-            } catch (err) {
-              errors.push(
-                `Gagal membuat ${tpNo}: ${err?.message || "unknown error"}`,
-              );
-              continue;
-            }
-          }
-
-          if (!nilaiMap[siswa.id]) nilaiMap[siswa.id] = {};
-          let existingRec = nilaiMap[siswa.id][tp.id];
-
-          const toSave = {};
-          for (const { kField, value } of values) {
-            const cur = existingRec?.[kField];
-            if (cur === undefined || cur === null || cur === -1) {
-              toSave[kField] = value;
-            } else {
-              skippedCount++;
-            }
-          }
-
-          if (Object.keys(toSave).length === 0) continue;
-
-          try {
-            if (existingRec?.recordId) {
-              const payload = {
-                k1: existingRec.k1 ?? -1,
-                k2: existingRec.k2 ?? -1,
-                k3: existingRec.k3 ?? -1,
-                k4: existingRec.k4 ?? -1,
-              };
-              for (const [k, v] of Object.entries(toSave)) payload[k] = v;
-              const saved = await pb
-                .collection("nilai_formatif")
-                .update(existingRec.recordId, payload, { requestKey: null });
-              existingRec = { recordId: saved.id, ...payload };
-              nilaiMap[siswa.id][tp.id] = existingRec;
-            } else {
-              const payload = {
-                tp_id: tp.id,
-                siswa_id: siswa.id,
-                kelas_id: kelas.id,
-                k1: -1,
-                k2: -1,
-                k3: -1,
-                k4: -1,
-              };
-              for (const [k, v] of Object.entries(toSave)) payload[k] = v;
-              const saved = await pb
-                .collection("nilai_formatif")
-                .create(payload, { requestKey: null });
-              existingRec = {
-                recordId: saved.id,
-                k1: payload.k1,
-                k2: payload.k2,
-                k3: payload.k3,
-                k4: payload.k4,
-              };
-              nilaiMap[siswa.id][tp.id] = existingRec;
-            }
-            savedCount += Object.keys(toSave).length;
-          } catch (err) {
-            errors.push(
-              `Baris ${rowNum} ${tpNo}: ${err?.message || "gagal menyimpan"}`,
-            );
-          }
-        }
-      }
-
-      setTpList((prev) => {
-        const map = new Map(prev.map((t) => [t.no_tp, t]));
-        for (const [no, tp] of tpMap.entries()) {
-          if (!map.has(no)) map.set(no, tp);
-        }
-        return Array.from(map.values()).sort(
-          (a, b) => tpNumber(a) - tpNumber(b),
-        );
-      });
-      setNilaiFormatif(nilaiMap);
-
-      setImportResult({
-        saved: savedCount,
-        skipped: skippedCount,
-        createdTp: createdTpCount,
-        errors,
-      });
-      showToast(`${savedCount} nilai diimpor`, "success");
+      setImportResult(summary);
+      setTableVersion((v) => v + 1);
+      const totalSaved = Object.values(summary).reduce(
+        (sum, r) => sum + (r?.saved || 0),
+        0,
+      );
+      showToast(`${totalSaved} nilai diimpor`, "success");
     } catch (error) {
       console.error("Gagal import:", error);
       showToast(
@@ -2354,9 +2844,45 @@ export default function PenilaianMapelPage() {
     });
   }
 
+  // Tombol Template & Impor (1 file, 3 sheet) dipakai di tab formatif, sumatif, ujian
+  const importButtons = (
+    <>
+      <button
+        onClick={() => setShowTemplateDialog(true)}
+        title="Unduh template Excel (sheet Formatif, Sumatif, Ujian)"
+        className={BTN_OUTLINE}
+      >
+        <Icon name="download" />
+        Template
+      </button>
+      <button
+        onClick={() => importInputRef.current?.click()}
+        disabled={importing}
+        title="Impor file Excel (sheet Formatif, Sumatif, Ujian)"
+        className={BTN_OUTLINE}
+      >
+        <Icon name="upload" />
+        {importing ? "Mengimpor..." : "Impor"}
+      </button>
+    </>
+  );
+
   return (
     <section className="relative isolate mx-auto max-w-7xl space-y-5 px-4 py-6 lg:px-8 lg:py-8">
       <Toast toast={toast} />
+
+      {/* Input file impor (dipakai semua tab) */}
+      <input
+        ref={importInputRef}
+        type="file"
+        accept=".xlsx,.xls"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) handleImportNilai(file);
+        }}
+      />
 
       {/* ================= HEADER ================= */}
       <div className="space-y-3">
@@ -2626,32 +3152,7 @@ export default function PenilaianMapelPage() {
               title="Tujuan pembelajaran (TP)"
               description="Setiap TP dinilai dengan 4 kriteria (K1–K4). Nilai akhir adalah rata-rata kriteria yang terisi."
             >
-              <button
-                onClick={() => setShowTemplateDialog(true)}
-                className={BTN_OUTLINE}
-              >
-                <Icon name="download" />
-                Template
-              </button>
-              <button
-                onClick={() => importInputRef.current?.click()}
-                disabled={importing}
-                className={BTN_OUTLINE}
-              >
-                <Icon name="upload" />
-                {importing ? "Mengimpor..." : "Impor"}
-              </button>
-              <input
-                ref={importInputRef}
-                type="file"
-                accept=".xlsx,.xls"
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  e.target.value = "";
-                  if (file) handleImportFormatif(file);
-                }}
-              />
+              {importButtons}
 
               <button onClick={openScanModal} className={BTN_OUTLINE}>
                 <Icon name="upload" />
@@ -2714,6 +3215,7 @@ export default function PenilaianMapelPage() {
               />
             ) : (
               <FormatifTable
+                key={`f-${tableVersion}`}
                 siswaList={siswaList}
                 tpList={tpList}
                 kriteria={SEMUA_KRITERIA}
@@ -2736,6 +3238,10 @@ export default function PenilaianMapelPage() {
               title="Lingkup materi (LP)"
               description="Nilai sumatif dihitung dari rata-rata nilai LP yang terisi."
             >
+              {importButtons}
+
+              <span className="hidden h-6 w-px bg-slate-200 lg:block" />
+
               <button
                 onClick={() => setShowAddLp((v) => !v)}
                 className={BTN_PRIMARY}
@@ -2778,6 +3284,7 @@ export default function PenilaianMapelPage() {
               />
             ) : (
               <SumatifTable
+                key={`s-${tableVersion}`}
                 siswaList={siswaList}
                 lpList={lpList}
                 nilai={nilaiSumatif}
@@ -2807,7 +3314,9 @@ export default function PenilaianMapelPage() {
                 <SectionHeader
                   title="Pilih ujian"
                   description="Nilai ujian disimpan otomatis saat kolom ditinggalkan."
-                />
+                >
+                  {importButtons}
+                </SectionHeader>
                 <div className="flex flex-wrap gap-2">
                   {ujianAktif.map((u) => (
                     <button
@@ -2893,6 +3402,7 @@ export default function PenilaianMapelPage() {
                   {/* Tabel: selebar penuh */}
                   <div className={`${CARD} overflow-hidden`}>
                     <UjianTable
+                      key={`u-${tableVersion}`}
                       siswaList={siswaList}
                       ujianList={ujianTerpilih ? [ujianTerpilih] : []}
                       nilai={nilaiUjian}
@@ -3005,8 +3515,8 @@ export default function PenilaianMapelPage() {
           onClose={() => !downloadingTemplate && setShowTemplateDialog(false)}
         >
           <ModalHeader
-            title="Unduh template formatif"
-            subtitle="Pilih jumlah TP dan jumlah kriteria (K) per TP."
+            title="Unduh template nilai"
+            subtitle="Satu file Excel berisi 3 sheet: Formatif, Sumatif, dan Ujian."
             onClose={() => setShowTemplateDialog(false)}
             disabled={downloadingTemplate}
           />
@@ -3014,7 +3524,7 @@ export default function PenilaianMapelPage() {
             <div className="grid grid-cols-2 gap-3">
               <label className="block">
                 <span className="mb-1 block text-xs font-semibold text-slate-600">
-                  Jumlah TP
+                  Formatif: jumlah TP
                 </span>
                 <select
                   value={templateTpCount}
@@ -3030,7 +3540,7 @@ export default function PenilaianMapelPage() {
               </label>
               <label className="block">
                 <span className="mb-1 block text-xs font-semibold text-slate-600">
-                  Jumlah K per TP
+                  Formatif: jumlah K per TP
                 </span>
                 <select
                   value={templateKCount}
@@ -3044,21 +3554,60 @@ export default function PenilaianMapelPage() {
                   ))}
                 </select>
               </label>
+              <label className="col-span-2 block">
+                <span className="mb-1 block text-xs font-semibold text-slate-600">
+                  Sumatif: kolom kosong untuk LM baru
+                </span>
+                <select
+                  value={templateLmExtra}
+                  onChange={(e) => setTemplateLmExtra(Number(e.target.value))}
+                  className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                >
+                  {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
+                    <option key={n} value={n}>
+                      {n} kolom
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
 
             <div className="space-y-2 rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs text-slate-600">
               <p>
-                Template berisi <b>{siswaList.length} siswa</b> dengan kolom TP
-                1 sampai TP {templateTpCount}, masing-masing K1 sampai K
-                {templateKCount}.
+                Template berisi <b>{siswaList.length} siswa</b> di setiap sheet:
               </p>
-              <div className="flex items-center gap-2">
+              <ul className="list-disc space-y-0.5 pl-4">
+                <li>
+                  <b>FORMATIF</b>: TP 1 sampai TP {templateTpCount},
+                  masing-masing K1 sampai K{templateKCount}.
+                </li>
+                <li>
+                  <b>SUMATIF</b>: {lpList.length} LM yang sudah ada
+                  {templateLmExtra > 0
+                    ? ` + ${templateLmExtra} kolom kosong. Isi nama LM baru di header kolom kosong, LM dibuat otomatis saat impor.`
+                    : "."}
+                </li>
+                <li>
+                  <b>UJIAN</b>: {ujianAktif.length} ujian aktif untuk kelas ini.
+                </li>
+              </ul>
+              <div className="flex items-center gap-2 pt-1">
                 <span className="h-3 w-3 shrink-0 rounded-sm border border-yellow-300 bg-yellow-300" />
-                <span>Nilai yang sudah ada. Tidak ditimpa saat impor.</span>
+                <span>
+                  Nilai yang sudah ada. Tidak ditimpa angka lain; jika
+                  dikosongkan, jadi -1 di DB.
+                </span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="h-3 w-3 shrink-0 rounded-sm border border-cyan-200 bg-cyan-100" />
-                <span>Nilai kosong, siap diisi.</span>
+                <span>
+                  Nilai kosong, siap diisi. Sel yang dibiarkan kosong disimpan
+                  -1 saat impor.
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="h-3 w-3 shrink-0 rounded-sm border border-orange-200 bg-orange-200" />
+                <span>Header kosong (sheet Sumatif) untuk LM baru.</span>
               </div>
             </div>
           </div>
@@ -3086,31 +3635,58 @@ export default function PenilaianMapelPage() {
 
       {/* ================= MODAL HASIL IMPORT ================= */}
       {importResult && (
-        <Modal size="max-w-md" onClose={() => setImportResult(null)}>
+        <Modal size="max-w-lg" onClose={() => setImportResult(null)}>
           <ModalHeader
-            title="Hasil impor nilai formatif"
-            subtitle="Nilai yang sudah terisi tidak ditimpa. Hanya kolom kosong yang diisi."
+            title="Hasil impor nilai"
+            subtitle="Sel kosong di Excel menjadi -1 di database (termasuk nilai lama yang dikosongkan). Angka yang sudah ada tidak ditimpa angka lain."
             onClose={() => setImportResult(null)}
           />
-          <div className="space-y-4 overflow-y-auto p-5">
-            <div className="grid grid-cols-3 gap-2">
-              <StatBox
-                tone="emerald"
-                value={importResult.saved}
-                label="Nilai disimpan"
-              />
-              <StatBox
-                tone="amber"
-                value={importResult.skipped}
-                label="Dilewati (sudah ada)"
-              />
-              <StatBox
-                tone="blue"
-                value={importResult.createdTp}
-                label="TP dibuat"
-              />
-            </div>
-            <ErrorList title="Peringatan" items={importResult.errors} />
+          <div className="space-y-5 overflow-y-auto p-5">
+            {IMPORT_SECTIONS.map(({ key, label, createdLabel }) => {
+              const r = importResult[key];
+              return (
+                <div key={key} className="space-y-2">
+                  <h4 className="text-sm font-bold text-slate-800">{label}</h4>
+                  {!r ? (
+                    <p className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                      Sheet {label.toUpperCase()} tidak ada di file, dilewati.
+                    </p>
+                  ) : (
+                    <>
+                      <div
+                        className={`grid grid-cols-2 gap-2 ${
+                          createdLabel ? "sm:grid-cols-4" : "sm:grid-cols-3"
+                        }`}
+                      >
+                        <StatBox
+                          tone="emerald"
+                          value={r.saved}
+                          label="Nilai disimpan"
+                        />
+                        <StatBox
+                          tone="amber"
+                          value={r.skipped}
+                          label="Dilewati (sudah ada)"
+                        />
+                        <StatBox
+                          tone="slate"
+                          value={r.empty}
+                          label="Dikosongkan (-1)"
+                        />
+                        {createdLabel && (
+                          <StatBox
+                            tone="blue"
+                            value={r.created}
+                            label={createdLabel}
+                          />
+                        )}
+                      </div>
+                      <ErrorList title="Peringatan" items={r.errors} />
+                    </>
+                  )}
+                </div>
+              );
+            })}
           </div>
           <ModalFooter>
             <button

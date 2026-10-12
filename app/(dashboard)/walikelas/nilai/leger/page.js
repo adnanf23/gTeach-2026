@@ -7,16 +7,8 @@ import * as ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 
 // ================================================================
-// KONFIGURASI BOBOT PENILAIAN
+// KONFIGURASI
 // ================================================================
-const NAMA_BOBOT = {
-  formatif: "Formatif",
-  sumatif: "Sumatif",
-  uts: "Ujian Tengah Semester",
-  uas: "Ujian Akhir Semester",
-  kehadiran: "Kehadiran",
-};
-
 const JENIS_UTS = "ahb";
 const JENIS_UAS = "asas";
 
@@ -72,45 +64,31 @@ export default function LegerPage() {
         setKelas(kelasData);
 
         // ========== AMBIL MAPEL + GURU PENGAMPU ==========
-        const [
-          siswaData,
-          mapelKhusus,
-          mapelTingkat,
-          plotingData,
-          presentaseData,
-          ujianData,
-          absensiData,
-        ] = await Promise.all([
-          pb.collection("siswa").getFullList({
-            filter: `kelas_id = "${kelasData.id}"`,
-            sort: "nama_siswa",
-            requestKey: null,
-          }),
-          pb.collection("mata_pelajaran").getFullList({
-            filter: `spesifik_kelas_id ~ "${kelasData.id}"`,
-            requestKey: null,
-          }),
-          pb.collection("mata_pelajaran").getFullList({
-            filter: `target_tingkat ~ "${String(kelasData.tingkat)}"`,
-            requestKey: null,
-          }),
-          pb.collection("ploting_guru").getFullList({
-            filter: `kelas_id ~ "${kelasData.id}"`,
-            expand: "guru_id",
-            requestKey: null,
-          }),
-          pb.collection("presentase_penilaian").getFullList({
-            requestKey: null,
-          }),
-          pb.collection("pengaturan_ujian").getFullList({
-            filter: `status_akses = "buka" && (target_kelas_id ~ "${kelasData.id}" || target_tingkat ~ "${String(kelasData.tingkat)}")`,
-            requestKey: null,
-          }),
-          pb.collection("absensi").getFullList({
-            filter: `kelas_id ~ "${kelasData.id}"`,
-            requestKey: null,
-          }),
-        ]);
+        const [siswaData, mapelKhusus, mapelTingkat, plotingData, ujianData] =
+          await Promise.all([
+            pb.collection("siswa").getFullList({
+              filter: `kelas_id = "${kelasData.id}"`,
+              sort: "nama_siswa",
+              requestKey: null,
+            }),
+            pb.collection("mata_pelajaran").getFullList({
+              filter: `spesifik_kelas_id ~ "${kelasData.id}"`,
+              requestKey: null,
+            }),
+            pb.collection("mata_pelajaran").getFullList({
+              filter: `target_tingkat ~ "${String(kelasData.tingkat)}"`,
+              requestKey: null,
+            }),
+            pb.collection("ploting_guru").getFullList({
+              filter: `kelas_id ~ "${kelasData.id}"`,
+              expand: "guru_id",
+              requestKey: null,
+            }),
+            pb.collection("pengaturan_ujian").getFullList({
+              filter: `status_akses = "buka" && (target_kelas_id ~ "${kelasData.id}" || target_tingkat ~ "${String(kelasData.tingkat)}")`,
+              requestKey: null,
+            }),
+          ]);
 
         setSiswaList(siswaData);
 
@@ -181,33 +159,7 @@ export default function LegerPage() {
         setMapelList(sortedMapel);
 
         // ========== PERHITUNGAN NILAI ==========
-        function getBobot(nama) {
-          const found = presentaseData.find(
-            (p) =>
-              (p.nama_presentase || "").trim().toLowerCase() ===
-              nama.toLowerCase(),
-          );
-          return found ? Number(found.angka_presentase) || 0 : 0;
-        }
-        const bobotFormatif = getBobot(NAMA_BOBOT.formatif);
-        const bobotSumatif = getBobot(NAMA_BOBOT.sumatif);
-        const bobotUts = getBobot(NAMA_BOBOT.uts);
-        const bobotUas = getBobot(NAMA_BOBOT.uas);
-        const bobotKehadiran = getBobot(NAMA_BOBOT.kehadiran);
-
-        // Kehadiran
-        const kehadiranMap = {};
-        siswaData.forEach((s) => {
-          const records = absensiData.filter((a) => a.siswa_id === s.id);
-          if (records.length === 0) {
-            kehadiranMap[s.id] = null;
-            return;
-          }
-          const hadir = records.filter((a) => a.status === "hadir").length;
-          kehadiranMap[s.id] = (hadir / records.length) * 100;
-        });
-
-        // UTS / UAS
+        // UTS / UAS (PER MAPEL)
         const utsIds = ujianData
           .filter((u) => u.jenis_ujian === JENIS_UTS)
           .map((u) => u.id);
@@ -225,24 +177,25 @@ export default function LegerPage() {
             requestKey: null,
           });
         }
+
+        // ✅ FIX: dikelompokkan per mapel -> per ujian -> per siswa
+        // (sebelumnya tanpa mapel, sehingga nilai mapel terakhir menimpa
+        // semua mapel dan UTS/UAS jadi sama di seluruh mapel)
         const ujianMap = {};
         nilaiUjianData.forEach((n) => {
-          if (!ujianMap[n.pengaturan_ujian_id])
-            ujianMap[n.pengaturan_ujian_id] = {};
-          ujianMap[n.pengaturan_ujian_id][n.siswa_id] = n.nilai;
+          const mId = Array.isArray(n.mapel_id) ? n.mapel_id[0] : n.mapel_id;
+          if (!mId) return;
+          if (!ujianMap[mId]) ujianMap[mId] = {};
+          if (!ujianMap[mId][n.pengaturan_ujian_id])
+            ujianMap[mId][n.pengaturan_ujian_id] = {};
+          ujianMap[mId][n.pengaturan_ujian_id][n.siswa_id] = n.nilai;
         });
-        function avgUjian(ids, siswaId) {
+        function avgUjian(ids, mapelId, siswaId) {
           const vals = ids
-            .map((uid) => ujianMap[uid]?.[siswaId])
+            .map((uid) => ujianMap[mapelId]?.[uid]?.[siswaId])
             .filter((v) => typeof v === "number" && !isNaN(v) && v !== -1);
           return average(vals);
         }
-        const utsAvgMap = {};
-        const uasAvgMap = {};
-        siswaData.forEach((s) => {
-          utsAvgMap[s.id] = avgUjian(utsIds, s.id);
-          uasAvgMap[s.id] = avgUjian(uasIds, s.id);
-        });
 
         // Formatif & Sumatif
         let tpAll = [];
@@ -257,7 +210,6 @@ export default function LegerPage() {
               requestKey: null,
             }),
             pb.collection("lingkup_materi").getFullList({
-              // ✅ FIX: sebelumnya "lingkup_mater" (tidak ada di schema)
               filter: mapelFilter,
               requestKey: null,
             }),
@@ -321,45 +273,18 @@ export default function LegerPage() {
           siswaData.forEach((s) => {
             const formatifAvg = average(formatifValues[m.id]?.[s.id] || []);
             const sumatifAvg = average(sumatifValues[m.id]?.[s.id] || []);
-            const utsVal = utsAvgMap[s.id];
-            const uasVal = uasAvgMap[s.id];
-            const kehadiranVal = kehadiranMap[s.id];
+            // ✅ FIX: UTS/UAS dihitung per mapel
+            const utsVal = avgUjian(utsIds, m.id, s.id);
+            const uasVal = avgUjian(uasIds, m.id, s.id);
 
-            const otherComponents = [
-              { value: formatifAvg, bobot: bobotFormatif },
-              { value: sumatifAvg, bobot: bobotSumatif },
-              { value: utsVal, bobot: bobotUts },
-              { value: uasVal, bobot: bobotUas },
-            ].filter(
-              (k) =>
-                k.value !== null &&
-                k.value !== undefined &&
-                !isNaN(k.value) &&
-                k.bobot > 0,
+            // Sama dengan tab "Nilai rapor": rata-rata komponen yang tersedia
+            const komponen = [formatifAvg, sumatifAvg, utsVal, uasVal].filter(
+              (v) => v !== null && v !== undefined && !isNaN(v) && v !== -1,
             );
-
-            let komponen = [...otherComponents];
-            if (otherComponents.length > 0) {
-              if (
-                kehadiranVal !== null &&
-                kehadiranVal !== undefined &&
-                !isNaN(kehadiranVal) &&
-                bobotKehadiran > 0
-              ) {
-                komponen.push({ value: kehadiranVal, bobot: bobotKehadiran });
-              }
-            }
-
-            const totalBobot = komponen.reduce((a, k) => a + k.bobot, 0);
-            if (totalBobot === 0) {
-              nilaiAkhir[m.id][s.id] = null;
-              return;
-            }
-            const weightedSum = komponen.reduce(
-              (a, k) => a + k.value * k.bobot,
-              0,
-            );
-            nilaiAkhir[m.id][s.id] = weightedSum / totalBobot;
+            nilaiAkhir[m.id][s.id] =
+              komponen.length === 0
+                ? null
+                : komponen.reduce((a, b) => a + b, 0) / komponen.length;
           });
         });
 
@@ -633,7 +558,8 @@ export default function LegerPage() {
             </h1>
             <p className="text-sm text-blue-100">
               Rekap nilai akhir rapor untuk mata pelajaran yang diampu di kelas
-              ini (bobot diatur admin).
+              ini (rata-rata komponen formatif, sumatif, UTS, dan UAS yang
+              tersedia).
             </p>
           </div>
         </div>
@@ -694,9 +620,6 @@ export default function LegerPage() {
                 <th className="px-2 py-2 font-bold border border-gray-200 bg-yellow-100 min-w-[70px]">
                   Rata Rata
                 </th>
-                <th className="px-2 py-2 font-bold border border-gray-200 bg-yellow-100 min-w-[70px]">
-                  Rata Rata
-                </th>
                 <th className="px-2 py-2 font-bold border border-gray-200 bg-gray-100 min-w-[50px]">
                   Rank
                 </th>
@@ -735,9 +658,6 @@ export default function LegerPage() {
                     <td className="px-2 py-1.5 text-center border border-gray-100 font-mono font-bold bg-yellow-50">
                       {formatGrade(rata)}
                     </td>
-                    <td className="px-2 py-1.5 text-center border border-gray-100 font-mono font-bold bg-yellow-50">
-                      {formatGrade(rata)}
-                    </td>
                     <td className="px-2 py-1.5 text-center border border-gray-100 font-bold">
                       {rankMap[siswa.id] ?? "-"}
                     </td>
@@ -761,7 +681,7 @@ export default function LegerPage() {
                     {formatGrade(mapelStats[m.id]?.rata)}
                   </td>
                 ))}
-                <td colSpan={4} className="border border-gray-100" />
+                <td colSpan={3} className="border border-gray-100" />
               </tr>
               <tr className="bg-cyan-100 font-bold">
                 <td
@@ -778,7 +698,7 @@ export default function LegerPage() {
                     {formatGrade(mapelStats[m.id]?.tertinggi)}
                   </td>
                 ))}
-                <td colSpan={4} className="border border-gray-100" />
+                <td colSpan={3} className="border border-gray-100" />
               </tr>
               <tr className="bg-cyan-100 font-bold">
                 <td
@@ -795,7 +715,7 @@ export default function LegerPage() {
                     {formatGrade(mapelStats[m.id]?.terendah)}
                   </td>
                 ))}
-                <td colSpan={4} className="border border-gray-100" />
+                <td colSpan={3} className="border border-gray-100" />
               </tr>
             </tfoot>
           </table>

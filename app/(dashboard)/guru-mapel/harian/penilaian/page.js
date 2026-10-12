@@ -164,6 +164,61 @@ function readCellString(cell) {
   return String(v).trim();
 }
 
+function normNis(v) {
+  return String(v ?? "")
+    .replace(/\D/g, "")
+    .trim();
+}
+function normText(v) {
+  return String(v ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+function normKey(v) {
+  return String(v ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+// ================= FILTER KATEGORI UJIAN =================
+// Ujian koding hanya boleh untuk mapel kategori "koding".
+function isUjianKoding(ujian) {
+  return (
+    String(ujian?.kategori || "")
+      .trim()
+      .toLowerCase() === "koding"
+  );
+}
+function isMapelKoding(mapel) {
+  return (
+    String(mapel?.kategori || "")
+      .trim()
+      .toLowerCase() === "koding"
+  );
+}
+// Rule generic: ujian koding hanya untuk mapel koding.
+// Kalau nanti admin menambah kategori lain, tambahkan cabang di sini.
+function ujianBolehUntukMapel(ujian, mapel) {
+  if (isUjianKoding(ujian)) return isMapelKoding(mapel);
+  return true;
+}
+
+async function runPool(tasks, limit = 6) {
+  let idx = 0;
+  const workers = Array.from(
+    { length: Math.min(limit, tasks.length) },
+    async () => {
+      while (idx < tasks.length) {
+        const task = tasks[idx++];
+        await task();
+      }
+    },
+  );
+  await Promise.all(workers);
+}
+
 // ================================================================
 // STYLE BERSAMA
 // ================================================================
@@ -475,11 +530,20 @@ export default function PenilaianGuruMapelPage() {
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
-  // EXPORT NILAI MENTAH PER KELAS
+  // EXPORT NILAI MENTAH PER KELAS (di step 1)
   const [exporting, setExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState("");
 
-  // TEMPLATE & IMPORT
+  // EXPORT RAPOR
+  const [exportingRapor, setExportingRapor] = useState(false);
+
+  // IMPORT NILAI PER KELAS (di step 2)
+  const [importKelasLoading, setImportKelasLoading] = useState(false);
+  const [importKelasProgress, setImportKelasProgress] = useState("");
+  const [importKelasResult, setImportKelasResult] = useState(null);
+  const importKelasRef = useRef(null);
+
+  // TEMPLATE & IMPORT (per kelas di step 3)
   const [showTemplateDialog, setShowTemplateDialog] = useState(false);
   const [templateTpCount, setTemplateTpCount] = useState(1);
   const [templateKCount, setTemplateKCount] = useState(4);
@@ -550,7 +614,6 @@ export default function PenilaianGuruMapelPage() {
     };
   }, [quickOpen]);
 
-  // Cleanup object URL
   useEffect(() => {
     return () => {
       if (scanImageUrl) URL.revokeObjectURL(scanImageUrl);
@@ -558,7 +621,6 @@ export default function PenilaianGuruMapelPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Cleanup toast timer
   useEffect(() => {
     return () => {
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
@@ -763,7 +825,7 @@ export default function PenilaianGuruMapelPage() {
   }, [selectedKelas, selectedMapelId]);
 
   /* ==============================================================
-     FETCH UJIAN AKTIF
+     FETCH UJIAN AKTIF  (FILTER BERDASARKAN KATEGORI MAPEL)
      ============================================================== */
   useEffect(() => {
     if (!selectedKelas) {
@@ -777,13 +839,11 @@ export default function PenilaianGuruMapelPage() {
       setLoadingUjianAktif(true);
       setSelectedUjianId(null);
       try {
-        // 1) Ambil semua ujian yang statusnya "buka" saja
         const ujianData = await pb.collection("pengaturan_ujian").getFullList({
           filter: `status_akses = "buka"`,
           requestKey: null,
         });
 
-        // 2) Filter di JS — lebih tahan terhadap tipe data select/relasi
         const kelasId = selectedKelas.id;
         const kelasTingkat = String(selectedKelas.tingkat ?? "").trim();
 
@@ -800,11 +860,14 @@ export default function PenilaianGuruMapelPage() {
 
           const matchKelas = targetKelas.includes(kelasId);
           const matchTingkat = targetTingkat.includes(kelasTingkat);
+          if (!matchKelas && !matchTingkat) return false;
 
-          return matchKelas || matchTingkat;
+          // ⬇️ FILTER KATEGORI: ujian koding hanya untuk mapel koding
+          if (!ujianBolehUntukMapel(u, mapel)) return false;
+
+          return true;
         });
 
-        // 3) Urutkan: UTS (ahb) dulu, lalu UAS (asas), dst.
         const jenisOrder = { ahb: 1, asas: 2, asat: 3, lainnya: 4 };
         matched.sort((a, b) => {
           const ja = jenisOrder[a.jenis_ujian] ?? 99;
@@ -816,23 +879,6 @@ export default function PenilaianGuruMapelPage() {
         if (!isMounted) return;
         setUjianAktif(matched);
         if (matched.length > 0) setSelectedUjianId(matched[0].id);
-
-        // Debug kalau masih kosong / cuma 1
-        if (typeof window !== "undefined" && matched.length < 2) {
-          console.log("[Debug ujian aktif]", {
-            kelasId,
-            kelasTingkat,
-            totalOpen: ujianData.length,
-            matched,
-            allOpen: ujianData.map((u) => ({
-              nama: u.nama_ujian,
-              jenis: u.jenis_ujian,
-              status: u.status_akses,
-              target_tingkat: u.target_tingkat,
-              target_kelas_id: u.target_kelas_id,
-            })),
-          });
-        }
       } catch (err) {
         if (!err?.isAbort) {
           console.error("Error fetching ujian aktif:", err);
@@ -847,7 +893,8 @@ export default function PenilaianGuruMapelPage() {
     return () => {
       isMounted = false;
     };
-  }, [selectedKelas]);
+    // ⬇️ Tambahkan `mapel` & `selectedMapelId` agar refetch ketika ganti mapel
+  }, [selectedKelas, mapel, selectedMapelId]);
 
   /* ==============================================================
    FETCH NILAI UJIAN
@@ -877,7 +924,7 @@ export default function PenilaianGuruMapelPage() {
         data.forEach((n) => {
           const uid = firstOf(n.pengaturan_ujian_id);
           const sid = firstOf(n.siswa_id);
-          if (!siswaIds.has(sid)) return; // hanya siswa kelas ini
+          if (!siswaIds.has(sid)) return;
           if (!map[uid]) map[uid] = {};
           map[uid][sid] = { recordId: n.id, nilai: n.nilai };
         });
@@ -911,7 +958,6 @@ export default function PenilaianGuruMapelPage() {
     setSelectedKelasId(opt.kelas.id);
   }
 
-  // ================= FILTER LIST UNTUK QUICK SWITCH =================
   const quickList = useMemo(() => {
     const q = quickSearch.trim().toLowerCase();
     if (!q) return kelasOptions;
@@ -922,7 +968,6 @@ export default function PenilaianGuruMapelPage() {
     });
   }, [kelasOptions, quickSearch]);
 
-  // ================= INDEKS KELAS SEKARANG & NAVIGASI =================
   const currentIndex = useMemo(
     () => kelasOptions.findIndex((o) => o.kelas.id === selectedKelasId),
     [kelasOptions, selectedKelasId],
@@ -1304,11 +1349,17 @@ export default function PenilaianGuruMapelPage() {
   async function handleSaveUjian(siswaId, ujianId, rawValue) {
     if (!ujianId || !selectedPloting || !selectedMapelId) return;
 
+    // Guard: pastikan ujian ini boleh untuk mapel yang sedang aktif
+    const ujianObj = ujianAktif.find((u) => u.id === ujianId);
+    if (ujianObj && !ujianBolehUntukMapel(ujianObj, mapel)) {
+      showToast("Ujian ini tidak berlaku untuk mapel ini", "error");
+      return;
+    }
+
     const cellKey = `u-${ujianId}-${siswaId}`;
     const existing = nilaiUjian[ujianId]?.[siswaId];
     const nilaiValue = rawValue === "" ? null : Number(rawValue);
 
-    // validasi: harus angka 0-100
     if (
       nilaiValue !== null &&
       (Number.isNaN(nilaiValue) || nilaiValue < 0 || nilaiValue > 100)
@@ -1316,7 +1367,6 @@ export default function PenilaianGuruMapelPage() {
       setCellStatus((prev) => ({ ...prev, [cellKey]: "error" }));
       return;
     }
-    // kolom dikosongkan / tidak berubah -> tidak perlu simpan
     if (nilaiValue === null) return;
     if (existing?.nilai === nilaiValue) return;
 
@@ -1957,7 +2007,7 @@ export default function PenilaianGuruMapelPage() {
     }
   }
 
-  // ================= IMPORT NILAI FORMATIF =================
+  // ================= IMPORT FORMATIF (step 3, per kelas) =================
   async function handleImportFormatif(file) {
     if (!file || !selectedKelas || !selectedMapelId) return;
     try {
@@ -2207,7 +2257,7 @@ export default function PenilaianGuruMapelPage() {
   }
 
   /* ==============================================================
-     EXPORT EXCEL — 1 SHEET PER KELAS
+     EXPORT EXCEL — 1 SHEET PER KELAS (TP + SUMATIF + UJIAN)
      ============================================================== */
   async function handleExportPerKelas() {
     if (!user?.id) return;
@@ -2261,23 +2311,32 @@ export default function PenilaianGuruMapelPage() {
         .map((id) => `mapel_id ~ "${id}"`)
         .join(" || ");
 
-      const [mapelAll, tpAll, lmAll, nfAll, nsAll] = await Promise.all([
-        pb.collection("mata_pelajaran").getFullList({
-          filter: mapelIdsArr.map((id) => `id = "${id}"`).join(" || "),
-          requestKey: null,
-        }),
-        pb.collection("tujuan_pembelajaran").getFullList({
-          filter: mapelFilter,
-          requestKey: null,
-        }),
-        pb.collection("lingkup_materi").getFullList({
-          filter: mapelFilter,
-          sort: "created",
-          requestKey: null,
-        }),
-        pb.collection("nilai_formatif").getFullList({ requestKey: null }),
-        pb.collection("nilai_sumatif").getFullList({ requestKey: null }),
-      ]);
+      const [mapelAll, tpAll, lmAll, nfAll, nsAll, nuAll, ujianAll] =
+        await Promise.all([
+          pb.collection("mata_pelajaran").getFullList({
+            filter: mapelIdsArr.map((id) => `id = "${id}"`).join(" || "),
+            requestKey: null,
+          }),
+          pb.collection("tujuan_pembelajaran").getFullList({
+            filter: mapelFilter,
+            requestKey: null,
+          }),
+          pb.collection("lingkup_materi").getFullList({
+            filter: mapelFilter,
+            sort: "created",
+            requestKey: null,
+          }),
+          pb.collection("nilai_formatif").getFullList({ requestKey: null }),
+          pb.collection("nilai_sumatif").getFullList({ requestKey: null }),
+          pb.collection("nilai_ujian").getFullList({
+            filter: mapelFilter,
+            requestKey: null,
+          }),
+          pb.collection("pengaturan_ujian").getFullList({
+            filter: `status_akses = "buka"`,
+            requestKey: null,
+          }),
+        ]);
 
       const mapelById = new Map(mapelAll.map((m) => [m.id, m]));
       const tpById = new Map(tpAll.map((t) => [t.id, t]));
@@ -2298,6 +2357,7 @@ export default function PenilaianGuruMapelPage() {
       const GREEN = "FFD9EAD3";
       const GREEN_ALT = "FFEAF4E4";
       const ORANGE = "FFFCE5CD";
+      const BLUE = "FFCFE2F3";
       const YELLOW_LIGHT = "FFFFF2CC";
 
       function styleHead(cell, argb) {
@@ -2316,6 +2376,8 @@ export default function PenilaianGuruMapelPage() {
       }
 
       const collator = new Intl.Collator("id", { numeric: true });
+      const jenisOrder = { ahb: 1, asas: 2, asat: 3, lainnya: 4 };
+      const normalizeArr = (v) => (Array.isArray(v) ? v : v != null ? [v] : []);
 
       for (let i = 0; i < kelasList.length; i++) {
         const { kelas: kelasItem, mapelIds } = kelasList[i];
@@ -2347,14 +2409,38 @@ export default function PenilaianGuruMapelPage() {
             (a.nama_mapel || "").localeCompare(b.nama_mapel || ""),
           );
 
+        // Ujian aktif untuk kelas ini — HANYA yang boleh untuk minimal salah satu mapel di kelas ini
+        const kelasId = kelasItem.id;
+        const kelasTingkat = String(kelasItem.tingkat ?? "").trim();
+
+        const ujianKelas = ujianAll
+          .filter((u) => {
+            const tk = normalizeArr(u.target_kelas_id);
+            const tt = normalizeArr(u.target_tingkat).map((t) =>
+              String(t).trim(),
+            );
+            if (!tk.includes(kelasId) && !tt.includes(kelasTingkat))
+              return false;
+            // ⬇️ include hanya jika ADA mapel di kelas ini yang boleh memakai ujian tsb
+            return mapelKelas.some((m) => ujianBolehUntukMapel(u, m));
+          })
+          .sort((a, b) => {
+            const ja = jenisOrder[a.jenis_ujian] ?? 99;
+            const jb = jenisOrder[b.jenis_ujian] ?? 99;
+            if (ja !== jb) return ja - jb;
+            return (a.nama_ujian || "").localeCompare(b.nama_ujian || "", "id");
+          });
+
         const fData = new Map();
         const sData = new Map();
+        const uData = new Map();
         const lmNamesByMapel = new Map();
         const maxTpByMapel = new Map();
 
         mapelKelas.forEach((m) => {
           fData.set(m.id, new Map());
           sData.set(m.id, new Map());
+          uData.set(m.id, new Map());
           lmNamesByMapel.set(m.id, []);
           maxTpByMapel.set(m.id, 0);
         });
@@ -2419,6 +2505,22 @@ export default function PenilaianGuruMapelPage() {
           perSiswa.get(sid)[namaLm] = nilai;
         });
 
+        // Nilai ujian untuk kelas ini
+        const ujianIdsKelas = new Set(ujianKelas.map((u) => u.id));
+        nuAll.forEach((n) => {
+          const ujianId = firstOf(n.pengaturan_ujian_id);
+          if (!ujianId || !ujianIdsKelas.has(ujianId)) return;
+          const mapelId = firstOf(n.mapel_id);
+          if (!mapelIds.has(mapelId)) return;
+          const nilai = numOrNull(n.nilai);
+          if (nilai === null) return;
+          const sid = firstOf(n.siswa_id);
+          const perSiswa = uData.get(mapelId);
+          if (!perSiswa) return;
+          if (!perSiswa.has(sid)) perSiswa.set(sid, {});
+          perSiswa.get(sid)[ujianId] = nilai;
+        });
+
         const maxTpGlobal = Math.max(0, ...maxTpByMapel.values());
         const maxLmGlobal = Math.max(
           0,
@@ -2431,7 +2533,12 @@ export default function PenilaianGuruMapelPage() {
 
         const FIXED = 4;
         const tpEnd = FIXED + maxTpGlobal * 4;
-        const lastCol = tpEnd + maxLmGlobal;
+        const sumatifStart = tpEnd + 1;
+        const sumatifEnd = tpEnd + maxLmGlobal;
+        const ujianStart = sumatifEnd + 1;
+        const ujianEnd = sumatifEnd + ujianKelas.length;
+        const lastCol = ujianEnd;
+
         const h1 = sheet.getRow(1);
         const h2 = sheet.getRow(2);
 
@@ -2455,28 +2562,45 @@ export default function PenilaianGuruMapelPage() {
         }
 
         if (maxLmGlobal > 0) {
-          const s = tpEnd + 1;
-          if (maxLmGlobal > 1) sheet.mergeCells(1, s, 1, lastCol);
-          h1.getCell(s).value = "SUMATIF";
+          if (maxLmGlobal > 1) sheet.mergeCells(1, sumatifStart, 1, sumatifEnd);
+          h1.getCell(sumatifStart).value = "SUMATIF";
           for (let l = 0; l < maxLmGlobal; l++) {
-            styleHead(h1.getCell(s + l), ORANGE);
-            h2.getCell(s + l).value = `LM ${l + 1}`;
-            styleHead(h2.getCell(s + l), ORANGE);
+            styleHead(h1.getCell(sumatifStart + l), ORANGE);
+            h2.getCell(sumatifStart + l).value = `LM ${l + 1}`;
+            styleHead(h2.getCell(sumatifStart + l), ORANGE);
           }
         }
+
+        if (ujianKelas.length > 0) {
+          if (ujianKelas.length > 1)
+            sheet.mergeCells(1, ujianStart, 1, ujianEnd);
+          h1.getCell(ujianStart).value = "UJIAN";
+          ujianKelas.forEach((u, idx) => {
+            styleHead(h1.getCell(ujianStart + idx), BLUE);
+            h2.getCell(ujianStart + idx).value =
+              u.nama_ujian || `Ujian ${idx + 1}`;
+            styleHead(h2.getCell(ujianStart + idx), BLUE);
+          });
+        }
+
         h1.height = 22;
-        h2.height = 20;
+        h2.height = 26;
 
         mapelKelas.forEach((m) => {
           const mapelName = (m.nama_mapel || m.nama || "-").trim();
           const lmNames = lmNamesByMapel.get(m.id) || [];
 
-          if (lmNames.length > 0) {
+          // Ujian yang berlaku khusus untuk mapel ini (untuk baris data)
+          const ujianMapel = ujianKelas.filter((u) =>
+            ujianBolehUntukMapel(u, m),
+          );
+
+          if (lmNames.length > 0 || ujianMapel.length > 0) {
             const titleRow = sheet.addRow([]);
             titleRow.getCell(3).value = "Lingkup Materi";
             titleRow.getCell(4).value = mapelName;
             lmNames.forEach((nm, l) => {
-              titleRow.getCell(tpEnd + l + 1).value = nm;
+              titleRow.getCell(sumatifStart + l).value = nm;
             });
             for (let c = 1; c <= lastCol; c++) {
               const cell = titleRow.getCell(c);
@@ -2510,6 +2634,7 @@ export default function PenilaianGuruMapelPage() {
             siswaSorted.forEach((siswa, idx) => {
               const perTp = fData.get(m.id)?.get(siswa.id) || {};
               const perLm = sData.get(m.id)?.get(siswa.id) || {};
+              const perUjian = uData.get(m.id)?.get(siswa.id) || {};
               const row = sheet.addRow([
                 idx + 1,
                 siswa.nis || "",
@@ -2523,7 +2648,14 @@ export default function PenilaianGuruMapelPage() {
                 }
               }
               lmNames.forEach((nm, l) => {
-                row.getCell(tpEnd + l + 1).value = perLm[nm] ?? null;
+                row.getCell(sumatifStart + l).value = perLm[nm] ?? null;
+              });
+              ujianKelas.forEach((u, n) => {
+                // Isi hanya jika ujian ini berlaku untuk mapel ini
+                const boleh = ujianBolehUntukMapel(u, m);
+                row.getCell(ujianStart + n).value = boleh
+                  ? (perUjian[u.id] ?? null)
+                  : null;
               });
               for (let c = 1; c <= lastCol; c++) {
                 const cell = row.getCell(c);
@@ -2542,8 +2674,10 @@ export default function PenilaianGuruMapelPage() {
         sheet.getColumn(3).width = 28;
         sheet.getColumn(4).width = 26;
         for (let c = FIXED + 1; c <= tpEnd; c++) sheet.getColumn(c).width = 6;
-        for (let c = tpEnd + 1; c <= lastCol; c++)
+        for (let c = sumatifStart; c <= sumatifEnd; c++)
           sheet.getColumn(c).width = 14;
+        for (let c = ujianStart; c <= ujianEnd; c++)
+          sheet.getColumn(c).width = 16;
 
         sheet.views = [{ state: "frozen", xSplit: 4, ySplit: 2 }];
       }
@@ -2562,6 +2696,973 @@ export default function PenilaianGuruMapelPage() {
     } finally {
       setExporting(false);
       setExportProgress("");
+    }
+  }
+
+  /* ==============================================================
+     IMPORT EXCEL PER KELAS (step 2) — untuk 1 mapel terpilih
+     ============================================================== */
+  async function handleImportAllKelas(file) {
+    if (!file || !selectedMapelId || !mapel || kelasOptions.length === 0)
+      return;
+    try {
+      setImportKelasLoading(true);
+      setImportKelasResult(null);
+      setImportKelasProgress("Membaca file...");
+
+      const arrayBuffer = await file.arrayBuffer();
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(arrayBuffer);
+
+      // Lookup kelas dari kelasOptions (kelas yang diajar untuk mapel ini)
+      const kelasByKey = new Map();
+      kelasOptions.forEach((opt) => {
+        const k = opt.kelas;
+        const key = normKey(k.nama_kelas);
+        if (key && !kelasByKey.has(key)) kelasByKey.set(key, k);
+      });
+
+      // Fetch siswa untuk semua kelas sekaligus
+      const kelasIds = kelasOptions.map((o) => o.kelas.id);
+      const allSiswa = kelasIds.length
+        ? await pb.collection("siswa").getFullList({
+            filter: kelasIds.map((id) => `kelas_id = "${id}"`).join(" || "),
+            requestKey: null,
+          })
+        : [];
+
+      const siswaByKelas = new Map();
+      allSiswa.forEach((s) => {
+        const kid = firstOf(s.kelas_id);
+        if (!kid) return;
+        if (!siswaByKelas.has(kid)) {
+          siswaByKelas.set(kid, { byNis: new Map(), byNama: new Map() });
+        }
+        const bucket = siswaByKelas.get(kid);
+        const nis = normNis(s.nis);
+        if (nis && !bucket.byNis.has(nis)) bucket.byNis.set(nis, s);
+        const nm = normText(s.nama_siswa);
+        if (nm && !bucket.byNama.has(nm)) bucket.byNama.set(nm, s);
+      });
+
+      const sheetSummaries = [];
+
+      for (let i = 0; i < workbook.worksheets.length; i++) {
+        const sheet = workbook.worksheets[i];
+        const sheetName = String(sheet.name || "").trim();
+        const key = normKey(sheetName);
+
+        let targetKelas = kelasByKey.get(key);
+        if (!targetKelas) {
+          for (const [k, v] of kelasByKey.entries()) {
+            if (k && key && (k.includes(key) || key.includes(k))) {
+              targetKelas = v;
+              break;
+            }
+          }
+        }
+
+        if (!targetKelas) {
+          sheetSummaries.push({
+            sheetName,
+            status: "skipped",
+            reason: "Nama sheet tidak cocok dengan kelas untuk mapel ini",
+          });
+          continue;
+        }
+
+        setImportKelasProgress(
+          `Memproses sheet ${i + 1}/${workbook.worksheets.length}: ${sheetName}`,
+        );
+        await new Promise((r) => setTimeout(r, 0));
+
+        const bucket = siswaByKelas.get(targetKelas.id) || {
+          byNis: new Map(),
+          byNama: new Map(),
+        };
+        const findSiswa = (nama, nis) => {
+          const n = normNis(nis);
+          if (n && bucket.byNis.has(n)) return bucket.byNis.get(n);
+          const nm = normText(nama);
+          return nm ? bucket.byNama.get(nm) || null : null;
+        };
+
+        try {
+          const summary = await processKelasSheet(
+            sheet,
+            targetKelas,
+            mapel,
+            findSiswa,
+          );
+          sheetSummaries.push({
+            sheetName,
+            kelasName: targetKelas.nama_kelas,
+            mapelName: mapel.nama_mapel || mapel.nama,
+            status: "ok",
+            ...summary,
+          });
+        } catch (err) {
+          console.error(`Gagal proses sheet ${sheetName}:`, err);
+          sheetSummaries.push({
+            sheetName,
+            kelasName: targetKelas.nama_kelas,
+            mapelName: mapel.nama_mapel || mapel.nama,
+            status: "error",
+            reason: err?.message || "Gagal memproses sheet",
+          });
+        }
+      }
+
+      const totalSaved = sheetSummaries.reduce(
+        (acc, s) =>
+          acc +
+          (s.formatif?.saved || 0) +
+          (s.sumatif?.saved || 0) +
+          (s.ujian?.saved || 0),
+        0,
+      );
+      const totalCleared = sheetSummaries.reduce(
+        (acc, s) =>
+          acc +
+          (s.formatif?.cleared || 0) +
+          (s.sumatif?.cleared || 0) +
+          (s.ujian?.cleared || 0),
+        0,
+      );
+
+      setImportKelasResult({
+        totalSaved,
+        totalCleared,
+        sheets: sheetSummaries,
+      });
+    } catch (error) {
+      console.error("Gagal import per kelas:", error);
+      alert("Gagal import: " + (error?.message || "File tidak valid"));
+    } finally {
+      setImportKelasLoading(false);
+      setImportKelasProgress("");
+    }
+  }
+
+  /* ==============================================================
+     PROSES 1 SHEET = 1 KELAS × 1 MAPEL
+     ============================================================== */
+  async function processKelasSheet(sheet, targetKelas, targetMapel, findSiswa) {
+    const result = {
+      formatif: { saved: 0, skipped: 0, cleared: 0, created: 0, errors: [] },
+      sumatif: { saved: 0, skipped: 0, cleared: 0, created: 0, errors: [] },
+      ujian: { saved: 0, skipped: 0, cleared: 0, errors: [] },
+    };
+
+    const [tpList, lmList, nfAll, nsAll, nuAll, ujianData] = await Promise.all([
+      pb.collection("tujuan_pembelajaran").getFullList({
+        filter: `mapel_id ~ "${targetMapel.id}" && kelas_id ~ "${targetKelas.id}"`,
+        requestKey: null,
+      }),
+      pb.collection("lingkup_materi").getFullList({
+        filter: `mapel_id ~ "${targetMapel.id}" && kelas_id ~ "${targetKelas.id}"`,
+        sort: "created",
+        requestKey: null,
+      }),
+      pb.collection("nilai_formatif").getFullList({
+        filter: `kelas_id = "${targetKelas.id}"`,
+        requestKey: null,
+      }),
+      pb.collection("nilai_sumatif").getFullList({
+        filter: `kelas_id = "${targetKelas.id}"`,
+        requestKey: null,
+      }),
+      pb.collection("nilai_ujian").getFullList({
+        filter: `mapel_id ~ "${targetMapel.id}"`,
+        requestKey: null,
+      }),
+      pb.collection("pengaturan_ujian").getFullList({
+        filter: `status_akses = "buka"`,
+        requestKey: null,
+      }),
+    ]);
+
+    // Saring ujian yang berlaku untuk kelas ini DAN mapel ini
+    const normalizeArr = (v) => (Array.isArray(v) ? v : v != null ? [v] : []);
+    const kelasId = targetKelas.id;
+    const kelasTingkat = String(targetKelas.tingkat ?? "").trim();
+    const ujianAktifKelas = ujianData.filter((u) => {
+      const tk = normalizeArr(u.target_kelas_id);
+      const tt = normalizeArr(u.target_tingkat).map((t) => String(t).trim());
+      const match = tk.includes(kelasId) || tt.includes(kelasTingkat);
+      if (!match) return false;
+      // ⬇️ FILTER KATEGORI: ujian koding hanya untuk mapel koding
+      if (!ujianBolehUntukMapel(u, targetMapel)) return false;
+      return true;
+    });
+
+    const tpByNo = new Map();
+    tpList.forEach((t) => {
+      const no = String(t.no_tp || "")
+        .trim()
+        .toUpperCase();
+      if (no) tpByNo.set(no, t);
+    });
+
+    const lmByName = new Map();
+    lmList.forEach((l) => lmByName.set(normText(l.nama), l));
+
+    const ujianByKey = new Map();
+    ujianAktifKelas.forEach((u) => {
+      const k = normKey(u.nama_ujian);
+      if (k && !ujianByKey.has(k)) ujianByKey.set(k, u);
+    });
+
+    const nfMap = {};
+    nfAll.forEach((n) => {
+      const tp = tpList.find((t) => t.id === firstOf(n.tp_id));
+      if (!tp) return;
+      const sid = firstOf(n.siswa_id);
+      if (!nfMap[sid]) nfMap[sid] = {};
+      nfMap[sid][tp.id] = {
+        recordId: n.id,
+        k1: n.k1 ?? -1,
+        k2: n.k2 ?? -1,
+        k3: n.k3 ?? -1,
+        k4: n.k4 ?? -1,
+      };
+    });
+
+    const nsMap = {};
+    nsAll.forEach((n) => {
+      const lm = lmList.find((l) => l.id === firstOf(n.lm_id));
+      if (!lm) return;
+      const sid = firstOf(n.siswa_id);
+      if (!nsMap[sid]) nsMap[sid] = {};
+      nsMap[sid][lm.id] = { recordId: n.id, nilai: n.nilai };
+    });
+
+    const nuMap = {};
+    nuAll.forEach((n) => {
+      const uid = firstOf(n.pengaturan_ujian_id);
+      const sid = firstOf(n.siswa_id);
+      if (!uid || !sid) return;
+      if (!nuMap[uid]) nuMap[uid] = {};
+      nuMap[uid][sid] = { recordId: n.id, nilai: n.nilai };
+    });
+
+    const h1 = sheet.getRow(1);
+    const h2 = sheet.getRow(2);
+    const h3 = sheet.getRow(3);
+
+    let lastCol = 4;
+    h1.eachCell({ includeEmpty: false }, (_, col) => {
+      if (col > lastCol) lastCol = col;
+    });
+    h2.eachCell({ includeEmpty: false }, (_, col) => {
+      if (col > lastCol) lastCol = col;
+    });
+
+    const colInfo = [];
+    let currentGroup = null;
+    for (let c = 5; c <= lastCol; c++) {
+      const v1 = readCellString(h1.getCell(c));
+      if (v1) currentGroup = v1;
+      const v2 = readCellString(h2.getCell(c));
+      const v3 = readCellString(h3.getCell(c));
+      colInfo.push({ col: c, group: currentGroup, sub: v2, title: v3 });
+    }
+
+    const formatifCols = [];
+    const sumatifCols = [];
+    const ujianCols = [];
+
+    for (const ci of colInfo) {
+      if (!ci.group) continue;
+      const g = String(ci.group).trim();
+      const tpMatch = g.match(/^TP\s*(\d+)$/i);
+      if (tpMatch) {
+        const kField = String(ci.sub || "").toLowerCase();
+        if (["k1", "k2", "k3", "k4"].includes(kField)) {
+          formatifCols.push({
+            col: ci.col,
+            tpNo: `TP ${parseInt(tpMatch[1], 10)}`,
+            kField,
+          });
+        }
+      } else if (g.toUpperCase() === "SUMATIF") {
+        const nm = ci.title || ci.sub;
+        if (nm) sumatifCols.push({ col: ci.col, lmName: nm });
+      } else if (g.toUpperCase() === "UJIAN") {
+        if (ci.sub) ujianCols.push({ col: ci.col, ujianKey: normKey(ci.sub) });
+      }
+    }
+
+    const c3 = readCellString(h3.getCell(3)).toLowerCase();
+    const dataStartRow = c3.includes("lingkup") ? 4 : 3;
+
+    const tpNeeded = new Set(formatifCols.map((c) => c.tpNo));
+    for (const no of tpNeeded) {
+      if (tpByNo.has(no.toUpperCase())) continue;
+      try {
+        const created = await pb.collection("tujuan_pembelajaran").create(
+          {
+            no_tp: no,
+            mapel_id: targetMapel.id,
+            kelas_id: targetKelas.id,
+          },
+          { requestKey: null },
+        );
+        tpByNo.set(no.toUpperCase(), created);
+        result.formatif.created++;
+      } catch (err) {
+        result.formatif.errors.push(
+          `Gagal buat ${no}: ${err?.message || "unknown"}`,
+        );
+      }
+    }
+
+    const lmColsResolved = [];
+    for (const sc of sumatifCols) {
+      const key = normText(sc.lmName);
+      let lm = lmByName.get(key);
+      if (!lm) {
+        try {
+          lm = await pb.collection("lingkup_materi").create(
+            {
+              nama: String(sc.lmName).trim(),
+              mapel_id: targetMapel.id,
+              kelas_id: targetKelas.id,
+              guru_id: user?.id,
+            },
+            { requestKey: null },
+          );
+          lmByName.set(key, lm);
+          result.sumatif.created++;
+        } catch (err) {
+          result.sumatif.errors.push(
+            `Gagal buat LM "${sc.lmName}": ${err?.message || "unknown"}`,
+          );
+          continue;
+        }
+      }
+      lmColsResolved.push({ col: sc.col, lm });
+    }
+
+    const ujianColsResolved = [];
+    for (const uc of ujianCols) {
+      const u = ujianByKey.get(uc.ujianKey);
+      if (!u) {
+        result.ujian.errors.push(
+          `Ujian "${uc.ujianKey}" tidak ditemukan / belum aktif / tidak berlaku untuk mapel ini, kolom dilewati.`,
+        );
+        continue;
+      }
+      ujianColsResolved.push({ col: uc.col, ujian: u });
+    }
+
+    const colByTpK = new Map();
+    formatifCols.forEach((c) => {
+      colByTpK.set(`${c.tpNo}|${c.kField}`, c.col);
+    });
+    const uniqueTpNos = [...new Set(formatifCols.map((c) => c.tpNo))];
+
+    const lastRow = sheet.rowCount;
+    const tasks = [];
+
+    for (let r = dataStartRow; r <= lastRow; r++) {
+      const row = sheet.getRow(r);
+      const nama = readCellString(row.getCell(3));
+      const nis = readCellString(row.getCell(2));
+
+      if (normText(nama) === "lingkup materi") continue;
+      if (!nama && !nis) continue;
+
+      const siswa = findSiswa(nama, nis);
+      if (!siswa) {
+        result.formatif.errors.push(
+          `Baris ${r}: siswa "${nama || nis}" tidak ditemukan.`,
+        );
+        continue;
+      }
+
+      // FORMATIF
+      for (const tpNo of uniqueTpNos) {
+        const tp = tpByNo.get(tpNo.toUpperCase());
+        if (!tp) continue;
+        const existing = nfMap[siswa.id]?.[tp.id];
+
+        const payload = {
+          k1: existing?.k1 ?? -1,
+          k2: existing?.k2 ?? -1,
+          k3: existing?.k3 ?? -1,
+          k4: existing?.k4 ?? -1,
+        };
+        let hasChange = false;
+        let anyExcelFilled = false;
+
+        for (const kField of ["k1", "k2", "k3", "k4"]) {
+          const col = colByTpK.get(`${tpNo}|${kField}`);
+          if (!col) continue;
+          const raw = readCellNumber(row.getCell(col));
+          const excelFilled = raw !== null && raw >= 0 && raw <= 100;
+          if (excelFilled) anyExcelFilled = true;
+          const curVal = payload[kField];
+          const curFilled = typeof curVal === "number" && curVal !== -1;
+
+          if (excelFilled) {
+            if (!curFilled) {
+              payload[kField] = raw;
+              hasChange = true;
+            } else {
+              result.formatif.skipped++;
+            }
+          } else {
+            if (curFilled) {
+              payload[kField] = -1;
+              hasChange = true;
+              result.formatif.cleared++;
+            }
+          }
+        }
+
+        if (!hasChange) continue;
+        if (!existing?.recordId && !anyExcelFilled) continue;
+
+        const filledCaptured = anyExcelFilled;
+        tasks.push(async () => {
+          try {
+            let saved;
+            if (existing?.recordId) {
+              saved = await pb
+                .collection("nilai_formatif")
+                .update(existing.recordId, payload, { requestKey: null });
+            } else {
+              saved = await pb.collection("nilai_formatif").create(
+                {
+                  tp_id: tp.id,
+                  siswa_id: siswa.id,
+                  kelas_id: targetKelas.id,
+                  ...payload,
+                },
+                { requestKey: null },
+              );
+            }
+            if (!nfMap[siswa.id]) nfMap[siswa.id] = {};
+            nfMap[siswa.id][tp.id] = { recordId: saved.id, ...payload };
+            if (filledCaptured) result.formatif.saved++;
+          } catch (err) {
+            result.formatif.errors.push(
+              `Baris ${r} ${tpNo}: ${err?.message || "gagal"}`,
+            );
+          }
+        });
+      }
+
+      // SUMATIF
+      for (const sc of lmColsResolved) {
+        const raw = readCellNumber(row.getCell(sc.col));
+        const excelFilled = raw !== null && raw >= 0 && raw <= 100;
+        const existing = nsMap[siswa.id]?.[sc.lm.id];
+        const curVal = existing?.nilai;
+        const curFilled = typeof curVal === "number" && curVal !== -1;
+        const lm = sc.lm;
+
+        if (excelFilled) {
+          if (curFilled) {
+            result.sumatif.skipped++;
+            continue;
+          }
+          tasks.push(async () => {
+            try {
+              let saved;
+              if (existing?.recordId) {
+                saved = await pb
+                  .collection("nilai_sumatif")
+                  .update(
+                    existing.recordId,
+                    { nilai: raw },
+                    { requestKey: null },
+                  );
+              } else {
+                saved = await pb.collection("nilai_sumatif").create(
+                  {
+                    lm_id: lm.id,
+                    siswa_id: siswa.id,
+                    kelas_id: targetKelas.id,
+                    nilai: raw,
+                  },
+                  { requestKey: null },
+                );
+              }
+              if (!nsMap[siswa.id]) nsMap[siswa.id] = {};
+              nsMap[siswa.id][lm.id] = { recordId: saved.id, nilai: raw };
+              result.sumatif.saved++;
+            } catch (err) {
+              result.sumatif.errors.push(
+                `Baris ${r} "${lm.nama}": ${err?.message || "gagal"}`,
+              );
+            }
+          });
+        } else {
+          if (curFilled && existing?.recordId) {
+            tasks.push(async () => {
+              try {
+                await pb
+                  .collection("nilai_sumatif")
+                  .update(
+                    existing.recordId,
+                    { nilai: -1 },
+                    { requestKey: null },
+                  );
+                nsMap[siswa.id][lm.id] = {
+                  recordId: existing.recordId,
+                  nilai: -1,
+                };
+                result.sumatif.cleared++;
+              } catch (err) {
+                result.sumatif.errors.push(
+                  `Baris ${r} "${lm.nama}": ${err?.message || "gagal clear"}`,
+                );
+              }
+            });
+          }
+        }
+      }
+
+      // UJIAN
+      for (const uc of ujianColsResolved) {
+        const raw = readCellNumber(row.getCell(uc.col));
+        const excelFilled = raw !== null && raw >= 0 && raw <= 100;
+        const existing = nuMap[uc.ujian.id]?.[siswa.id];
+        const curVal = existing?.nilai;
+        const curFilled = typeof curVal === "number" && curVal !== -1;
+        const ujian = uc.ujian;
+
+        if (excelFilled) {
+          if (curFilled) {
+            result.ujian.skipped++;
+            continue;
+          }
+          tasks.push(async () => {
+            try {
+              let saved;
+              if (existing?.recordId) {
+                saved = await pb
+                  .collection("nilai_ujian")
+                  .update(
+                    existing.recordId,
+                    { nilai: raw },
+                    { requestKey: null },
+                  );
+              } else {
+                saved = await pb.collection("nilai_ujian").create(
+                  {
+                    siswa_id: siswa.id,
+                    pengaturan_ujian_id: ujian.id,
+                    mapel_id: targetMapel.id,
+                    nilai: raw,
+                  },
+                  { requestKey: null },
+                );
+              }
+              if (!nuMap[ujian.id]) nuMap[ujian.id] = {};
+              nuMap[ujian.id][siswa.id] = { recordId: saved.id, nilai: raw };
+              result.ujian.saved++;
+            } catch (err) {
+              result.ujian.errors.push(
+                `Baris ${r} "${ujian.nama_ujian}": ${err?.message || "gagal"}`,
+              );
+            }
+          });
+        } else {
+          if (curFilled && existing?.recordId) {
+            tasks.push(async () => {
+              try {
+                await pb
+                  .collection("nilai_ujian")
+                  .update(
+                    existing.recordId,
+                    { nilai: -1 },
+                    { requestKey: null },
+                  );
+                nuMap[ujian.id][siswa.id] = {
+                  recordId: existing.recordId,
+                  nilai: -1,
+                };
+                result.ujian.cleared++;
+              } catch (err) {
+                result.ujian.errors.push(
+                  `Baris ${r} "${ujian.nama_ujian}": ${err?.message || "gagal clear"}`,
+                );
+              }
+            });
+          }
+        }
+      }
+    }
+
+    await runPool(tasks, 6);
+    return result;
+  }
+
+  /* ==============================================================
+     EXPORT RAPOR — SATU FILE, 4 SHEET
+     ============================================================== */
+  async function handleExportRapor() {
+    if (!mapel || !selectedKelas) return;
+    if (siswaList.length === 0) {
+      showToast("Belum ada siswa di kelas ini", "error");
+      return;
+    }
+    try {
+      setExportingRapor(true);
+
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = "Sistem Penilaian";
+      workbook.created = new Date();
+
+      const GREEN = "FFD9EAD3";
+      const YELLOW = "FFFFFF00";
+      const CYAN = "FFE0FFFF";
+
+      function setAutoWidth(worksheet) {
+        worksheet.columns.forEach((column) => {
+          let maxLength = 0;
+          column.eachCell({ includeEmpty: true }, (cell) => {
+            const cellValue = cell.value ? cell.value.toString() : "";
+            maxLength = Math.max(maxLength, cellValue.length);
+          });
+          column.width = Math.min(Math.max(maxLength + 4, 10), 50);
+        });
+      }
+      function setFixedWidth(worksheet, colIndex, width) {
+        if (worksheet.columns[colIndex - 1]) {
+          worksheet.columns[colIndex - 1].width = width;
+        }
+      }
+      function addBorder(cell) {
+        cell.border = {
+          top: { style: "thin", color: { argb: "FF000000" } },
+          left: { style: "thin", color: { argb: "FF000000" } },
+          bottom: { style: "thin", color: { argb: "FF000000" } },
+          right: { style: "thin", color: { argb: "FF000000" } },
+        };
+      }
+      function styleHeader(cell, horizontal = "center") {
+        cell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: GREEN },
+        };
+        cell.font = { bold: true, color: { argb: "FF000000" }, size: 11 };
+        cell.alignment = { horizontal, vertical: "middle", wrapText: true };
+        addBorder(cell);
+      }
+      function styleBody(cell, horizontal = "center") {
+        cell.alignment = { horizontal, vertical: "middle" };
+        addBorder(cell);
+      }
+      function styleResult(cell) {
+        cell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: YELLOW },
+        };
+        cell.alignment = { horizontal: "center", vertical: "middle" };
+        addBorder(cell);
+      }
+      function styleNilai(cell) {
+        cell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: CYAN },
+        };
+        cell.alignment = { horizontal: "center", vertical: "middle" };
+        addBorder(cell);
+      }
+      function styleRow(row, styleFn, horizontalMap = null) {
+        row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+          const horiz = horizontalMap?.[colNumber] || "center";
+          styleFn(cell, horiz);
+        });
+      }
+      function addHeading(worksheet, title, colCount, rowIndex = 1) {
+        const row = worksheet.getRow(rowIndex);
+        row.getCell(1).value = title;
+        worksheet.mergeCells(rowIndex, 1, rowIndex, colCount);
+        const mergedCell = worksheet.getCell(rowIndex, 1);
+        mergedCell.font = { bold: true, size: 16, color: { argb: "FF000000" } };
+        mergedCell.alignment = { horizontal: "center", vertical: "middle" };
+        row.height = 30;
+      }
+
+      // DATA KELAS
+      const sheetKelas = workbook.addWorksheet("DATA KELAS", {
+        properties: { tabColor: { argb: GREEN } },
+      });
+      const headerKelas = ["No", "Nama Siswa", "Jenis Kelamin", "NIS", "NISN"];
+      const colCountKelas = headerKelas.length;
+
+      addHeading(sheetKelas, "DATA KELAS", colCountKelas);
+      sheetKelas.addRow([]);
+      sheetKelas.addRow([`Kelas: ${selectedKelas.nama_kelas}`]);
+      sheetKelas.addRow([`Mata Pelajaran: ${mapel.nama_mapel}`]);
+      sheetKelas.addRow([]);
+
+      const headerRowKelas = sheetKelas.addRow(headerKelas);
+      styleRow(headerRowKelas, styleHeader, { 2: "left" });
+      headerRowKelas.height = 25;
+
+      siswaList.forEach((s, idx) => {
+        const row = sheetKelas.addRow([
+          idx + 1,
+          s.nama_siswa,
+          s.jenis_kelamin || "-",
+          s.nis || "-",
+          s.nisn || "-",
+        ]);
+        styleRow(row, styleBody, { 2: "left" });
+      });
+      setAutoWidth(sheetKelas);
+
+      // FORMATIF
+      const sheetFormatif = workbook.addWorksheet("FORMATIF", {
+        properties: { tabColor: { argb: GREEN } },
+      });
+
+      const tpColLayout = [];
+      let colCursor = 5;
+      tpList.forEach((tp) => {
+        tpColLayout.push({
+          tpId: tp.id,
+          tpNo: tp.no_tp,
+          startCol: colCursor,
+          count: SEMUA_KRITERIA.length,
+          activeK: SEMUA_KRITERIA,
+        });
+        colCursor += SEMUA_KRITERIA.length;
+      });
+      const colRata = colCursor;
+      const totalCols = colCursor;
+
+      addHeading(sheetFormatif, "DAFTAR NILAI FORMATIF", totalCols, 1);
+      addHeading(
+        sheetFormatif,
+        "NILAI FORMATIF SETIAP TUJUAN PEMBELAJARAN",
+        totalCols,
+        2,
+      );
+      sheetFormatif.addRow([]);
+
+      const headerRow1 = sheetFormatif.addRow([]);
+      headerRow1.getCell(1).value = "NOMOR";
+      headerRow1.getCell(2).value = "NAMA";
+      headerRow1.getCell(3).value = "L/P";
+      headerRow1.getCell(4).value = "NIS";
+
+      tpColLayout.forEach((layout) => {
+        headerRow1.getCell(layout.startCol).value = layout.tpNo;
+        if (layout.count > 1) {
+          sheetFormatif.mergeCells(
+            4,
+            layout.startCol,
+            4,
+            layout.startCol + layout.count - 1,
+          );
+        }
+      });
+      headerRow1.getCell(colRata).value = "RATA-RATA NILAI";
+
+      const headerRow2 = sheetFormatif.addRow([]);
+      tpColLayout.forEach((layout) => {
+        layout.activeK.forEach((k, i) => {
+          headerRow2.getCell(layout.startCol + i).value = k.toUpperCase();
+        });
+      });
+
+      styleRow(headerRow1, styleHeader, { 2: "left" });
+      styleRow(headerRow2, styleHeader);
+      styleResult(headerRow1.getCell(colRata));
+
+      [1, 2, 3, 4, colRata].forEach((col) => {
+        sheetFormatif.mergeCells(4, col, 5, col);
+      });
+
+      headerRow1.height = 20;
+      headerRow2.height = 15;
+
+      siswaList.forEach((siswa, idx) => {
+        const rowData = new Array(totalCols).fill(null);
+        rowData[0] = idx + 1;
+        rowData[1] = siswa.nama_siswa;
+        rowData[2] = siswa.jenis_kelamin || "-";
+        rowData[3] = siswa.nis;
+
+        tpColLayout.forEach((layout) => {
+          const rec = nilaiFormatif[siswa.id]?.[layout.tpId] || {};
+          layout.activeK.forEach((k, i) => {
+            const v = rec[k];
+            rowData[layout.startCol - 1 + i] =
+              v !== undefined && v !== -1 ? v : null;
+          });
+        });
+
+        const avg = formatifAvgMap[siswa.id];
+        rowData[colRata - 1] = avg !== null ? Number(avg.toFixed(2)) : null;
+
+        const row = sheetFormatif.addRow(rowData);
+        styleRow(row, styleBody, { 2: "left" });
+
+        tpColLayout.forEach((layout) => {
+          for (let i = 0; i < layout.count; i++) {
+            styleNilai(row.getCell(layout.startCol + i));
+          }
+        });
+        styleResult(row.getCell(colRata));
+        row.height = 18;
+      });
+
+      // Lebar kolom formatif — K1–K4 sempit
+      sheetFormatif.getColumn(1).width = 6;
+      sheetFormatif.getColumn(2).width = 28;
+      sheetFormatif.getColumn(3).width = 5;
+      sheetFormatif.getColumn(4).width = 12;
+      tpColLayout.forEach((layout) => {
+        for (let i = 0; i < layout.count; i++) {
+          sheetFormatif.getColumn(layout.startCol + i).width = 4.5;
+        }
+      });
+      sheetFormatif.getColumn(colRata).width = 12;
+
+      // SUMATIF
+      const sheetSumatif = workbook.addWorksheet("SUMATIF", {
+        properties: { tabColor: { argb: GREEN } },
+      });
+
+      const colCountSumatif = 5 + lpList.length + 3;
+      const colRataSumatif = 5 + lpList.length + 1;
+      addHeading(sheetSumatif, "DAFTAR NILAI SUMATIF", colCountSumatif, 1);
+      sheetSumatif.addRow([]);
+
+      const headerSumatif = ["NOMOR", "NIS", "NAMA", "L/P", "KELAS"];
+      lpList.forEach((lp) => headerSumatif.push(lp.nama || "LM"));
+      headerSumatif.push(
+        "Rata-rata",
+        "Sumatif Tengah Semester (STS)",
+        "Sumatif Akhir Semester (SAS)",
+      );
+
+      const headerRowSumatif = sheetSumatif.addRow(headerSumatif);
+      styleRow(headerRowSumatif, styleHeader, { 3: "left" });
+      styleResult(headerRowSumatif.getCell(colRataSumatif));
+      headerRowSumatif.height = 25;
+
+      siswaList.forEach((siswa, idx) => {
+        const rowData = [];
+        rowData.push(idx + 1);
+        rowData.push(siswa.nis || "-");
+        rowData.push(siswa.nama_siswa);
+        rowData.push(siswa.jenis_kelamin || "-");
+        rowData.push(selectedKelas.nama_kelas);
+        lpList.forEach((lp) => {
+          const rec = nilaiSumatif[siswa.id]?.[lp.id] || {};
+          rowData.push(
+            rec.nilai !== undefined && rec.nilai !== null ? rec.nilai : null,
+          );
+        });
+        const avgSum = sumatifAvgMap[siswa.id];
+        rowData.push(avgSum !== null ? Number(avgSum.toFixed(2)) : null);
+        const sts = utsAvgMap[siswa.id];
+        const sas = uasAvgMap[siswa.id];
+        rowData.push(sts !== null ? Number(sts.toFixed(2)) : null);
+        rowData.push(sas !== null ? Number(sas.toFixed(2)) : null);
+
+        const row = sheetSumatif.addRow(rowData);
+        styleRow(row, styleBody, { 3: "left" });
+
+        const colLPStart = 6;
+        for (let i = 0; i < lpList.length; i++) {
+          styleNilai(row.getCell(colLPStart + i));
+        }
+        styleNilai(row.getCell(colRataSumatif + 1));
+        styleNilai(row.getCell(colRataSumatif + 2));
+        styleResult(row.getCell(colRataSumatif));
+      });
+
+      setAutoWidth(sheetSumatif);
+      setFixedWidth(sheetSumatif, 4, 5);
+
+      // NILAI AKHIR
+      const sheetAkhir = workbook.addWorksheet("NILAI AKHIR", {
+        properties: { tabColor: { argb: GREEN } },
+      });
+
+      const headerAkhir = [
+        "NO",
+        "Nama Siswa",
+        "Formatif",
+        "Sumatif",
+        "UTS",
+        "UAS",
+        "Nilai Akhir Rapor",
+      ];
+      const colCountAkhir = headerAkhir.length;
+      const colNilaiAkhir = colCountAkhir;
+
+      addHeading(sheetAkhir, "NILAI AKHIR RAPOR", colCountAkhir, 1);
+      sheetAkhir.addRow([]);
+
+      const headerRowAkhir = sheetAkhir.addRow(headerAkhir);
+      styleRow(headerRowAkhir, styleHeader, { 2: "left" });
+      styleResult(headerRowAkhir.getCell(colNilaiAkhir));
+      headerRowAkhir.height = 25;
+
+      siswaList.forEach((siswa, idx) => {
+        const row = sheetAkhir.addRow([
+          idx + 1,
+          siswa.nama_siswa,
+          formatifAvgMap[siswa.id] !== null
+            ? Number(formatifAvgMap[siswa.id].toFixed(2))
+            : null,
+          sumatifAvgMap[siswa.id] !== null
+            ? Number(sumatifAvgMap[siswa.id].toFixed(2))
+            : null,
+          utsAvgMap[siswa.id] !== null
+            ? Number(utsAvgMap[siswa.id].toFixed(2))
+            : null,
+          uasAvgMap[siswa.id] !== null
+            ? Number(uasAvgMap[siswa.id].toFixed(2))
+            : null,
+          raporMap[siswa.id] !== null
+            ? Number(raporMap[siswa.id].toFixed(2))
+            : null,
+        ]);
+        styleRow(row, styleBody, { 2: "left" });
+
+        for (let i = 3; i <= 6; i++) {
+          styleNilai(row.getCell(i));
+        }
+        styleResult(row.getCell(colNilaiAkhir));
+      });
+
+      setAutoWidth(sheetAkhir);
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      saveAs(
+        blob,
+        `Rapor_${mapel.nama_mapel}_${selectedKelas.nama_kelas}.xlsx`.replace(
+          /\s+/g,
+          "_",
+        ),
+      );
+      showToast("Rapor berhasil diekspor", "success");
+    } catch (error) {
+      console.error("Gagal export:", error);
+      showToast(
+        "Gagal export. Pastikan package 'exceljs' dan 'file-saver' sudah terinstall.",
+        "error",
+      );
+    } finally {
+      setExportingRapor(false);
     }
   }
 
@@ -2613,7 +3714,6 @@ export default function PenilaianGuruMapelPage() {
     "border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-500";
   const tdBase = "border-b border-slate-100";
 
-  // Ringkasan tab ujian (tampilan seperti halaman walikelas)
   const ujianTerpilih = ujianAktif.find((u) => u.id === selectedUjianId);
   const ujianNilaiList = selectedUjianId
     ? siswaList
@@ -2705,19 +3805,6 @@ export default function PenilaianGuruMapelPage() {
                   ampu.
                 </p>
               </div>
-
-              <button
-                type="button"
-                onClick={handleExportPerKelas}
-                disabled={
-                  exporting || loadingPloting || plotingList.length === 0
-                }
-                className="inline-flex flex-shrink-0 items-center gap-2 self-start rounded-xl bg-white/15 px-4 py-2.5 text-xs font-bold text-white ring-1 ring-inset ring-white/20 backdrop-blur-sm transition hover:bg-white/25 disabled:cursor-not-allowed disabled:opacity-50 sm:self-end"
-              >
-                {exporting
-                  ? exportProgress || "Mengexport..."
-                  : "⬇ Export Nilai Mentah (Per Kelas)"}
-              </button>
             </div>
           </div>
 
@@ -2781,16 +3868,62 @@ export default function PenilaianGuruMapelPage() {
         <>
           <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-blue-600 via-blue-600 to-blue-700 p-6 text-white shadow-lg md:p-8">
             <div className="pointer-events-none absolute -right-10 -bottom-20 h-80 w-80 rounded-full bg-white/5" />
-            <div className="relative z-10 space-y-1">
-              <span className="block text-xs font-semibold uppercase tracking-widest text-blue-200">
-                {mapel?.kode_mapel || "Mata Pelajaran"}
-              </span>
-              <h1 className="text-2xl font-extrabold uppercase tracking-wide md:text-3xl">
-                {mapel?.nama_mapel || "Pilih Kelas"}
-              </h1>
-              <p className="text-sm text-blue-100">
-                Pilih kelas untuk mengelola penilaian mata pelajaran ini.
-              </p>
+            <div className="relative z-10 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+              <div className="space-y-1">
+                <span className="block text-xs font-semibold uppercase tracking-widest text-blue-200">
+                  {mapel?.kode_mapel || "Mata Pelajaran"}
+                </span>
+                <h1 className="text-2xl font-extrabold uppercase tracking-wide md:text-3xl">
+                  {mapel?.nama_mapel || "Pilih Kelas"}
+                </h1>
+                <p className="text-sm text-blue-100">
+                  Pilih kelas untuk mengelola penilaian mata pelajaran ini.
+                </p>
+              </div>
+
+              <div className="flex flex-shrink-0 flex-wrap items-center gap-2 self-start sm:self-end">
+                <input
+                  ref={importKelasRef}
+                  type="file"
+                  accept=".xlsx,.xls"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = "";
+                    if (file) handleImportAllKelas(file);
+                  }}
+                />
+
+                <button
+                  type="button"
+                  onClick={() => importKelasRef.current?.click()}
+                  disabled={
+                    importKelasLoading ||
+                    loadingKelasOptions ||
+                    kelasOptions.length === 0
+                  }
+                  className="inline-flex items-center gap-2 rounded-xl bg-white/15 px-4 py-2.5 text-xs font-bold text-white ring-1 ring-inset ring-white/20 backdrop-blur-sm transition hover:bg-white/25 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {importKelasLoading
+                    ? importKelasProgress || "Mengimpor..."
+                    : "⬆ Import Nilai (Per Kelas)"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleExportPerKelas}
+                  disabled={
+                    exporting ||
+                    loadingKelasOptions ||
+                    kelasOptions.length === 0
+                  }
+                  className="inline-flex items-center gap-2 rounded-xl bg-white/15 px-4 py-2.5 text-xs font-bold text-white ring-1 ring-inset ring-white/20 backdrop-blur-sm transition hover:bg-white/25 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {exporting
+                    ? exportProgress || "Mengexport..."
+                    : "⬇ Export Nilai Mentah (Per Kelas)"}
+                </button>
+              </div>
             </div>
           </div>
 
@@ -2882,7 +4015,6 @@ export default function PenilaianGuruMapelPage() {
       {/* ============ STEP 3: INPUT NILAI ============ */}
       {selectedPloting && selectedKelas && (
         <>
-          {/* ================= HEADER ================= */}
           <div className="space-y-3">
             <button
               type="button"
@@ -2895,7 +4027,6 @@ export default function PenilaianGuruMapelPage() {
 
             <div className="relative z-40 rounded-2xl bg-blue-600 p-3 text-white shadow-sm min-[360px]:p-4 sm:px-7 sm:py-6">
               <div className="flex flex-col gap-3 min-[360px]:gap-4 lg:flex-row lg:items-end lg:justify-between">
-                {/* Judul */}
                 <div className="min-w-0">
                   <p className="text-[13px] text-blue-100 min-[360px]:text-sm">
                     {selectedKelas.nama_kelas}, tingkat {selectedKelas.tingkat}
@@ -2906,7 +4037,6 @@ export default function PenilaianGuruMapelPage() {
                 </div>
 
                 <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-                  {/* Statistik: satu baris, ringkas */}
                   <div className="grid grid-cols-3 gap-1.5 min-[360px]:gap-2 sm:flex">
                     {[
                       ["Siswa", siswaList.length],
@@ -2925,7 +4055,6 @@ export default function PenilaianGuruMapelPage() {
                     ))}
                   </div>
 
-                  {/* Pindah kelas + prev/next: satu baris */}
                   {kelasOptions.length > 1 && (
                     <div
                       className="relative flex min-w-0 items-center gap-1.5 min-[360px]:gap-2"
@@ -3024,7 +4153,6 @@ export default function PenilaianGuruMapelPage() {
                         </div>
                       )}
 
-                      {/* Dropdown: selebar baris kontrol di mobile */}
                       {quickOpen && (
                         <div
                           role="listbox"
@@ -3124,7 +4252,6 @@ export default function PenilaianGuruMapelPage() {
             </div>
           </div>
 
-          {/* ================= TABS ================= */}
           <div className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <div
               role="tablist"
@@ -3153,7 +4280,7 @@ export default function PenilaianGuruMapelPage() {
             <LoadingSkeleton />
           ) : (
             <>
-              {/* ================= TAB FORMATIF ================= */}
+              {/* TAB FORMATIF */}
               {activeTab === "formatif" && (
                 <div className="space-y-4">
                   <div className={`${CARD} space-y-4 p-4 sm:p-5`}>
@@ -3276,7 +4403,7 @@ export default function PenilaianGuruMapelPage() {
                 </div>
               )}
 
-              {/* ================= TAB SUMATIF ================= */}
+              {/* TAB SUMATIF */}
               {activeTab === "sumatif" && (
                 <div className="space-y-4">
                   <div className={`${CARD} space-y-4 p-4 sm:p-5`}>
@@ -3342,7 +4469,7 @@ export default function PenilaianGuruMapelPage() {
                 </div>
               )}
 
-              {/* ================= TAB UJIAN ================= */}
+              {/* TAB UJIAN */}
               {activeTab === "ujian" && (
                 <div className="space-y-4">
                   {loadingUjianAktif || loadingNilaiUjian ? (
@@ -3401,7 +4528,6 @@ export default function PenilaianGuruMapelPage() {
                         </div>
                       ) : (
                         <div className="space-y-4">
-                          {/* Ringkasan: strip ringkas di atas tabel */}
                           <div
                             className={`${CARD} flex flex-col gap-4 p-4 sm:p-5 lg:flex-row lg:items-center lg:justify-between`}
                           >
@@ -3452,7 +4578,6 @@ export default function PenilaianGuruMapelPage() {
                             </div>
                           </div>
 
-                          {/* Tabel: selebar penuh */}
                           <div className={`${CARD} overflow-hidden`}>
                             <UjianTable
                               siswaList={siswaList}
@@ -3474,14 +4599,28 @@ export default function PenilaianGuruMapelPage() {
                 </div>
               )}
 
-              {/* ================= TAB RAPOR ================= */}
+              {/* TAB RAPOR */}
               {activeTab === "rapor" && (
                 <div className="space-y-4">
                   <div className={`${CARD} p-4 sm:p-5`}>
                     <SectionHeader
                       title="Rekap nilai rapor"
                       description="Nilai akhir adalah rata-rata komponen formatif, sumatif, UTS, dan UAS yang tersedia. Nilai di bawah 70 berwarna merah."
-                    />
+                    >
+                      <button
+                        type="button"
+                        onClick={handleExportRapor}
+                        disabled={
+                          exportingRapor ||
+                          loadingDetail ||
+                          siswaList.length === 0
+                        }
+                        className={BTN_PRIMARY}
+                      >
+                        <Icon name="download" />
+                        {exportingRapor ? "Mengekspor..." : "Ekspor Excel"}
+                      </button>
+                    </SectionHeader>
                   </div>
 
                   <div className={`${CARD} overflow-hidden`}>
@@ -3507,7 +4646,7 @@ export default function PenilaianGuruMapelPage() {
         </>
       )}
 
-      {/* ================= MODAL KONFIRMASI HAPUS ================= */}
+      {/* MODAL KONFIRMASI HAPUS */}
       {confirmDialog && (
         <Modal
           size="max-w-sm"
@@ -3557,7 +4696,7 @@ export default function PenilaianGuruMapelPage() {
         </Modal>
       )}
 
-      {/* ================= MODAL DOWNLOAD TEMPLATE ================= */}
+      {/* MODAL DOWNLOAD TEMPLATE */}
       {showTemplateDialog && (
         <Modal
           size="max-w-md"
@@ -3643,7 +4782,7 @@ export default function PenilaianGuruMapelPage() {
         </Modal>
       )}
 
-      {/* ================= MODAL HASIL IMPORT ================= */}
+      {/* MODAL HASIL IMPORT FORMATIF */}
       {importResult && (
         <Modal size="max-w-md" onClose={() => setImportResult(null)}>
           <ModalHeader
@@ -3683,7 +4822,186 @@ export default function PenilaianGuruMapelPage() {
         </Modal>
       )}
 
-      {/* ================= MODAL SCAN KERTAS ================= */}
+      {/* MODAL HASIL IMPORT (PER KELAS) */}
+      {importKelasResult && (
+        <div
+          className="fixed inset-0 z-[80] flex items-end justify-center bg-slate-900/40 backdrop-blur-sm sm:items-center sm:p-4"
+          onClick={() => setImportKelasResult(null)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-t-2xl bg-white shadow-2xl sm:rounded-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">
+              <div className="min-w-0">
+                <h3 className="text-base font-bold text-slate-800">
+                  Hasil import (per kelas)
+                </h3>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  {importKelasResult.totalSaved} nilai tersimpan
+                  {importKelasResult.totalCleared > 0 && (
+                    <>
+                      {" · "}
+                      <span className="font-semibold text-amber-600">
+                        {importKelasResult.totalCleared} nilai dikosongkan (-1)
+                      </span>
+                    </>
+                  )}{" "}
+                  dari{" "}
+                  {
+                    importKelasResult.sheets.filter((s) => s.status === "ok")
+                      .length
+                  }{" "}
+                  sheet.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setImportKelasResult(null)}
+                aria-label="Tutup"
+                className="-mr-1 rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+              >
+                <svg
+                  className="h-4 w-4"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M18 6 6 18" />
+                  <path d="m6 6 12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5 space-y-3">
+              {importKelasResult.sheets.map((s, i) => (
+                <div
+                  key={i}
+                  className="rounded-xl border border-slate-200 bg-white p-3"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-bold text-slate-800">
+                        {s.kelasName || s.sheetName}
+                        {s.mapelName && (
+                          <span className="ml-1.5 rounded-full bg-blue-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest text-blue-700">
+                            {s.mapelName}
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-[11px] text-slate-400">
+                        Sheet: {s.sheetName}
+                      </p>
+                    </div>
+                    {s.status === "ok" && (
+                      <div className="flex flex-wrap gap-1 text-[10px]">
+                        <span className="rounded-md bg-emerald-100 px-1.5 py-0.5 font-bold text-emerald-700">
+                          F: {s.formatif?.saved || 0}
+                        </span>
+                        <span className="rounded-md bg-orange-100 px-1.5 py-0.5 font-bold text-orange-700">
+                          S: {s.sumatif?.saved || 0}
+                        </span>
+                        <span className="rounded-md bg-blue-100 px-1.5 py-0.5 font-bold text-blue-700">
+                          U: {s.ujian?.saved || 0}
+                        </span>
+                        {(s.formatif?.cleared ||
+                          s.sumatif?.cleared ||
+                          s.ujian?.cleared) > 0 && (
+                          <span className="rounded-md bg-amber-100 px-1.5 py-0.5 font-bold text-amber-700">
+                            Clear:{" "}
+                            {(s.formatif?.cleared || 0) +
+                              (s.sumatif?.cleared || 0) +
+                              (s.ujian?.cleared || 0)}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    {s.status === "skipped" && (
+                      <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">
+                        Dilewati
+                      </span>
+                    )}
+                    {s.status === "error" && (
+                      <span className="rounded-md bg-red-100 px-1.5 py-0.5 text-[10px] font-bold text-red-700">
+                        Error
+                      </span>
+                    )}
+                  </div>
+
+                  {s.status === "skipped" && (
+                    <p className="mt-2 text-xs text-slate-500">{s.reason}</p>
+                  )}
+                  {s.status === "error" && (
+                    <p className="mt-2 text-xs text-red-600">{s.reason}</p>
+                  )}
+
+                  {s.status === "ok" && (
+                    <div className="mt-2 space-y-1 text-[11px] text-slate-500">
+                      {s.formatif?.created > 0 && (
+                        <p>• {s.formatif.created} TP baru dibuat</p>
+                      )}
+                      {s.sumatif?.created > 0 && (
+                        <p>• {s.sumatif.created} LM baru dibuat</p>
+                      )}
+                      {s.formatif?.skipped > 0 && (
+                        <p>• Formatif: {s.formatif.skipped} nilai dilewati</p>
+                      )}
+                      {s.sumatif?.skipped > 0 && (
+                        <p>• Sumatif: {s.sumatif.skipped} nilai dilewati</p>
+                      )}
+                      {s.ujian?.skipped > 0 && (
+                        <p>• Ujian: {s.ujian.skipped} nilai dilewati</p>
+                      )}
+                    </div>
+                  )}
+
+                  {["formatif", "sumatif", "ujian"].map((k) => {
+                    const errs = s[k]?.errors || [];
+                    if (errs.length === 0) return null;
+                    return (
+                      <div
+                        key={k}
+                        className="mt-2 max-h-32 overflow-y-auto rounded-lg border border-red-100 bg-red-50 p-2"
+                      >
+                        <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-red-700">
+                          {k} — {errs.length} peringatan
+                        </p>
+                        <ul className="space-y-0.5 text-[11px] text-red-600">
+                          {errs.slice(0, 20).map((e, j) => (
+                            <li key={j}>• {e}</li>
+                          ))}
+                          {errs.length > 20 && (
+                            <li className="italic">
+                              ... dan {errs.length - 20} lainnya
+                            </li>
+                          )}
+                        </ul>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-3">
+              <button
+                type="button"
+                onClick={() => setImportKelasResult(null)}
+                className="inline-flex h-9 items-center justify-center rounded-lg bg-blue-600 px-4 text-xs font-semibold text-white transition-colors hover:bg-blue-700"
+              >
+                Tutup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL SCAN KERTAS */}
       {scanOpen && (
         <Modal size="max-w-4xl" onClose={closeScanModal}>
           <ModalHeader

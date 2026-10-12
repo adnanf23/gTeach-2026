@@ -7,6 +7,8 @@
 //   atau tombol keyboard ← →
 // - Rapor siswa berikutnya & sebelumnya di-prefetch, jadi pindah siswa terasa instan
 // - Tampilan kertas F4, zoom, dan unduh PDF sama seperti halaman rapor wali murid
+// - Nilai akhir per mapel DIHITUNG SAMA PERSIS dengan halaman leger
+//   (UTS/UAS dikelompokkan per mapel, rata-rata sederhana, tanpa kehadiran)
 
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
@@ -26,14 +28,6 @@ const TEXT_RENDAH = "Ananda membutuhkan bimbingan dalam";
 const JENIS_UTS = "ahb";
 const JENIS_UAS = "asas";
 
-// Nama bobot di collection presentase_penilaian (sama dengan halaman leger)
-const NAMA_BOBOT = {
-  formatif: "Formatif",
-  sumatif: "Sumatif",
-  uts: "Ujian Tengah Semester",
-  uas: "Ujian Akhir Semester",
-  kehadiran: "Kehadiran",
-};
 const MAX_MAPEL_HAL1 = 8; // mapel ke-9 dst pindah ke halaman 2
 
 /* ───────────── urutan mapel ───────────── */
@@ -104,7 +98,7 @@ const formatTanggal = (d) =>
     day: "numeric",
     month: "long",
     year: "numeric",
-    timeZone: "UTC", // tanggal_rapor disimpan 00:00 UTC; hindari mundur 1 hari
+    timeZone: "UTC",
   });
 
 const slug = (s) =>
@@ -131,14 +125,12 @@ const judulRapor = (ujian, semester) => {
 };
 
 /* ───────────── hook: auto-fit kertas ke lebar container ───────────── */
-/* F4/Folio: 215mm × 330mm. Lebar konten px @96dpi ≈ 812px. */
 function useFitScale(contentWidthPx = 812, active = true) {
   const outerRef = useRef(null);
   const wrapRef = useRef(null);
   const innerRef = useRef(null);
   const [scale, setScale] = useState(1);
   const [height, setHeight] = useState(0);
-  // mobile: lebar & geser kiri agar kontainer = lebar layar penuh
   const [bleed, setBleed] = useState(null);
 
   useEffect(() => {
@@ -183,7 +175,7 @@ function useFitScale(contentWidthPx = 812, active = true) {
   return { outerRef, wrapRef, innerRef, scale, height, bleed };
 }
 
-/* ───────────── hook: tinggi elemen fixed di dasar layar (mis. bottom-nav) ───────────── */
+/* ───────────── hook: tinggi elemen fixed di dasar layar ───────────── */
 function useBottomInset(active) {
   const [inset, setInset] = useState(0);
 
@@ -227,7 +219,7 @@ function useBottomInset(active) {
   return inset;
 }
 
-/* ───────────── nilai akhir per mapel (logika sama dengan halaman leger) ───────────── */
+/* ───────────── nilai akhir per mapel (SAMA DENGAN HALAMAN LEGER) ───────────── */
 function average(arr) {
   const nums = arr.filter(
     (v) => typeof v === "number" && !isNaN(v) && v !== -1,
@@ -239,38 +231,28 @@ function average(arr) {
 async function hitungNilaiAkhir(kelasData, siswaData) {
   const tingkat = String(kelasData.tingkat);
 
-  const [
-    mapelKhusus,
-    mapelTingkat,
-    plotingData,
-    presentaseData,
-    ujianData,
-    absensiData,
-  ] = await Promise.all([
-    pb.collection("mata_pelajaran").getFullList({
-      filter: `spesifik_kelas_id ~ "${kelasData.id}"`,
-      requestKey: null,
-    }),
-    pb.collection("mata_pelajaran").getFullList({
-      filter: `target_tingkat ~ "${tingkat}"`,
-      requestKey: null,
-    }),
-    pb.collection("ploting_guru").getFullList({
-      filter: `kelas_id ~ "${kelasData.id}"`,
-      requestKey: null,
-    }),
-    pb.collection("presentase_penilaian").getFullList({ requestKey: null }),
-    pb.collection("pengaturan_ujian").getFullList({
-      filter: `status_akses = "buka" && (target_kelas_id ~ "${kelasData.id}" || target_tingkat ~ "${tingkat}")`,
-      requestKey: null,
-    }),
-    pb.collection("absensi").getFullList({
-      filter: `kelas_id ~ "${kelasData.id}"`,
-      requestKey: null,
-    }),
-  ]);
+  const [mapelKhusus, mapelTingkat, plotingData, ujianData] = await Promise.all(
+    [
+      pb.collection("mata_pelajaran").getFullList({
+        filter: `spesifik_kelas_id ~ "${kelasData.id}"`,
+        requestKey: null,
+      }),
+      pb.collection("mata_pelajaran").getFullList({
+        filter: `target_tingkat ~ "${tingkat}"`,
+        requestKey: null,
+      }),
+      pb.collection("ploting_guru").getFullList({
+        filter: `kelas_id ~ "${kelasData.id}"`,
+        requestKey: null,
+      }),
+      pb.collection("pengaturan_ujian").getFullList({
+        filter: `status_akses = "buka" && (target_kelas_id ~ "${kelasData.id}" || target_tingkat ~ "${tingkat}")`,
+        requestKey: null,
+      }),
+    ],
+  );
 
-  // Mapel: hanya kategori umum, sesuai restriksi kelas, dedup berdasarkan nama
+  // Mapel: hanya kategori umum, sesuai restriksi kelas
   const combined = [...mapelKhusus, ...mapelTingkat];
   const uniqueMapel = Array.from(
     new Map(combined.map((m) => [m.id, m])).values(),
@@ -297,33 +279,8 @@ async function hitungNilaiAkhir(kelasData, siswaData) {
   });
   const mapelList = Array.from(mapelByName.values());
 
-  // Bobot
-  const getBobot = (nama) => {
-    const found = presentaseData.find(
-      (p) =>
-        (p.nama_presentase || "").trim().toLowerCase() === nama.toLowerCase(),
-    );
-    return found ? Number(found.angka_presentase) || 0 : 0;
-  };
-  const bobotFormatif = getBobot(NAMA_BOBOT.formatif);
-  const bobotSumatif = getBobot(NAMA_BOBOT.sumatif);
-  const bobotUts = getBobot(NAMA_BOBOT.uts);
-  const bobotUas = getBobot(NAMA_BOBOT.uas);
-  const bobotKehadiran = getBobot(NAMA_BOBOT.kehadiran);
-
-  // Kehadiran
-  const kehadiranMap = {};
-  siswaData.forEach((s) => {
-    const records = absensiData.filter((a) => a.siswa_id === s.id);
-    if (records.length === 0) {
-      kehadiranMap[s.id] = null;
-      return;
-    }
-    const hadir = records.filter((a) => a.status === "hadir").length;
-    kehadiranMap[s.id] = (hadir / records.length) * 100;
-  });
-
-  // UTS / UAS
+  // UTS / UAS → dikelompokkan per mapel → per ujian → per siswa
+  // (persis seperti di halaman leger — FIX utama)
   const utsIds = ujianData
     .filter((u) => u.jenis_ujian === JENIS_UTS)
     .map((u) => u.id);
@@ -342,13 +299,17 @@ async function hitungNilaiAkhir(kelasData, siswaData) {
   }
   const ujianMap = {};
   nilaiUjianData.forEach((n) => {
-    if (!ujianMap[n.pengaturan_ujian_id]) ujianMap[n.pengaturan_ujian_id] = {};
-    ujianMap[n.pengaturan_ujian_id][n.siswa_id] = n.nilai;
+    const mId = Array.isArray(n.mapel_id) ? n.mapel_id[0] : n.mapel_id;
+    if (!mId) return;
+    if (!ujianMap[mId]) ujianMap[mId] = {};
+    if (!ujianMap[mId][n.pengaturan_ujian_id])
+      ujianMap[mId][n.pengaturan_ujian_id] = {};
+    ujianMap[mId][n.pengaturan_ujian_id][n.siswa_id] = n.nilai;
   });
-  const avgUjian = (ids, siswaId) =>
+  const avgUjian = (ids, mapelId, siswaId) =>
     average(
       ids
-        .map((uid) => ujianMap[uid]?.[siswaId])
+        .map((uid) => ujianMap[mapelId]?.[uid]?.[siswaId])
         .filter((v) => typeof v === "number" && !isNaN(v) && v !== -1),
     );
 
@@ -413,47 +374,23 @@ async function hitungNilaiAkhir(kelasData, siswaData) {
     }
   });
 
-  // Nilai akhir per mapel per siswa (rata-rata berbobot)
+  // Nilai akhir = rata-rata sederhana komponen yang tersedia
+  // (persis seperti leger — tanpa bobot & tanpa kehadiran)
   const nilaiAkhir = {};
   mapelList.forEach((m) => {
     nilaiAkhir[m.id] = {};
     siswaData.forEach((s) => {
-      const others = [
-        {
-          value: average(formatifValues[m.id]?.[s.id] || []),
-          bobot: bobotFormatif,
-        },
-        {
-          value: average(sumatifValues[m.id]?.[s.id] || []),
-          bobot: bobotSumatif,
-        },
-        { value: avgUjian(utsIds, s.id), bobot: bobotUts },
-        { value: avgUjian(uasIds, s.id), bobot: bobotUas },
-      ].filter(
-        (k) =>
-          k.value !== null &&
-          k.value !== undefined &&
-          !isNaN(k.value) &&
-          k.bobot > 0,
-      );
+      const komponen = [
+        average(formatifValues[m.id]?.[s.id] || []),
+        average(sumatifValues[m.id]?.[s.id] || []),
+        avgUjian(utsIds, m.id, s.id),
+        avgUjian(uasIds, m.id, s.id),
+      ].filter((v) => v !== null && v !== undefined && !isNaN(v) && v !== -1);
 
-      const komponen = [...others];
-      const hadirVal = kehadiranMap[s.id];
-      if (
-        others.length > 0 &&
-        hadirVal !== null &&
-        hadirVal !== undefined &&
-        !isNaN(hadirVal) &&
-        bobotKehadiran > 0
-      ) {
-        komponen.push({ value: hadirVal, bobot: bobotKehadiran });
-      }
-
-      const totalBobot = komponen.reduce((a, k) => a + k.bobot, 0);
       nilaiAkhir[m.id][s.id] =
-        totalBobot === 0
+        komponen.length === 0
           ? null
-          : komponen.reduce((a, k) => a + k.value * k.bobot, 0) / totalBobot;
+          : komponen.reduce((a, b) => a + b, 0) / komponen.length;
     });
   });
 
@@ -486,7 +423,6 @@ async function buildRapor(
     }),
   ]);
 
-  // Nilai akhir = nilai akhir per mapel dari perhitungan leger
   const nilai = mapelList
     .map((mapel) => {
       const cap = capaianMap.get(mapel.id);
@@ -552,7 +488,7 @@ async function buildRapor(
   };
 }
 
-/* ───────────── tabel nilai (dipakai di hal 1 & 2) ───────────── */
+/* ───────────── tabel nilai ───────────── */
 const NilaiTable = ({ rows, startIndex = 0, rowH }) => (
   <table
     className="rapor-table nilai-table text-left"
@@ -593,7 +529,7 @@ const NilaiTable = ({ rows, startIndex = 0, rowH }) => (
   </table>
 );
 
-/* ───────────── preview rapor (tabel) ───────────── */
+/* ───────────── preview rapor ───────────── */
 const RaporPreview = ({ siswa, rapor, innerRef }) => {
   const nilai = toArray(rapor.nilai);
   const ekskul = toArray(rapor.ekstrakurikuler);
@@ -614,7 +550,7 @@ const RaporPreview = ({ siswa, rapor, innerRef }) => {
 
   return (
     <div className="rapor-sheet" ref={innerRef}>
-      {/* ══════════════ HALAMAN 1 — IDENTITAS + NILAI (1–8) ══════════════ */}
+      {/* ══════════════ HALAMAN 1 ══════════════ */}
       <div className="page page-1">
         <h1 className="rapor-title">
           LAPORAN HASIL BELAJAR
@@ -664,7 +600,7 @@ const RaporPreview = ({ siswa, rapor, innerRef }) => {
         <NilaiTable rows={nilaiHal1} startIndex={0} rowH={rowH1} />
       </div>
 
-      {/* ══════════════ HALAMAN 2 — LANJUTAN NILAI + EKSKUL + CATATAN + TTD ══════════════ */}
+      {/* ══════════════ HALAMAN 2 ══════════════ */}
       <div className="page page-2">
         {nilaiHal2.length > 0 && (
           <>
@@ -769,7 +705,7 @@ const RaporPreview = ({ siswa, rapor, innerRef }) => {
   );
 };
 
-/* ───────────── komponen UI (mobile-first) ───────────── */
+/* ───────────── komponen UI ───────────── */
 const CARD_SHADOW = "shadow-[0_4px_14px_rgba(99,120,200,0.12)]";
 
 const ZOOM_BTN_CLS =
@@ -833,12 +769,12 @@ const Spinner = ({ children }) => (
   </div>
 );
 
-/* ───────────── picker kustom (bottom sheet / dialog) ───────────── */
+/* ───────────── picker kustom ───────────── */
 const PilihanSheet = ({
   label,
   value,
   onChange,
-  options, // [{ id, title, subtitle, badge }]
+  options,
   disabled,
   placeholder = "Pilih…",
   searchable = false,
@@ -1041,13 +977,12 @@ export default function RaporWalikelasPage() {
 
   const [ujianList, setUjianList] = useState([]);
   const [ujianId, setUjianId] = useState("");
-  const [pengaturan, setPengaturan] = useState(null); // { ujianId, data }
+  const [pengaturan, setPengaturan] = useState(null);
 
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState("");
 
-  // cache rapor per siswa: key = `${ujianId}:${siswaId}`
   const cacheRef = useRef({});
   const inflightRef = useRef(new Set());
   const currentKeyRef = useRef("");
@@ -1056,7 +991,7 @@ export default function RaporWalikelasPage() {
   const sheetRef = useRef(null);
   const headRef = useRef(null);
 
-  /* ───── data dasar: kelas, siswa, capaian, periode ───── */
+  /* ───── data dasar ───── */
   useEffect(() => {
     if (!userId) {
       setLoading(false);
@@ -1094,7 +1029,6 @@ export default function RaporWalikelasPage() {
           if (mid) cMap.set(mid, c);
         });
 
-        // Nilai akhir per mapel (bobot dari presentase_penilaian, sama dengan leger)
         const hasil = await hitungNilaiAkhir(kelasData, siswaData);
 
         const sorted = sortUjian(ujianData);
@@ -1121,7 +1055,7 @@ export default function RaporWalikelasPage() {
     [ujianList, ujianId],
   );
 
-  /* ───── pengaturan_rapor untuk periode terpilih ───── */
+  /* ───── pengaturan_rapor ───── */
   useEffect(() => {
     if (!ujian) {
       setPengaturan(null);
@@ -1131,12 +1065,11 @@ export default function RaporWalikelasPage() {
     (async () => {
       let pr = null;
       try {
-        // Field relasi di schema bernama `ujian_id` → pengaturan_ujian
         pr = await pb
           .collection("pengaturan_rapor")
           .getFirstListItem(`ujian_id ~ "${ujian.id}"`, { requestKey: null });
       } catch {
-        pr = null; // belum diatur admin → pakai default sekolah
+        pr = null;
       }
       if (!cancelled) setPengaturan({ ujianId: ujian.id, data: pr });
     })();
@@ -1147,12 +1080,11 @@ export default function RaporWalikelasPage() {
 
   const pengaturanSiap = !!ujian && pengaturan?.ujianId === ujian.id;
 
-  /* ───── rapor siswa aktif (dari cache) ───── */
   const raporKey = siswa && ujian ? `${ujian.id}:${siswa.id}` : "";
   currentKeyRef.current = raporKey;
   const rapor = raporKey ? cacheRef.current[raporKey] : null;
 
-  /* ───── susun rapor siswa aktif + prefetch tetangganya ───── */
+  /* ───── susun rapor + prefetch ───── */
   useEffect(() => {
     if (!kelas || !ujian || !pengaturanSiap || !siswaList.length) return;
     setError("");
@@ -1195,7 +1127,7 @@ export default function RaporWalikelasPage() {
     nilaiAkhirData,
   ]);
 
-  /* ───── navigasi siswa ───── */
+  /* ───── navigasi ───── */
   const total = siswaList.length;
 
   const step = useCallback(
@@ -1225,7 +1157,6 @@ export default function RaporWalikelasPage() {
   const fit = useFitScale(812, !!rapor);
   const bottomInset = useBottomInset(!!siswa && !!ujian);
 
-  // zoom manual: null = auto-fit, angka = faktor tambahan
   const [zoom, setZoom] = useState(null);
   const pinchRef = useRef({ startDist: 0, startZoom: 1 });
   const zoomValRef = useRef(null);
@@ -1242,7 +1173,6 @@ export default function RaporWalikelasPage() {
   const zoomOut = () => setZoom((z) => Math.max(0.25, (z ?? 1) / 1.25));
   const zoomReset = () => setZoom(null);
 
-  // Pinch-to-zoom (2 jari) + Ctrl/⌘ + scroll untuk trackpad
   const adaRapor = !!rapor;
   useEffect(() => {
     const el = fit.wrapRef.current;
@@ -1294,7 +1224,7 @@ export default function RaporWalikelasPage() {
     };
   }, [fit.wrapRef, adaRapor]);
 
-  /* ───── unduh PDF siswa aktif ───── */
+  /* ───── unduh PDF ───── */
   const handleDownloadPdf = async () => {
     if (!rapor || !siswa || !sheetRef.current) return;
     setDownloading(true);
@@ -1310,8 +1240,6 @@ export default function RaporWalikelasPage() {
         import("jspdf"),
       ]);
 
-      // Render dari salinan di luar layar: bebas dari transform/zoom preview,
-      // ukuran selalu tepat 215mm × 330mm (F4).
       const stage = document.createElement("div");
       stage.style.cssText =
         "position:absolute;left:-10000px;top:0;width:215mm;background:#fff;";
@@ -1431,7 +1359,6 @@ export default function RaporWalikelasPage() {
     <>
       <style>{CSS}</style>
 
-      {/* Judul */}
       <header className="no-print mb-3">
         <h1 className="text-[18px] font-semibold text-gray-900">
           Pratinjau Rapor Siswa
@@ -1442,7 +1369,6 @@ export default function RaporWalikelasPage() {
         </p>
       </header>
 
-      {/* Filter */}
       <section
         className={`no-print mb-4 grid gap-3 rounded-2xl bg-white p-3 sm:grid-cols-2 ${CARD_SHADOW}`}
       >
@@ -1465,7 +1391,6 @@ export default function RaporWalikelasPage() {
         />
       </section>
 
-      {/* Status */}
       {error && <StateCard tone="error">{error}</StateCard>}
       {!error && !total && (
         <StateCard title="Belum ada siswa">
@@ -1479,7 +1404,6 @@ export default function RaporWalikelasPage() {
       )}
       {menyusun && <Spinner>Menyusun rapor…</Spinner>}
 
-      {/* Pratinjau */}
       {tampilkanBar && (
         <div
           className="no-print"
@@ -1547,7 +1471,6 @@ export default function RaporWalikelasPage() {
             </div>
           )}
 
-          {/* Bar aksi: fixed + portal ke <body>. Otomatis naik di atas bottom-nav. */}
           {createPortal(
             <div
               data-rapor-bar
@@ -1560,7 +1483,6 @@ export default function RaporWalikelasPage() {
                   : "max(0.75rem, env(safe-area-inset-bottom))",
               }}
             >
-              {/* Baris 1: pindah siswa */}
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => step(-1)}
@@ -1588,7 +1510,6 @@ export default function RaporWalikelasPage() {
                 </button>
               </div>
 
-              {/* Baris 2: zoom + unduh */}
               <div className="flex items-center gap-2">
                 <div className="flex items-center">
                   <button
@@ -1654,7 +1575,7 @@ const CSS = `
       min-width: 215mm;
     }
 
-    /* ── Kertas: tiap .page tampil langsung sebagai lembar F4 putih ── */
+    /* ── Kertas ── */
     .rapor-paper {
       width: 215mm;
       min-width: 215mm;
@@ -1700,7 +1621,7 @@ const CSS = `
       text-shadow: none;
     }
 
-    /* ── Tiap halaman = satu lembar kertas F4 ── */
+    /* ── Halaman ── */
     .page {
       display: block;
       width: 215mm;
@@ -1844,7 +1765,6 @@ const CSS = `
       background: transparent;
     }
 
-    /* Ketidakhadiran: tabel kecil di kiri */
     .rapor-table.absen {
       width: 80mm;
       margin: 20px 0 0;
