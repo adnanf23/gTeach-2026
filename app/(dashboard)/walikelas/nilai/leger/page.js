@@ -12,6 +12,9 @@ import { saveAs } from "file-saver";
 const JENIS_UTS = "ahb";
 const JENIS_UAS = "asas";
 
+// ✅ FIX: kategori mapel yang ditampilkan di leger
+const KATEGORI_LEGER = ["umum", "koding"];
+
 // ================================================================
 // UTIL
 // ================================================================
@@ -98,8 +101,10 @@ export default function LegerPage() {
           new Map(combined.map((m) => [m.id, m])).values(),
         );
 
+        // ✅ FIX: izinkan kategori "umum" dan "koding" masuk ke leger
         const uniqueMapel = uniqueMapelRaw.filter((m) => {
-          if ((m.kategori || "").toLowerCase() !== "umum") return false;
+          const kat = (m.kategori || "").toLowerCase();
+          if (!KATEGORI_LEGER.includes(kat)) return false;
 
           const spesifik = m.spesifik_kelas_id;
           const punyaRestriksi = Array.isArray(spesifik) && spesifik.length > 0;

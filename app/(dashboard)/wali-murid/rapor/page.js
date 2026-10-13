@@ -8,6 +8,14 @@
 // `presentase_penilaian`. Sumber "periode" adalah pengaturan_ujian yang
 // akses_rapor = true. Header (nama sekolah, alamat, kepala sekolah, tanggal)
 // dari pengaturan_rapor bila tersedia, fallback ke SEKOLAH_DEFAULT.
+//
+// ✅ Fix terbaru:
+//  - Mapel kategori "koding" ikut tampil (selalu di urutan paling akhir)
+//  - Alias urutan mapel diperluas (Math, Science, dll)
+//  - Capaian Kompetensi & Catatan: teks rata kiri-kanan (justify)
+//  - Ketidakhadiran: Sakit & Izin dari `kehadiran_manual` (fallback ke
+//    `absensi`). Alpha diambil dari field `hadir` di `kehadiran_manual`
+//    (fallback ke absensi status "alpha").
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -37,22 +45,37 @@ const NAMA_BOBOT = {
   kehadiran: "Kehadiran",
 };
 
+// ✅ kategori mapel yang ditampilkan di rapor
+const KATEGORI_RAPOR = ["umum", "koding"];
+
+// ✅ urutan khusus: koding selalu paling akhir, apapun nama mapelnya
+const URUTAN_KODING = 10000;
+const URUTAN_TIDAK_DIKENAL = 999;
+
 /* ───────────── konfigurasi halaman ───────────── */
 const MAX_MAPEL_HAL1 = 8; // mapel ke-9 dst pindah ke halaman 2
 
 /* ───────────── urutan mapel ───────────── */
+// Alias diperluas (termasuk nama Inggris) supaya mapel seperti
+// "Math"/"Science" ikut tersortir rapi, bukan menumpuk di urutan 999.
 const URUTAN_MAPEL = [
-  ["pai", "pendidikan agama islam dan budi pekerti"],
-  ["pancsl", "pancasila", "pendidikan pancasila dan kewarganegaraan"],
-  ["bind", "bahasa indonesia"],
-  ["mtk", "matematika"],
-  ["ipas", "ilmu pengetahuan alam sosial"],
-  ["senbud", "seni budaya"],
-  ["pjok", "pendidikan jasmani olahraga dan kesehatan"],
-  ["arab", "bahasa arab"],
-  ["english", "bahasa inggris"],
-  ["bsund", "bahasa sunda"],
-  ["kka", "koding"],
+  ["pai", "pendidikan agama islam dan budi pekerti", "agama", "islam"],
+  [
+    "pancsl",
+    "pancasila",
+    "pendidikan pancasila dan kewarganegaraan",
+    "pkn",
+    "civic",
+  ],
+  ["bind", "bahasa indonesia", "indonesia"],
+  ["mtk", "matematika", "math", "mathematics"],
+  ["ipas", "ilmu pengetahuan alam sosial", "science", "sains", "ipa", "ips"],
+  ["senbud", "seni budaya", "art", "seni"],
+  ["pjok", "pendidikan jasmani olahraga dan kesehatan", "penjas", "sport"],
+  ["arab", "bahasa arab", "arabic"],
+  ["english", "bahasa inggris", "inggris"],
+  ["bsund", "bahasa sunda", "sunda"],
+  ["kka", "koding", "coding"], // alias koding (urutan idx ke-10)
 ];
 
 const normMapel = (s) =>
@@ -63,13 +86,16 @@ const normMapel = (s) =>
     .trim();
 
 const urutanMapel = (mapel) => {
+  // ✅ Koding SELALU paling akhir, meskipun nama mapel tidak match alias.
+  if ((mapel?.kategori || "").toLowerCase() === "koding") return URUTAN_KODING;
+
   const kandidat = [mapel?.Label, mapel?.kode_mapel, mapel?.nama_mapel]
     .map(normMapel)
     .filter(Boolean);
   const idx = URUTAN_MAPEL.findIndex((alias) =>
     kandidat.some((k) => alias.includes(k)),
   );
-  return idx === -1 ? 999 : idx;
+  return idx === -1 ? URUTAN_TIDAK_DIKENAL : idx;
 };
 
 /* ───────────── helpers ───────────── */
@@ -259,12 +285,14 @@ async function hitungNilaiAkhirSiswa(siswa, kelas) {
       }),
     ]);
 
-  // Mapel: hanya kategori umum, sesuai restriksi kelas, dedup berdasarkan nama
+  // ✅ Mapel: kategori "umum" + "koding", sesuai restriksi kelas.
+  //    Koding otomatis di urutan paling akhir lewat urutanMapel().
   const combined = [...mapelKhusus, ...mapelTingkat];
   const uniqueMapel = Array.from(
     new Map(combined.map((m) => [m.id, m])).values(),
   ).filter((m) => {
-    if ((m.kategori || "").toLowerCase() !== "umum") return false;
+    const kat = (m.kategori || "").toLowerCase();
+    if (!KATEGORI_RAPOR.includes(kat)) return false;
     const spesifik = m.spesifik_kelas_id;
     const punyaRestriksi = Array.isArray(spesifik) && spesifik.length > 0;
     if (!punyaRestriksi) return true;
@@ -447,31 +475,51 @@ async function buildRapor(siswa, ujian, pengaturanRapor = null) {
     : { mapelList: [], nilaiAkhir: {} };
 
   // 2) Data pendukung tampilan rapor
-  const [capaianRes, absenRes, ekskulRes, catatanRes] = await Promise.all([
-    kelasId
-      ? pb.collection("capaian_kompetensi").getFullList({
-          filter: `kelas_id = "${kelasId}"`,
-          requestKey: null,
-        })
-      : Promise.resolve([]),
-    ta?.Mulai && ta?.Akhir
-      ? pb.collection("absensi").getFullList({
-          filter: `siswa_id = "${sid}" && tanggal >= "${ta.Mulai}" && tanggal <= "${ta.Akhir}"`,
-          requestKey: null,
-        })
-      : Promise.resolve([]),
-    pb.collection("nilai_ekskul").getFullList({
-      filter: `siswa_id = "${sid}"`,
-      requestKey: null,
-    }),
-    kelasId
-      ? pb.collection("catatan_siswa").getFullList({
-          filter: `siswa_id = "${sid}" && kelas_id = "${kelasId}"`,
-          sort: "-created",
-          requestKey: null,
-        })
-      : Promise.resolve([]),
-  ]);
+  //    • kehadiran_manual → prioritas untuk Sakit/Izin/Alpha
+  //      (field `hadir` di collection ini berisi data Alpha)
+  //    • absensi → fallback
+  const [capaianRes, absenRes, ekskulRes, catatanRes, kehadiranRes] =
+    await Promise.all([
+      kelasId
+        ? pb.collection("capaian_kompetensi").getFullList({
+            filter: `kelas_id = "${kelasId}"`,
+            requestKey: null,
+          })
+        : Promise.resolve([]),
+      ta?.Mulai && ta?.Akhir
+        ? pb.collection("absensi").getFullList({
+            filter: `siswa_id = "${sid}" && tanggal >= "${ta.Mulai}" && tanggal <= "${ta.Akhir}"`,
+            requestKey: null,
+          })
+        : Promise.resolve([]),
+      pb.collection("nilai_ekskul").getFullList({
+        filter: `siswa_id = "${sid}"`,
+        requestKey: null,
+      }),
+      kelasId
+        ? pb.collection("catatan_siswa").getFullList({
+            filter: `siswa_id = "${sid}" && kelas_id = "${kelasId}"`,
+            sort: "-created",
+            requestKey: null,
+          })
+        : Promise.resolve([]),
+      // ✅ catch → kalau 403 (access rule belum dibuka), tidak mematikan rapor.
+      kelasId
+        ? pb
+            .collection("kehadiran_manual")
+            .getFullList({
+              filter: `siswa_id = "${sid}" && kelas_id = "${kelasId}"`,
+              requestKey: null,
+            })
+            .catch((err) => {
+              console.warn(
+                "[rapor] kehadiran_manual tidak bisa dibaca:",
+                err?.status,
+              );
+              return [];
+            })
+        : Promise.resolve([]),
+    ]);
 
   const capaianPerMapel = new Map();
   capaianRes.forEach((c) => {
@@ -486,7 +534,7 @@ async function buildRapor(siswa, ujian, pengaturanRapor = null) {
       const v = nilaiAkhir[mapel.id];
       return {
         mapel: mapel.Label || mapel.nama_mapel || mapel.nama || "-",
-        urutan: urutanMapel(mapel),
+        urutan: urutanMapel(mapel), // ✅ koding = 10000 → selalu paling akhir
         nilai: typeof v === "number" && !isNaN(v) ? Math.round(v) : "-",
         capaian_tinggi: cap?.capaian_tinggi
           ? `${TEXT_TINGGI} ${cap.capaian_tinggi}`
@@ -498,7 +546,16 @@ async function buildRapor(siswa, ujian, pengaturanRapor = null) {
     })
     .sort((a, b) => a.urutan - b.urutan || a.mapel.localeCompare(b.mapel));
 
-  const hitung = (s) => absenRes.filter((a) => a.status === s).length;
+  const hitungAbsen = (s) => absenRes.filter((a) => a.status === s).length;
+
+  // ✅ Ketidakhadiran:
+  //    - Sakit & Izin → utamakan kehadiran_manual, fallback ke absensi.
+  //    - Alpha (Tanpa Keterangan) → field `hadir` di kehadiran_manual
+  //      berisi data alpha. Fallback ke absensi (status = "alpha").
+  const km = kehadiranRes[0] || null;
+  const sakit = km ? Number(km.sakit ?? 0) : hitungAbsen("sakit");
+  const izin = km ? Number(km.izin ?? 0) : hitungAbsen("izin");
+  const alpa = km ? Number(km.hadir ?? 0) : hitungAbsen("alpha");
 
   const catatanTeks = catatanRes.length
     ? catatanRes
@@ -534,9 +591,9 @@ async function buildRapor(siswa, ujian, pengaturanRapor = null) {
     // Tanggal: utamakan pengaturan_rapor.tanggal_rapor
     tanggal_rapor: pengaturanRapor?.tanggal_rapor || null,
     catatan: catatanTeks,
-    sakit: hitung("sakit"),
-    izin: hitung("izin"),
-    alpa: hitung("alpha"),
+    sakit,
+    izin,
+    alpa,
     nilai,
     ekstrakurikuler: ekskulRes.map((e) => ({
       nama: e.nama_ekskul,
@@ -1610,17 +1667,25 @@ const CSS = `
       -webkit-text-fill-color: #000000;
       background: transparent;
     }
+    /* ✅ Capaian kompetensi: teks rata kiri-kanan (justify) */
     .cap {
       padding: 2px 10px;
       border-bottom: 1px solid #000000;
       font-size: 12px;
-      text-align: left;
+      text-align: justify;
+      text-justify: inter-word;
+      hyphens: auto;
       display: flex;
       align-items: center;
       min-height: calc(var(--row-h, 30mm) / 2 - 0.5px);
       color: #000000;
       -webkit-text-fill-color: #000000;
       background: transparent;
+    }
+    .cap > * {
+      width: 100%;
+      text-align: justify;
+      text-justify: inter-word;
     }
     .cap-last { border-bottom: 0; }
 
@@ -1629,13 +1694,16 @@ const CSS = `
       color: #000000;
       -webkit-text-fill-color: #000000;
     }
+    /* ✅ Catatan: teks rata kiri-kanan (justify) */
     .rapor-table.catatan-table .catatan {
       padding: 12px 14px;
       height: 40mm;
       font-size: 12.5px;
       overflow: hidden;
       white-space: pre-line;
-      text-align: left;
+      text-align: justify;
+      text-justify: inter-word;
+      hyphens: auto;
       vertical-align: top;
       color: #000000;
       -webkit-text-fill-color: #000000;

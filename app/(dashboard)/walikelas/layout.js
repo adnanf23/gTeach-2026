@@ -51,6 +51,9 @@ const icons = {
   // ── Icon baru untuk Preview Rapor (dokumen dengan mata / pratinjau) ──
   preview:
     "M2 3h9l3 3v7H2V3z M11 3v3h3 M8 8.5a2 2 0 100 4 2 2 0 000-4z M4.5 10.5C5.5 9.3 6.7 8.7 8 8.7s2.5.6 3.5 1.8",
+  // ── Icon baru untuk Kehadiran Rapor (kalender dengan centang) ──
+  kehadiran:
+    "M2 3h12v10H2V3z M2 6h12 M5 3V1.5 M11 3V1.5 M5.5 10l1.5 1.5L11 8.5",
 };
 
 // ── Struktur navigasi: array of groups ──
@@ -141,6 +144,12 @@ const NAV_GROUPS = [
         label: "Status Kelengkapan",
         href: "/walikelas/rapor/status-kelengkapan",
         icon: "log",
+      },
+      {
+        key: "kehadiran_rapor",
+        label: "Kehadiran",
+        href: "/walikelas/rapor/kehadiran",
+        icon: "kehadiran",
       },
       {
         key: "capaian_kompetensi",
