@@ -133,6 +133,12 @@ const NAV_SECTIONS = [
             icon: "nilai",
           },
           {
+            key: "full-data",
+            label: "Full Data",
+            href: "/ict/nilai-siswa/full-data",
+            icon: "summary",
+          },
+          {
             key: "presentase",
             label: "Presentase",
             href: "/ict/presentase",
