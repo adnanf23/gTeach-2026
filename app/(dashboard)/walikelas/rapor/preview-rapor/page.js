@@ -14,17 +14,25 @@
 //     • Alpa (Tanpa Keterangan) → dari `kehadiran_manual.hadir`
 //       (field `hadir` di collection ini berisi data alpha),
 //       fallback ke `absensi` jika tidak ada record.
+// - ✅ Foto TTD:
+//     • Wali kelas → field `ttd` di collection users (via relasi kelas.walikelas_id)
+//     • Kepala sekolah → file statis di folder assets/
+// - ✅ PDF: pakai `html-to-image` (bukan html2canvas) supaya hasil 100% sama
+//   dengan UI (justify, flexbox, font, dst).
 
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { getCurrentUser, pb } from "@/lib/pocketbase";
+
+// ✅ TTD kepala sekolah dari folder assets (static import Next.js)
+import ttdKepsekAsset from "@/assets/TTD BUNDA AHDA_STAMPEL.png";
 
 /* ───────────── konfigurasi ───────────── */
 const SEKOLAH_DEFAULT = {
   nama: "SD Global Garuda Nusantara Islamic Centre",
   alamat: "Jl. Raya Semplak Salabenda",
   kota: "Bogor",
-  kepala_sekolah: "Syafrina Ahda, S.Pd",
+  kepala_sekolah: "Syafrina Ahda, S.Pd., M.M.",
 };
 
 const TEXT_TINGGI = "Ananda menunjukkan pemahaman dalam";
@@ -33,18 +41,14 @@ const TEXT_RENDAH = "Ananda membutuhkan bimbingan dalam";
 const JENIS_UTS = "ahb";
 const JENIS_UAS = "asas";
 
-// ✅ kategori mapel yang ditampilkan di rapor
 const KATEGORI_RAPOR = ["umum", "koding"];
 
-// ✅ urutan khusus: koding selalu paling akhir, apapun nama mapelnya
 const URUTAN_KODING = 10000;
 const URUTAN_TIDAK_DIKENAL = 999;
 
-const MAX_MAPEL_HAL1 = 8; // mapel ke-9 dst pindah ke halaman 2
+const MAX_MAPEL_HAL1 = 8;
 
 /* ───────────── urutan mapel ───────────── */
-// Alias diperluas (termasuk nama Inggris) supaya mapel seperti
-// "Math"/"Science" ikut tersortir rapi, bukan menumpuk di urutan 999.
 const URUTAN_MAPEL = [
   ["pai", "pendidikan agama islam dan budi pekerti", "agama", "islam"],
   [
@@ -62,7 +66,7 @@ const URUTAN_MAPEL = [
   ["arab", "bahasa arab", "arabic"],
   ["english", "bahasa inggris", "inggris"],
   ["bsund", "bahasa sunda", "sunda"],
-  ["kka", "koding", "coding"], // alias koding (urutan idx ke-10)
+  ["kka", "koding", "coding"],
 ];
 
 const normMapel = (s) =>
@@ -73,7 +77,6 @@ const normMapel = (s) =>
     .trim();
 
 const urutanMapel = (mapel) => {
-  // ✅ Koding SELALU paling akhir, meskipun nama mapel tidak match alias.
   if ((mapel?.kategori || "").toLowerCase() === "koding") return URUTAN_KODING;
 
   const kandidat = [mapel?.Label, mapel?.kode_mapel, mapel?.nama_mapel]
@@ -112,8 +115,6 @@ const faseDari = (tingkat) => {
   return t <= 2 ? "A" : t <= 4 ? "B" : "C";
 };
 
-// PocketBase menyimpan tanggal sebagai "2026-10-17 00:00:00.000Z" (pakai spasi).
-// Safari/iOS gagal membaca format itu, jadi spasi diganti "T".
 const parseTgl = (d) => new Date(String(d).replace(" ", "T"));
 
 const formatTanggal = (d) =>
@@ -275,7 +276,6 @@ async function hitungNilaiAkhir(kelasData, siswaData) {
     ],
   );
 
-  // ✅ Mapel: kategori "umum" + "koding", sesuai restriksi kelas.
   const combined = [...mapelKhusus, ...mapelTingkat];
   const uniqueMapel = Array.from(
     new Map(combined.map((m) => [m.id, m])).values(),
@@ -303,7 +303,6 @@ async function hitungNilaiAkhir(kelasData, siswaData) {
   });
   const mapelList = Array.from(mapelByName.values());
 
-  // UTS / UAS → dikelompokkan per mapel → per ujian → per siswa
   const utsIds = ujianData
     .filter((u) => u.jenis_ujian === JENIS_UTS)
     .map((u) => u.id);
@@ -336,7 +335,6 @@ async function hitungNilaiAkhir(kelasData, siswaData) {
         .filter((v) => typeof v === "number" && !isNaN(v) && v !== -1),
     );
 
-  // Formatif & sumatif
   let tpAll = [];
   let lpAll = [];
   if (mapelList.length > 0) {
@@ -397,7 +395,6 @@ async function hitungNilaiAkhir(kelasData, siswaData) {
     }
   });
 
-  // Nilai akhir = rata-rata sederhana komponen yang tersedia
   const nilaiAkhir = {};
   mapelList.forEach((m) => {
     nilaiAkhir[m.id] = {};
@@ -427,10 +424,6 @@ async function buildRapor(
   const ta = ujian.expand?.tahun_ajaran_id;
   const sid = siswa.id;
 
-  // ✅ Ambil semua sumber data paralel.
-  //    - absensi          : per tanggal (fallback)
-  //    - kehadiran_manual : rekap per siswa+kelas.
-  //      Field `hadir` di sini berisi data ALPHA (Tanpa Keterangan).
   const [absenRes, ekskulRes, catatanRes, kehadiranRes] = await Promise.all([
     ta?.Mulai && ta?.Akhir
       ? pb.collection("absensi").getFullList({
@@ -459,7 +452,7 @@ async function buildRapor(
       const v = nilaiAkhirMap[mapel.id]?.[sid];
       return {
         mapel: mapel.Label || mapel.nama_mapel || mapel.nama || "-",
-        urutan: urutanMapel(mapel), // ✅ koding = 10000 → selalu paling akhir
+        urutan: urutanMapel(mapel),
         nilai: typeof v === "number" && !isNaN(v) ? Math.round(v) : "-",
         capaian_tinggi: cap?.capaian_tinggi
           ? `${TEXT_TINGGI} ${cap.capaian_tinggi}`
@@ -473,11 +466,6 @@ async function buildRapor(
 
   const hitungAbsen = (s) => absenRes.filter((a) => a.status === s).length;
 
-  // ✅ Ketidakhadiran:
-  //    - Sakit & Izin → utamakan kehadiran_manual, fallback ke absensi.
-  //    - Alpa (Tanpa Keterangan) → field `hadir` di kehadiran_manual
-  //      berisi data alpha. Fallback ke absensi (status = "alpha") kalau
-  //      tidak ada record di kehadiran_manual.
   const km = kehadiranRes[0] || null;
   const sakit = km ? Number(km.sakit ?? 0) : hitungAbsen("sakit");
   const izin = km ? Number(km.izin ?? 0) : hitungAbsen("izin");
@@ -503,13 +491,18 @@ async function buildRapor(
         .join("\n")
     : "-";
 
+  const waliUser = kelas?.expand?.walikelas_id;
+  const waliKelasTtd =
+    waliUser && waliUser.ttd ? pb.files.getURL(waliUser, waliUser.ttd) : null;
+
   return {
     judul: judulRapor(ujian, ta?.semester),
     semester: ta?.semester,
     tahun_ajaran: pengaturanRapor?.tahun_ajaran || ta?.tahun,
     kelas: kelas?.tingkat,
     fase: faseDari(kelas?.tingkat),
-    wali_kelas: kelas?.expand?.walikelas_id?.nama_lengkap || "-",
+    wali_kelas: waliUser?.nama_lengkap || "-",
+    wali_kelas_ttd: waliKelasTtd,
     kepala_sekolah:
       pengaturanRapor?.kepala_sekolah || SEKOLAH_DEFAULT.kepala_sekolah,
     nama_sekolah: pengaturanRapor?.nama_sekolah || SEKOLAH_DEFAULT.nama,
@@ -560,8 +553,12 @@ const NilaiTable = ({ rows, startIndex = 0, rowH }) => (
           <td className="td-left">{m.mapel}</td>
           <td className="center">{m.nilai ?? "-"}</td>
           <td className="cap-cell">
-            <div className="cap">{m.capaian_tinggi || "-"}</div>
-            <div className="cap cap-last">{m.capaian_rendah || "-"}</div>
+            <div className="cap">
+              <span>{m.capaian_tinggi || "-"}</span>
+            </div>
+            <div className="cap cap-last">
+              <span>{m.capaian_rendah || "-"}</span>
+            </div>
           </td>
         </tr>
       ))}
@@ -587,6 +584,8 @@ const RaporPreview = ({ siswa, rapor, innerRef }) => {
     ? Math.min(30, Math.floor((290 / nilaiHal1.length) * 10) / 10)
     : 30;
   const rowH2 = 24;
+
+  const ttdKepsekSrc = ttdKepsekAsset?.src || null;
 
   return (
     <div className="rapor-sheet" ref={innerRef}>
@@ -718,25 +717,48 @@ const RaporPreview = ({ siswa, rapor, innerRef }) => {
         <div className="ttd">
           <div className="ttd-row">
             <div className="ttd-col">
+              <p>&nbsp;</p>
+              <p>&nbsp;</p>
+              <p>&nbsp;</p>
               <p>Orang Tua,</p>
               <div className="ttd-space" />
               <p>……………………….</p>
             </div>
             <div className="ttd-col">
-              <p className="text-left">
+              <p className="text-left top-[-10px]">
                 {rapor.kota || SEKOLAH_DEFAULT.kota},{" "}
                 {rapor.tanggal_rapor
                   ? formatTanggal(rapor.tanggal_rapor)
                   : "……………………"}
               </p>
-              <div className="ttd-space" />
+              <br />
+              <p className="text-center ttd-jabatan">Wali Kelas,</p>
+              <div className="ttd-space ttd-space-wali">
+                {rapor.wali_kelas_ttd && (
+                  <img
+                    src={rapor.wali_kelas_ttd}
+                    alt=""
+                    className="ttd-img"
+                    crossOrigin="anonymous"
+                  />
+                )}
+              </div>
               <p className="text-left">{rapor.wali_kelas || "-"}</p>
             </div>
           </div>
           <div className="ttd-kepsek">
             <p>Mengetahui,</p>
             <p>Kepala Sekolah</p>
-            <div className="ttd-space" />
+            <div className="ttd-space">
+              {ttdKepsekSrc && (
+                <img
+                  src={ttdKepsekSrc}
+                  alt=""
+                  className="ttd-img ttd-img-kepsek"
+                  crossOrigin="anonymous"
+                />
+              )}
+            </div>
             <p>{rapor.kepala_sekolah || "-"}</p>
           </div>
         </div>
@@ -1275,8 +1297,8 @@ export default function RaporWalikelasPage() {
 
       const pages = Array.from(sheetRef.current.querySelectorAll(".page"));
 
-      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
-        import("html2canvas"),
+      const [{ toPng }, { jsPDF }] = await Promise.all([
+        import("html-to-image"),
         import("jspdf"),
       ]);
 
@@ -1298,6 +1320,36 @@ export default function RaporWalikelasPage() {
           return c;
         });
 
+        const imgs = Array.from(sheet.querySelectorAll("img"));
+        await Promise.all(
+          imgs.map((img) =>
+            img.complete
+              ? Promise.resolve()
+              : new Promise((res) => {
+                  img.onload = img.onerror = () => res();
+                }),
+          ),
+        );
+
+        if (document.fonts?.ready) {
+          try {
+            await document.fonts.ready;
+          } catch {
+            /* ignore */
+          }
+        }
+
+        const dataUrls = [];
+        for (const c of clones) {
+          const url = await toPng(c, {
+            pixelRatio: 2,
+            backgroundColor: "#ffffff",
+            cacheBust: true,
+            skipFonts: false,
+          });
+          dataUrls.push(url);
+        }
+
         const pdf = new jsPDF({
           unit: "mm",
           format: [215, 330],
@@ -1305,24 +1357,10 @@ export default function RaporWalikelasPage() {
           compress: true,
         });
 
-        for (let i = 0; i < clones.length; i++) {
-          const canvas = await html2canvas(clones[i], {
-            scale: 2,
-            useCORS: true,
-            backgroundColor: "#ffffff",
-            scrollX: 0,
-            scrollY: 0,
-          });
+        dataUrls.forEach((url, i) => {
           if (i > 0) pdf.addPage([215, 330], "portrait");
-          pdf.addImage(
-            canvas.toDataURL("image/jpeg", 0.95),
-            "JPEG",
-            0,
-            0,
-            215,
-            330,
-          );
-        }
+          pdf.addImage(url, "PNG", 0, 0, 215, 330);
+        });
         pdf.save(filename);
       } finally {
         stage.remove();
@@ -1642,9 +1680,15 @@ const CSS = `
       box-sizing: border-box;
     }
 
+    /* ✅ Dua kategori ukuran font:
+         --fs-header : judul & header tabel
+         --fs-isi    : isi / data (diperbesar) */
     .rapor-sheet {
+      --fs-header: 15px;
+      --fs-isi: 13.5px;
+
       font-family: "Times New Roman", Times, "Liberation Serif", serif;
-      font-size: 12.5px;
+      font-size: var(--fs-isi);
       line-height: 1.3;
       color: #000000;
       -webkit-text-fill-color: #000000;
@@ -1679,7 +1723,7 @@ const CSS = `
 
     .rapor-title {
       text-align: center;
-      font-size: 14px;
+      font-size: var(--fs-header);
       font-weight: 700;
       margin: 0 0 12px;
       letter-spacing: .03em;
@@ -1696,7 +1740,7 @@ const CSS = `
     .rapor-plain td {
       padding: 2px 0;
       vertical-align: top;
-      font-size: 12.5px;
+      font-size: var(--fs-isi);
       color: #000000;
       -webkit-text-fill-color: #000000;
       background: transparent;
@@ -1705,7 +1749,7 @@ const CSS = `
     .rapor-plain .lbl  { width: 80px; }
     .rapor-plain .sep  { width: 12px; }
     .rapor-plain .val  { width: 60%; }
-    .rapor-plain .lbl2 { width: 120px; }
+    .rapor-plain .lbl2 { width: 130px; }
     .rapor-plain .val2 { white-space: nowrap; }
 
     .rapor-table {
@@ -1725,7 +1769,7 @@ const CSS = `
       padding: 8px 10px;
       vertical-align: middle;
       text-align: center;
-      font-size: 12.5px;
+      font-size: var(--fs-isi);
       text-decoration: none;
       color: #000000;
       -webkit-text-fill-color: #000000;
@@ -1733,6 +1777,7 @@ const CSS = `
     }
     .rapor-table th {
       font-weight: 700;
+      font-size: var(--fs-header);
       color: #000000;
       -webkit-text-fill-color: #000000;
     }
@@ -1773,39 +1818,41 @@ const CSS = `
       -webkit-text-fill-color: #000000;
       background: transparent;
     }
+
     /* ✅ Capaian kompetensi: teks rata kiri-kanan (justify) */
     .cap {
-      padding: 2px 10px;
+      padding: 4px 10px;
       border-bottom: 1px solid #000000;
-      font-size: 12px;
-      text-align: justify;
-      text-justify: inter-word;
-      hyphens: auto;
+      font-size: var(--fs-isi);
       display: flex;
-      align-items: center;
+      flex-direction: column;
+      justify-content: center;
       min-height: calc(var(--row-h, 30mm) / 2 - 0.5px);
       color: #000000;
       -webkit-text-fill-color: #000000;
       background: transparent;
     }
-    .cap > * {
+    .cap > span {
+      display: block;
       width: 100%;
       text-align: justify;
       text-justify: inter-word;
+      hyphens: auto;
     }
     .cap-last { border-bottom: 0; }
 
+    /* ✅ Header "CATATAN" — tinggi diperkecil */
     .rapor-table.catatan-table th {
-      height: 14mm;
+      height: 8mm;
+      padding: 4px 10px;
       color: #000000;
       -webkit-text-fill-color: #000000;
     }
-    /* ✅ Catatan: teks rata kiri-kanan (justify) */
+    /* ✅ Isi catatan — tinggi menyesuaikan isi (auto), dengan min-height */
     .rapor-table.catatan-table .catatan {
-      padding: 12px 14px;
-      height: 40mm;
-      font-size: 12.5px;
-      overflow: hidden;
+      padding: 10px 14px;
+      min-height: 15mm;
+      font-size: var(--fs-isi);
       white-space: pre-line;
       text-align: justify;
       text-justify: inter-word;
@@ -1821,13 +1868,15 @@ const CSS = `
       margin: 20px 0 0;
       border: 1px solid #000000;
     }
+    /* ✅ Ketidakhadiran: teks lurus vertikal (center) */
     .rapor-table.absen th,
     .rapor-table.absen td {
       border: 0;
       border-bottom: 1px solid #000000;
       height: 6mm;
-      line-height: 18px;
-      padding: 0 8px 3px;
+      line-height: 6mm;
+      padding: 0 8px;
+      vertical-align: middle;
     }
     .rapor-table.absen tbody tr:last-child td { border-bottom: 0; }
     .rapor-table.absen td.absen-label { text-align: left; }
@@ -1837,6 +1886,7 @@ const CSS = `
       padding-left: 20px;
     }
 
+    /* ── Tanda tangan ── */
     .ttd {
       margin-top: 24px;
       text-align: center;
@@ -1852,7 +1902,7 @@ const CSS = `
     .ttd-col {
       text-align: center;
       min-width: 160px;
-      font-size: 12.5px;
+      font-size: var(--fs-isi);
       color: #000000;
       -webkit-text-fill-color: #000000;
     }
@@ -1862,10 +1912,43 @@ const CSS = `
       color: #000000;
       -webkit-text-fill-color: #000000;
     }
-    .ttd-space { height: 58px; }
+    /* ✅ Label "Wali Kelas," di bawah tanggal — sejajar kiri dengan tanggal */
+    .ttd-jabatan {
+      margin-top: 6px;
+      margin-left: -6px;
+      margin-bottom: 2px;
+      text-align: center;
+    }
+    /* Default: ruang TTD kecil (dipakai Orang Tua & Kepala Sekolah) */
+    .ttd-space {
+      height: 58px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+    /* ✅ Ruang khusus TTD wali kelas — lebih tinggi untuk gambar besar */
+    .ttd-space-wali {
+      height: 90px;
+    }
+    /* ✅ Foto TTD wali kelas — diperbesar */
+    .ttd-img {
+      max-height: 110px;
+      max-width: 240px;
+      object-fit: contain;
+      margin-bottom: -10px;
+      opacity: 1 !important;
+      -webkit-text-fill-color: initial !important;
+      mix-blend-mode: normal;
+    }
+    /* ✅ Foto TTD kepala sekolah — ukuran besar */
+    .ttd-img-kepsek {
+      max-height: 150px;
+      max-width: 290px;
+    }
     .ttd-kepsek {
       margin-top: 8px;
-      font-size: 12.5px;
+      font-size: var(--fs-isi);
       color: #000000;
       -webkit-text-fill-color: #000000;
     }
@@ -1932,6 +2015,15 @@ const CSS = `
       .rapor-table th,
       .rapor-table td {
         background-color: transparent !important;
+      }
+      /* ✅ Pastikan kedua foto TTD muncul & ukurannya terkontrol saat print */
+      .ttd-img {
+        max-height: 110px !important;
+        max-width: 240px !important;
+      }
+      .ttd-img-kepsek {
+        max-height: 150px !important;
+        max-width: 290px !important;
       }
     }
   `;

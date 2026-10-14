@@ -11,6 +11,7 @@
   "dependencies": {
     "exceljs": "^4.4.0",
     "file-saver": "^2.0.5",
+    "html-to-image": "^1.11.13",
     "html2canvas": "^1.4.1",
     "js-cookie": "^3.0.7",
     "jspdf": "^4.2.1",

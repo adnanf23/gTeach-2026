@@ -68,6 +68,7 @@ export default function PengaturanRaporPage() {
   const [form, setForm] = useState(emptyForm);
   const [savingForm, setSavingForm] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
+  const [togglingAksesId, setTogglingAksesId] = useState(null);
 
   const selectedTahunAjaran = useMemo(
     () => tahunAjaranList.find((t) => t.id === selectedTahunAjaranId) || null,
@@ -268,6 +269,26 @@ export default function PengaturanRaporPage() {
     }
   }
 
+  async function toggleAksesRapor(u) {
+    setTogglingAksesId(u.id);
+    setError("");
+    try {
+      const nextAkses = !u.akses_rapor;
+      const updated = await pb.collection("pengaturan_ujian").update(u.id, {
+        akses_rapor: nextAkses,
+        status_akses: nextAkses ? "buka" : "tutup",
+      });
+      setUjianList((prev) =>
+        prev.map((item) => (item.id === updated.id ? updated : item)),
+      );
+    } catch (err) {
+      console.error("Error toggling akses rapor:", err);
+      setError("Gagal mengubah status akses rapor.");
+    } finally {
+      setTogglingAksesId(null);
+    }
+  }
+
   const jumlahTerisi = raporList.length;
   const jumlahKosong = ujianList.length - jumlahTerisi;
 
@@ -352,7 +373,6 @@ export default function PengaturanRaporPage() {
         {/* Banner Card - Nuansa Hitam */}
         {selectedTahunAjaran && (
           <div className="mb-8 rounded-2xl bg-slate-900 p-6 sm:p-8 text-white shadow-md relative overflow-hidden">
-            {/* Aksen dekoratif di kanan */}
             <div className="absolute top-0 right-0 -mt-16 -mr-16 h-64 w-64 rounded-full bg-white/5 blur-2xl pointer-events-none" />
 
             <div className="relative z-10 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -525,6 +545,8 @@ export default function PengaturanRaporPage() {
                 (r) => getUjianIdOfRapor(r) === u.id,
               );
               const isEditing = editingUjianId === u.id;
+              const isAksesRaporOpen = !!u.akses_rapor;
+
               return (
                 <div
                   key={u.id}
@@ -542,6 +564,20 @@ export default function PengaturanRaporPage() {
                         >
                           {u.jenis_ujian || "—"}
                         </span>
+
+                        {/* Badge akses rapor */}
+                        <span
+                          className={`text-[10px] font-bold uppercase px-2.5 py-1 rounded border ${
+                            isAksesRaporOpen
+                              ? "bg-emerald-50 text-emerald-700 border-emerald-100"
+                              : "bg-rose-50 text-rose-700 border-rose-100"
+                          }`}
+                        >
+                          {isAksesRaporOpen
+                            ? "● Rapor Dibuka"
+                            : "○ Rapor Ditutup"}
+                        </span>
+
                         <span
                           className={`text-[10px] font-bold uppercase px-2.5 py-1 rounded ${
                             rapor
@@ -585,7 +621,25 @@ export default function PengaturanRaporPage() {
                       )}
                     </div>
 
-                    <div className="flex items-center gap-2 shrink-0">
+                    <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                      {/* Tombol Buka / Tutup Rapor */}
+                      <button
+                        type="button"
+                        disabled={togglingAksesId === u.id}
+                        onClick={() => toggleAksesRapor(u)}
+                        className={`rounded-lg px-4 py-2 text-xs font-semibold border transition ${
+                          isAksesRaporOpen
+                            ? "bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100"
+                            : "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
+                        } disabled:opacity-50`}
+                      >
+                        {togglingAksesId === u.id
+                          ? "Memproses..."
+                          : isAksesRaporOpen
+                            ? "Tutup Rapor"
+                            : "Buka Rapor"}
+                      </button>
+
                       <button
                         type="button"
                         onClick={() => openFormForUjian(u)}

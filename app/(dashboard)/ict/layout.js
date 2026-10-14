@@ -56,6 +56,7 @@ const icons = {
   resource:
     "M4 4h8v8H4V4zM6 1v3M10 1v3M6 12v3M10 12v3M1 6h3M1 10h3M12 6h3M12 10h3",
   summary: "M2 12h2V8H2v4zM7 12h2V4H7v8zM12 12h2V6h-2v6z",
+  signature: "M2 12c2 0 3-2 4-4s2-4 4-4 2 2 1 4-3 4-5 4M2 14h12",
 };
 
 const NAV_SECTIONS = [
@@ -197,6 +198,12 @@ const NAV_SECTIONS = [
             label: "Monitoring Kesiapan Rapor",
             href: "/ict/rapor/monitoring-kesiapan",
             icon: "monitoring",
+          },
+          {
+            key: "ttd-rapor",
+            label: "Tanda Tangan Rapor",
+            href: "/ict/rapor/ttd",
+            icon: "signature",
           },
           {
             key: "print-rapor",

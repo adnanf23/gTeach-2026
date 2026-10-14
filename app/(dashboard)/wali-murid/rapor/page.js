@@ -16,27 +16,32 @@
 //  - Ketidakhadiran: Sakit & Izin dari `kehadiran_manual` (fallback ke
 //    `absensi`). Alpha diambil dari field `hadir` di `kehadiran_manual`
 //    (fallback ke absensi status "alpha").
+//  - ✅ Foto TTD:
+//      • Wali kelas → field `ttd` di collection users (via relasi kelas.walikelas_id)
+//      • Kepala sekolah → file statis di folder assets/
+//  - ✅ PDF: pakai `html-to-image` supaya hasil 100% sama dengan UI.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { pb } from "@/lib/pocketbase";
+
+// ✅ TTD kepala sekolah dari folder assets (static import Next.js)
+import ttdKepsekAsset from "@/assets/TTD BUNDA AHDA_STAMPEL.png";
 
 /* ───────────── konfigurasi ───────────── */
 const SEKOLAH_DEFAULT = {
   nama: "SD Global Garuda Nusantara Islamic Centre",
   alamat: "Jl. Raya Semplak Salabenda",
   kota: "Bogor",
-  kepala_sekolah: "Syafrina Ahda, S.Pd",
+  kepala_sekolah: "Syafrina Ahda, S.Pd., M.M.",
 };
 
 const TEXT_TINGGI = "Ananda menunjukkan pemahaman dalam";
 const TEXT_RENDAH = "Ananda membutuhkan bimbingan dalam";
 
-// Jenis ujian (sama dengan halaman walikelas / leger)
 const JENIS_UTS = "ahb";
 const JENIS_UAS = "asas";
 
-// Nama bobot di collection presentase_penilaian (sama dengan halaman leger)
 const NAMA_BOBOT = {
   formatif: "Formatif",
   sumatif: "Sumatif",
@@ -45,19 +50,14 @@ const NAMA_BOBOT = {
   kehadiran: "Kehadiran",
 };
 
-// ✅ kategori mapel yang ditampilkan di rapor
 const KATEGORI_RAPOR = ["umum", "koding"];
 
-// ✅ urutan khusus: koding selalu paling akhir, apapun nama mapelnya
 const URUTAN_KODING = 10000;
 const URUTAN_TIDAK_DIKENAL = 999;
 
-/* ───────────── konfigurasi halaman ───────────── */
-const MAX_MAPEL_HAL1 = 8; // mapel ke-9 dst pindah ke halaman 2
+const MAX_MAPEL_HAL1 = 8;
 
 /* ───────────── urutan mapel ───────────── */
-// Alias diperluas (termasuk nama Inggris) supaya mapel seperti
-// "Math"/"Science" ikut tersortir rapi, bukan menumpuk di urutan 999.
 const URUTAN_MAPEL = [
   ["pai", "pendidikan agama islam dan budi pekerti", "agama", "islam"],
   [
@@ -75,7 +75,7 @@ const URUTAN_MAPEL = [
   ["arab", "bahasa arab", "arabic"],
   ["english", "bahasa inggris", "inggris"],
   ["bsund", "bahasa sunda", "sunda"],
-  ["kka", "koding", "coding"], // alias koding (urutan idx ke-10)
+  ["kka", "koding", "coding"],
 ];
 
 const normMapel = (s) =>
@@ -86,9 +86,7 @@ const normMapel = (s) =>
     .trim();
 
 const urutanMapel = (mapel) => {
-  // ✅ Koding SELALU paling akhir, meskipun nama mapel tidak match alias.
   if ((mapel?.kategori || "").toLowerCase() === "koding") return URUTAN_KODING;
-
   const kandidat = [mapel?.Label, mapel?.kode_mapel, mapel?.nama_mapel]
     .map(normMapel)
     .filter(Boolean);
@@ -155,18 +153,15 @@ const sortUjian = (list) =>
   });
 
 /* ───────────── hook: auto-fit kertas ke lebar container ───────────── */
-/* F4/Folio: 215mm × 330mm. Lebar konten px @96dpi ≈ 812px. */
-function useFitScale(contentWidthPx = 812 /* 215mm @96dpi */, active = true) {
+function useFitScale(contentWidthPx = 812, active = true) {
   const outerRef = useRef(null);
   const wrapRef = useRef(null);
   const innerRef = useRef(null);
   const [scale, setScale] = useState(1);
   const [height, setHeight] = useState(0);
-  // mobile: lebar & geser kiri agar kontainer = lebar layar penuh
   const [bleed, setBleed] = useState(null);
 
   useEffect(() => {
-    // pratinjau baru dirender setelah data siap → jalankan ulang saat `active` berubah
     if (!active) return;
     const outer = outerRef.current;
     const wrap = wrapRef.current;
@@ -208,8 +203,7 @@ function useFitScale(contentWidthPx = 812 /* 215mm @96dpi */, active = true) {
   return { outerRef, wrapRef, innerRef, scale, height, bleed };
 }
 
-/* ───────────── hook: tinggi elemen fixed di dasar layar (mis. bottom-nav) ───────────── */
-/* Bar aksi dinaikkan otomatis supaya tidak tertutup / tenggelam di belakangnya. */
+/* ───────────── hook: tinggi elemen fixed di dasar layar ───────────── */
 function useBottomInset(active) {
   const [inset, setInset] = useState(0);
 
@@ -253,12 +247,7 @@ function useBottomInset(active) {
   return inset;
 }
 
-/* ───────────── nilai akhir per mapel untuk SATU siswa ─────────────
-   Skema identik dengan halaman walikelas / leger:
-   nilai akhir = rata-rata berbobot Formatif, Sumatif, UTS (AHB),
-   UAS (ASAS), dan Kehadiran. Bobot diambil dari `presentase_penilaian`.
-   Kehadiran = (hadir / total absensi siswa) × 100.
-   ------------------------------------------------------------------- */
+/* ───────────── nilai akhir per mapel untuk SATU siswa ───────────── */
 async function hitungNilaiAkhirSiswa(siswa, kelas) {
   const kelasId = kelas.id;
   const tingkat = String(kelas.tingkat);
@@ -285,8 +274,6 @@ async function hitungNilaiAkhirSiswa(siswa, kelas) {
       }),
     ]);
 
-  // ✅ Mapel: kategori "umum" + "koding", sesuai restriksi kelas.
-  //    Koding otomatis di urutan paling akhir lewat urutanMapel().
   const combined = [...mapelKhusus, ...mapelTingkat];
   const uniqueMapel = Array.from(
     new Map(combined.map((m) => [m.id, m])).values(),
@@ -314,7 +301,6 @@ async function hitungNilaiAkhirSiswa(siswa, kelas) {
   });
   const mapelList = Array.from(mapelByName.values());
 
-  // Bobot
   const getBobot = (nama) => {
     const found = presentaseData.find(
       (p) =>
@@ -328,7 +314,6 @@ async function hitungNilaiAkhirSiswa(siswa, kelas) {
   const bobotUas = getBobot(NAMA_BOBOT.uas);
   const bobotKehadiran = getBobot(NAMA_BOBOT.kehadiran);
 
-  // Kehadiran (semua absensi siswa)
   const absensiData = await pb.collection("absensi").getFullList({
     filter: `siswa_id = "${sid}"`,
     requestKey: null,
@@ -339,7 +324,6 @@ async function hitungNilaiAkhirSiswa(siswa, kelas) {
     kehadiran = (hadir / absensiData.length) * 100;
   }
 
-  // UTS / UAS
   const utsIds = ujianData
     .filter((u) => u.jenis_ujian === JENIS_UTS)
     .map((u) => u.id);
@@ -368,7 +352,6 @@ async function hitungNilaiAkhirSiswa(siswa, kelas) {
         .filter((v) => typeof v === "number" && !isNaN(v) && v !== -1),
     );
 
-  // Formatif & sumatif
   let tpAll = [];
   let lpAll = [];
   if (mapelList.length > 0) {
@@ -425,7 +408,6 @@ async function hitungNilaiAkhirSiswa(siswa, kelas) {
     }
   });
 
-  // Nilai akhir per mapel (rata-rata berbobot) — sama dengan leger
   const nilaiAkhir = {};
   mapelList.forEach((m) => {
     const others = [
@@ -469,15 +451,10 @@ async function buildRapor(siswa, ujian, pengaturanRapor = null) {
   const sid = siswa.id;
   const kelasId = toArray(siswa.kelas_id)[0] || null;
 
-  // 1) Nilai akhir per mapel (logika sama dengan halaman walikelas / leger)
   const { mapelList, nilaiAkhir } = kelas
     ? await hitungNilaiAkhirSiswa(siswa, kelas)
     : { mapelList: [], nilaiAkhir: {} };
 
-  // 2) Data pendukung tampilan rapor
-  //    • kehadiran_manual → prioritas untuk Sakit/Izin/Alpha
-  //      (field `hadir` di collection ini berisi data Alpha)
-  //    • absensi → fallback
   const [capaianRes, absenRes, ekskulRes, catatanRes, kehadiranRes] =
     await Promise.all([
       kelasId
@@ -503,7 +480,6 @@ async function buildRapor(siswa, ujian, pengaturanRapor = null) {
             requestKey: null,
           })
         : Promise.resolve([]),
-      // ✅ catch → kalau 403 (access rule belum dibuka), tidak mematikan rapor.
       kelasId
         ? pb
             .collection("kehadiran_manual")
@@ -534,7 +510,7 @@ async function buildRapor(siswa, ujian, pengaturanRapor = null) {
       const v = nilaiAkhir[mapel.id];
       return {
         mapel: mapel.Label || mapel.nama_mapel || mapel.nama || "-",
-        urutan: urutanMapel(mapel), // ✅ koding = 10000 → selalu paling akhir
+        urutan: urutanMapel(mapel),
         nilai: typeof v === "number" && !isNaN(v) ? Math.round(v) : "-",
         capaian_tinggi: cap?.capaian_tinggi
           ? `${TEXT_TINGGI} ${cap.capaian_tinggi}`
@@ -548,10 +524,6 @@ async function buildRapor(siswa, ujian, pengaturanRapor = null) {
 
   const hitungAbsen = (s) => absenRes.filter((a) => a.status === s).length;
 
-  // ✅ Ketidakhadiran:
-  //    - Sakit & Izin → utamakan kehadiran_manual, fallback ke absensi.
-  //    - Alpha (Tanpa Keterangan) → field `hadir` di kehadiran_manual
-  //      berisi data alpha. Fallback ke absensi (status = "alpha").
   const km = kehadiranRes[0] || null;
   const sakit = km ? Number(km.sakit ?? 0) : hitungAbsen("sakit");
   const izin = km ? Number(km.izin ?? 0) : hitungAbsen("izin");
@@ -577,18 +549,22 @@ async function buildRapor(siswa, ujian, pengaturanRapor = null) {
         .join("\n")
     : "-";
 
+  const waliUser = kelas?.expand?.walikelas_id;
+  const waliKelasTtd =
+    waliUser && waliUser.ttd ? pb.files.getURL(waliUser, waliUser.ttd) : null;
+
   return {
     semester: ta?.semester,
     tahun_ajaran: ta?.tahun,
     kelas: kelas?.tingkat,
     fase: faseDari(kelas?.tingkat),
-    wali_kelas: kelas?.expand?.walikelas_id?.nama_lengkap || "-",
+    wali_kelas: waliUser?.nama_lengkap || "-",
+    wali_kelas_ttd: waliKelasTtd,
     kepala_sekolah:
       pengaturanRapor?.kepala_sekolah || SEKOLAH_DEFAULT.kepala_sekolah,
     nama_sekolah: pengaturanRapor?.nama_sekolah || SEKOLAH_DEFAULT.nama,
     alamat: pengaturanRapor?.alamat || SEKOLAH_DEFAULT.alamat,
     kota: SEKOLAH_DEFAULT.kota,
-    // Tanggal: utamakan pengaturan_rapor.tanggal_rapor
     tanggal_rapor: pengaturanRapor?.tanggal_rapor || null,
     catatan: catatanTeks,
     sakit,
@@ -602,7 +578,7 @@ async function buildRapor(siswa, ujian, pengaturanRapor = null) {
   };
 }
 
-/* ───────────── tabel nilai (dipakai di hal 1 & 2) ───────────── */
+/* ───────────── tabel nilai ───────────── */
 const NilaiTable = ({ rows, startIndex = 0, rowH }) => (
   <table
     className="rapor-table nilai-table text-left"
@@ -634,8 +610,12 @@ const NilaiTable = ({ rows, startIndex = 0, rowH }) => (
           <td className="td-left">{m.mapel}</td>
           <td className="center">{m.nilai ?? "-"}</td>
           <td className="cap-cell">
-            <div className="cap">{m.capaian_tinggi || "-"}</div>
-            <div className="cap cap-last">{m.capaian_rendah || "-"}</div>
+            <div className="cap">
+              <span>{m.capaian_tinggi || "-"}</span>
+            </div>
+            <div className="cap cap-last">
+              <span>{m.capaian_rendah || "-"}</span>
+            </div>
           </td>
         </tr>
       ))}
@@ -654,7 +634,6 @@ const RaporPreview = ({ siswa, rapor, innerRef }) => {
         { nama: "-", keterangan: "-" },
       ];
 
-  // pecah nilai: hal 1 maksimal 8 mapel, sisanya ke hal 2
   const nilaiHal1 = nilai.slice(0, MAX_MAPEL_HAL1);
   const nilaiHal2 = nilai.slice(MAX_MAPEL_HAL1);
 
@@ -663,9 +642,11 @@ const RaporPreview = ({ siswa, rapor, innerRef }) => {
     : 30;
   const rowH2 = 24;
 
+  const ttdKepsekSrc = ttdKepsekAsset?.src || null;
+
   return (
     <div className="rapor-sheet" ref={innerRef}>
-      {/* ══════════════ HALAMAN 1 — IDENTITAS + NILAI (1–8) ══════════════ */}
+      {/* ══════════════ HALAMAN 1 ══════════════ */}
       <div className="page page-1">
         <h1 className="rapor-title">
           LAPORAN HASIL BELAJAR
@@ -701,7 +682,6 @@ const RaporPreview = ({ siswa, rapor, innerRef }) => {
               <td className="sep">:</td>
               <td className="val2">{semesterLabel(rapor.semester)}</td>
             </tr>
-            {/* ── Tahun Pelajaran: 1 baris, kolom kanan digeser ── */}
             <tr>
               <td className="lbl">Alamat</td>
               <td className="sep">:</td>
@@ -716,7 +696,7 @@ const RaporPreview = ({ siswa, rapor, innerRef }) => {
         <NilaiTable rows={nilaiHal1} startIndex={0} rowH={rowH1} />
       </div>
 
-      {/* ══════════════ HALAMAN 2 — LANJUTAN NILAI + EKSKUL + CATATAN + TTD ══════════════ */}
+      {/* ══════════════ HALAMAN 2 ══════════════ */}
       <div className="page page-2">
         {nilaiHal2.length > 0 && (
           <>
@@ -794,27 +774,47 @@ const RaporPreview = ({ siswa, rapor, innerRef }) => {
         <div className="ttd">
           <div className="ttd-row">
             <div className="ttd-col">
+              <p>&nbsp;</p>
+              <p>&nbsp;</p>
+              <p>&nbsp;</p>
               <p>Orang Tua,</p>
               <div className="ttd-space" />
               <p>……………………….</p>
             </div>
             <div className="ttd-col">
-              {/* ── Tanggal rapor murni dari DB (pengaturan_rapor.tanggal_rapor).
-                     Kalau kosong → titik-titik, biar jelas belum diisi admin. ── */}
               <p className="text-left">
                 {rapor.kota || SEKOLAH_DEFAULT.kota},{" "}
                 {rapor.tanggal_rapor
                   ? formatTanggal(rapor.tanggal_rapor)
                   : "……………………"}
               </p>
-              <div className="ttd-space" />
-              <p className="text-left">{rapor.wali_kelas || "-"}</p>
+              <p className="text-center ttd-jabatan">Wali Kelas,</p>
+              <div className="ttd-space ttd-space-wali">
+                {rapor.wali_kelas_ttd && (
+                  <img
+                    src={rapor.wali_kelas_ttd}
+                    alt=""
+                    className="ttd-img"
+                    crossOrigin="anonymous"
+                  />
+                )}
+              </div>
+              <p>{rapor.wali_kelas || "-"}</p>
             </div>
           </div>
           <div className="ttd-kepsek">
             <p>Mengetahui,</p>
             <p>Kepala Sekolah</p>
-            <div className="ttd-space" />
+            <div className="ttd-space">
+              {ttdKepsekSrc && (
+                <img
+                  src={ttdKepsekSrc}
+                  alt=""
+                  className="ttd-img ttd-img-kepsek"
+                  crossOrigin="anonymous"
+                />
+              )}
+            </div>
             <p>{rapor.kepala_sekolah || "-"}</p>
           </div>
         </div>
@@ -823,7 +823,7 @@ const RaporPreview = ({ siswa, rapor, innerRef }) => {
   );
 };
 
-/* ───────────── komponen UI (mobile-first) ───────────── */
+/* ───────────── komponen UI ───────────── */
 const CARD_SHADOW = "shadow-[0_4px_14px_rgba(99,120,200,0.12)]";
 
 const ZOOM_BTN_CLS =
@@ -857,12 +857,12 @@ const StateCard = ({ tone = "muted", title, children }) => (
   </div>
 );
 
-/* ───────────── picker kustom (bottom sheet / dialog) ───────────── */
+/* ───────────── picker kustom ───────────── */
 const PilihanSheet = ({
   label,
   value,
   onChange,
-  options, // [{ id, title, subtitle, badge }]
+  options,
   disabled,
   placeholder = "Pilih…",
   className = "",
@@ -1029,13 +1029,11 @@ export default function RaporPage() {
   const [error, setError] = useState("");
 
   const sheetRef = useRef(null);
-  const fit = useFitScale(812, !!rapor && !loadingRapor); // 215mm @ 96dpi (F4)
+  const fit = useFitScale(812, !!rapor && !loadingRapor);
   const bottomInset = useBottomInset(!!rapor && !loadingRapor);
 
-  // zoom manual: null = auto-fit, angka = faktor tambahan (1.25, 1.5, 2, …)
   const [zoom, setZoom] = useState(null);
 
-  // pinch-to-zoom refs
   const pinchRef = useRef({ startDist: 0, startZoom: 1 });
   const zoomValRef = useRef(null);
   useEffect(() => {
@@ -1120,8 +1118,6 @@ export default function RaporPage() {
     [siswaList],
   );
 
-  // Ambil pengaturan_rapor yang terkait dengan ujian terpilih.
-  // Coba relasi `ujian` dulu, fallback ke `ujian_id`.
   useEffect(() => {
     if (!ujian) {
       setPengaturanRapor(null);
@@ -1144,7 +1140,6 @@ export default function RaporPage() {
         }
       }
       if (cancelled) return;
-      console.log("[rapor] pengaturan_rapor:", pr);
       setPengaturanRapor(pr);
     })();
     return () => {
@@ -1176,7 +1171,6 @@ export default function RaporPage() {
     };
   }, [siswa, ujian, pengaturanRapor]);
 
-  // Pinch-to-zoom (2 jari) + Ctrl/⌘ + scroll untuk trackpad
   useEffect(() => {
     const el = fit.wrapRef.current;
     if (!el) return;
@@ -1186,7 +1180,6 @@ export default function RaporPage() {
 
     const apply = (value) => {
       const clamped = Math.min(4, Math.max(0.25, value));
-      // dekat 100% → kembali ke mode auto-fit
       setZoom(Math.abs(clamped - 1) < 0.04 ? null : clamped);
     };
 
@@ -1201,7 +1194,7 @@ export default function RaporPage() {
 
     const onTouchMove = (e) => {
       if (e.touches.length !== 2 || !pinchRef.current.startDist) return;
-      e.preventDefault(); // cegah zoom bawaan browser
+      e.preventDefault();
       const ratio = dist(e.touches) / pinchRef.current.startDist;
       apply(pinchRef.current.startZoom * ratio);
     };
@@ -1241,15 +1234,11 @@ export default function RaporPage() {
 
       const pages = Array.from(sheetRef.current.querySelectorAll(".page"));
 
-      // Dimuat saat dibutuhkan (hindari error SSR)
-      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
-        import("html2canvas"),
+      const [{ toPng }, { jsPDF }] = await Promise.all([
+        import("html-to-image"),
         import("jspdf"),
       ]);
 
-      // Render dari salinan di luar layar: bebas dari transform/zoom preview,
-      // ukuran selalu tepat 215mm × 330mm (F4). Margin 8mm sudah ada di
-      // dalam .page (padding), jadi PDF tidak menambah margin lagi.
       const stage = document.createElement("div");
       stage.style.cssText =
         "position:absolute;left:-10000px;top:0;width:215mm;background:#fff;";
@@ -1268,6 +1257,36 @@ export default function RaporPage() {
           return c;
         });
 
+        const imgs = Array.from(sheet.querySelectorAll("img"));
+        await Promise.all(
+          imgs.map((img) =>
+            img.complete
+              ? Promise.resolve()
+              : new Promise((res) => {
+                  img.onload = img.onerror = () => res();
+                }),
+          ),
+        );
+
+        if (document.fonts?.ready) {
+          try {
+            await document.fonts.ready;
+          } catch {
+            /* ignore */
+          }
+        }
+
+        const dataUrls = [];
+        for (const c of clones) {
+          const url = await toPng(c, {
+            pixelRatio: 2,
+            backgroundColor: "#ffffff",
+            cacheBust: true,
+            skipFonts: false,
+          });
+          dataUrls.push(url);
+        }
+
         const pdf = new jsPDF({
           unit: "mm",
           format: [215, 330],
@@ -1275,24 +1294,10 @@ export default function RaporPage() {
           compress: true,
         });
 
-        for (let i = 0; i < clones.length; i++) {
-          const canvas = await html2canvas(clones[i], {
-            scale: 2,
-            useCORS: true,
-            backgroundColor: "#ffffff",
-            scrollX: 0,
-            scrollY: 0,
-          });
+        dataUrls.forEach((url, i) => {
           if (i > 0) pdf.addPage([215, 330], "portrait");
-          pdf.addImage(
-            canvas.toDataURL("image/jpeg", 0.95),
-            "JPEG",
-            0,
-            0,
-            215,
-            330,
-          );
-        }
+          pdf.addImage(url, "PNG", 0, 0, 215, 330);
+        });
         pdf.save(filename);
       } finally {
         stage.remove();
@@ -1311,7 +1316,6 @@ export default function RaporPage() {
     <>
       <style>{CSS}</style>
 
-      {/* Judul */}
       <header className="no-print mb-3">
         <h1 className="text-[18px] font-semibold text-gray-900">
           Rapor Ananda
@@ -1321,7 +1325,6 @@ export default function RaporPage() {
         </p>
       </header>
 
-      {/* Filter: 1 kolom di mobile, 2 kolom di layar ≥ sm */}
       <section
         className={`no-print mb-4 grid gap-3 rounded-2xl bg-white p-3 sm:grid-cols-2 ${CARD_SHADOW}`}
       >
@@ -1345,7 +1348,6 @@ export default function RaporPage() {
         />
       </section>
 
-      {/* Status */}
       {(loading || loadingRapor) && (
         <div
           className={`no-print flex items-center justify-center gap-2 rounded-2xl bg-white py-12 text-[13px] text-gray-400 ${CARD_SHADOW}`}
@@ -1367,7 +1369,6 @@ export default function RaporPage() {
         </StateCard>
       )}
 
-      {/* Pratinjau + bar aksi */}
       {siswa && rapor && !loadingRapor && (
         <div
           className="no-print"
@@ -1386,7 +1387,6 @@ export default function RaporPage() {
             </p>
           </div>
 
-          {/* Meja kerja: latar netral supaya lembar putih terlihat sebagai kertas */}
           <div
             ref={fit.outerRef}
             className="rapor-fit-outer bg-[#dfe3ec] py-2 sm:rounded-2xl sm:p-4"
@@ -1423,8 +1423,6 @@ export default function RaporPage() {
             </div>
           </div>
 
-          {/* Bar aksi: fixed + portal ke <body> supaya tidak terpengaruh
-                overflow/transform layout induk. Otomatis naik di atas bottom-nav. */}
           {createPortal(
             <div
               data-rapor-bar
@@ -1479,11 +1477,11 @@ export default function RaporPage() {
 }
 
 /* ───────────── CSS ───────────── */
+
 const CSS = `
     /* ── Wrapper auto-fit + zoom ── */
     .rapor-fit-outer { width: 100%; }
 
-    /* Mobile: lebar kontainer & kertas = lebar layar dihitung di useFitScale */
     @media screen and (max-width: 639px) {
       .rapor-sheet { gap: 8mm; }
       .rapor-paper.zoomed { outline: none; }
@@ -1501,17 +1499,16 @@ const CSS = `
       min-width: 215mm;
     }
 
-    /* ── Kertas: tiap .page tampil langsung sebagai lembar F4 putih ── */
+    /* ── Kertas ── */
     .rapor-paper {
       width: 215mm;
       min-width: 215mm;
-      padding: 0;                 /* tidak ada padding — kertas = .page */
-      background: transparent;    /* hilangkan latar abu-biru */
+      padding: 0;
+      background: transparent;
       color: #000000;
       box-shadow: none;
       border-radius: 0;
     }
-    /* Outline tegas saat user zoom manual */
     .rapor-paper.zoomed {
       outline: 2px solid rgba(59,110,245,.55);
       outline-offset: 6px;
@@ -1521,7 +1518,7 @@ const CSS = `
     .rapor-sheet {
       display: flex;
       flex-direction: column;
-      gap: 12mm;                  /* GAP antar halaman */
+      gap: 12mm;
     }
 
     .rapor-sheet,
@@ -1529,9 +1526,15 @@ const CSS = `
       box-sizing: border-box;
     }
 
+    /* ✅ Dua kategori ukuran font:
+         --fs-header : judul & header tabel
+         --fs-isi    : isi / data (diperbesar) */
     .rapor-sheet {
+      --fs-header: 15px;
+      --fs-isi: 13.5px;
+
       font-family: "Times New Roman", Times, "Liberation Serif", serif;
-      font-size: 12.5px;
+      font-size: var(--fs-isi);
       line-height: 1.3;
       color: #000000;
       -webkit-text-fill-color: #000000;
@@ -1548,12 +1551,12 @@ const CSS = `
       text-shadow: none;
     }
 
-    /* ── Tiap halaman = satu lembar kertas F4 ── */
+    /* ── Halaman ── */
     .page {
       display: block;
-      width: 215mm;               /* full F4 width */
-      height: 330mm;              /* full F4 height */
-      padding: 8mm;               /* margin cetak di dalam kertas */
+      width: 215mm;
+      height: 330mm;
+      padding: 8mm;
       overflow: hidden;
       background: #ffffff;
       position: relative;
@@ -1562,12 +1565,11 @@ const CSS = `
         0 8px 24px rgba(15,23,42,.10);
       border-radius: 2px;
     }
-    /* baris ke-2 dst tidak perlu margin lagi karena sudah pakai gap di .rapor-sheet */
     .page + .page { margin-top: 0; }
 
     .rapor-title {
       text-align: center;
-      font-size: 14px;
+      font-size: var(--fs-header);
       font-weight: 700;
       margin: 0 0 12px;
       letter-spacing: .03em;
@@ -1575,12 +1577,6 @@ const CSS = `
       -webkit-text-fill-color: #000000;
     }
 
-    /* ── Identitas: kolom kanan (Kelas/Fase/Semester/TP) digeser ke kanan ──
-       Cara kerja:
-       • .val  = 52%  → kolom kiri "makan" ruang lebih banyak
-       • .lbl2 = 120px → label kanan punya lebar tetap
-       • Hasil: blok kanan (Kelas/Fase/Semester/TP) mulai di ±58% lebar tabel
-    */
     .rapor-plain {
       width: 100%;
       border-collapse: collapse;
@@ -1590,16 +1586,16 @@ const CSS = `
     .rapor-plain td {
       padding: 2px 0;
       vertical-align: top;
-      font-size: 12.5px;
+      font-size: var(--fs-isi);
       color: #000000;
       -webkit-text-fill-color: #000000;
       background: transparent;
-      white-space: nowrap;      /* cegah "Tahun Pelajaran" pecah 2 baris */
+      white-space: nowrap;
     }
     .rapor-plain .lbl  { width: 80px; }
     .rapor-plain .sep  { width: 12px; }
-    .rapor-plain .val  { width: 60%; }        /* kiri lebih lebar → kanan geser */
-    .rapor-plain .lbl2 { width: 120px; }      /* label kanan lebar tetap */
+    .rapor-plain .val  { width: 60%; }
+    .rapor-plain .lbl2 { width: 130px; }
     .rapor-plain .val2 { white-space: nowrap; }
 
     .rapor-table {
@@ -1619,7 +1615,7 @@ const CSS = `
       padding: 8px 10px;
       vertical-align: middle;
       text-align: center;
-      font-size: 12.5px;
+      font-size: var(--fs-isi);
       text-decoration: none;
       color: #000000;
       -webkit-text-fill-color: #000000;
@@ -1627,6 +1623,7 @@ const CSS = `
     }
     .rapor-table th {
       font-weight: 700;
+      font-size: var(--fs-header);
       color: #000000;
       -webkit-text-fill-color: #000000;
     }
@@ -1667,39 +1664,41 @@ const CSS = `
       -webkit-text-fill-color: #000000;
       background: transparent;
     }
+
     /* ✅ Capaian kompetensi: teks rata kiri-kanan (justify) */
     .cap {
-      padding: 2px 10px;
+      padding: 4px 10px;
       border-bottom: 1px solid #000000;
-      font-size: 12px;
-      text-align: justify;
-      text-justify: inter-word;
-      hyphens: auto;
+      font-size: var(--fs-isi);
       display: flex;
-      align-items: center;
+      flex-direction: column;
+      justify-content: center;
       min-height: calc(var(--row-h, 30mm) / 2 - 0.5px);
       color: #000000;
       -webkit-text-fill-color: #000000;
       background: transparent;
     }
-    .cap > * {
+    .cap > span {
+      display: block;
       width: 100%;
       text-align: justify;
       text-justify: inter-word;
+      hyphens: auto;
     }
     .cap-last { border-bottom: 0; }
 
+    /* ✅ Header "CATATAN" — tinggi diperkecil */
     .rapor-table.catatan-table th {
-      height: 14mm;
+      height: 8mm;
+      padding: 4px 10px;
       color: #000000;
       -webkit-text-fill-color: #000000;
     }
-    /* ✅ Catatan: teks rata kiri-kanan (justify) */
+    /* ✅ Isi catatan — tinggi menyesuaikan isi (auto), dengan min-height */
     .rapor-table.catatan-table .catatan {
-      padding: 12px 14px;
-      height: 40mm;
-      font-size: 12.5px;
-      overflow: hidden;
+      padding: 10px 14px;
+      min-height: 15mm;
+      font-size: var(--fs-isi);
       white-space: pre-line;
       text-align: justify;
       text-justify: inter-word;
@@ -1710,21 +1709,20 @@ const CSS = `
       background: transparent;
     }
 
-    /* Ketidakhadiran: tabel kecil di kiri, garis antar baris, tanpa garis vertikal */
     .rapor-table.absen {
       width: 80mm;
       margin: 20px 0 0;
       border: 1px solid #000000;
     }
+    /* ✅ Ketidakhadiran: teks lurus vertikal (center) */
     .rapor-table.absen th,
     .rapor-table.absen td {
       border: 0;
       border-bottom: 1px solid #000000;
       height: 6mm;
-      /* line-height + padding-bottom: html2canvas menggeser teks ke bawah
-        bila hanya mengandalkan vertical-align */
-      line-height: 18px;
-      padding: 0 8px 3px;
+      line-height: 6mm;
+      padding: 0 8px;
+      vertical-align: middle;
     }
     .rapor-table.absen tbody tr:last-child td { border-bottom: 0; }
     .rapor-table.absen td.absen-label { text-align: left; }
@@ -1734,6 +1732,7 @@ const CSS = `
       padding-left: 20px;
     }
 
+    /* ── Tanda tangan ── */
     .ttd {
       margin-top: 24px;
       text-align: center;
@@ -1749,7 +1748,7 @@ const CSS = `
     .ttd-col {
       text-align: center;
       min-width: 160px;
-      font-size: 12.5px;
+      font-size: var(--fs-isi);
       color: #000000;
       -webkit-text-fill-color: #000000;
     }
@@ -1759,10 +1758,42 @@ const CSS = `
       color: #000000;
       -webkit-text-fill-color: #000000;
     }
-    .ttd-space { height: 58px; }
+    /* ✅ Label "Wali Kelas," di bawah tanggal — sejajar kiri dengan tanggal */
+    .ttd-jabatan {
+      margin-top: 6px;
+      margin-bottom: 2px;
+      text-align: left;
+    }
+    /* Default: ruang TTD kecil (dipakai Orang Tua & Kepala Sekolah) */
+    .ttd-space {
+      height: 58px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+    /* ✅ Ruang khusus TTD wali kelas — lebih tinggi untuk gambar besar */
+    .ttd-space-wali {
+      height: 90px;
+    }
+    /* ✅ Foto TTD wali kelas — diperbesar */
+    .ttd-img {
+      max-height: 110px;
+      max-width: 240px;
+      object-fit: contain;
+      margin-bottom: -10px;
+      opacity: 1 !important;
+      -webkit-text-fill-color: initial !important;
+      mix-blend-mode: normal;
+    }
+    /* ✅ Foto TTD kepala sekolah — ukuran besar */
+    .ttd-img-kepsek {
+      max-height: 150px;
+      max-width: 290px;
+    }
     .ttd-kepsek {
       margin-top: 8px;
-      font-size: 12.5px;
+      font-size: var(--fs-isi);
       color: #000000;
       -webkit-text-fill-color: #000000;
     }
@@ -1775,7 +1806,7 @@ const CSS = `
     thead { display: table-header-group; }
 
     @page {
-      size: 215mm 330mm; /* F4 / Folio */
+      size: 215mm 330mm;
       margin: 8mm;
     }
     @media print {
@@ -1793,7 +1824,6 @@ const CSS = `
         min-width: 0 !important;
       }
 
-      /* Di print: tiap .page auto-pecah ke halaman fisik */
       .rapor-paper {
         width: auto;
         min-width: 0;
@@ -1830,6 +1860,15 @@ const CSS = `
       .rapor-table th,
       .rapor-table td {
         background-color: transparent !important;
+      }
+      /* ✅ Pastikan kedua foto TTD muncul & ukurannya terkontrol saat print */
+      .ttd-img {
+        max-height: 110px !important;
+        max-width: 240px !important;
+      }
+      .ttd-img-kepsek {
+        max-height: 150px !important;
+        max-width: 290px !important;
       }
     }
   `;

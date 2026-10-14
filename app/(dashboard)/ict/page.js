@@ -758,7 +758,16 @@ export default function IctDashboard() {
           requestKey: null,
         });
 
-        setLogs(records.items.map(buildLogEntry));
+        // Dedup berdasarkan id (jaga-jaga bila ada realtime event yang
+        // datang lebih dulu sebelum fetch selesai).
+        const seen = new Set();
+        const items = [];
+        for (const r of records.items) {
+          if (seen.has(r.id)) continue;
+          seen.add(r.id);
+          items.push(buildLogEntry(r));
+        }
+        setLogs(items);
       } catch (error) {
         if (!error.isAbort) {
           console.error("Gagal mengambil data log awal:", error);
@@ -789,7 +798,16 @@ export default function IctDashboard() {
           requestKey: null,
         });
 
-        setLoginLogs(records.filter(isSuccessfulLogin).map(slimLogin));
+        // Dedup berdasarkan id juga di sini.
+        const seen = new Set();
+        const logins = [];
+        for (const r of records) {
+          if (!isSuccessfulLogin(r)) continue;
+          if (seen.has(r.id)) continue;
+          seen.add(r.id);
+          logins.push(slimLogin(r));
+        }
+        setLoginLogs(logins);
       } catch (error) {
         if (!error.isAbort) {
           console.error("Gagal mengambil data login:", error);
@@ -808,20 +826,32 @@ export default function IctDashboard() {
     pb.collection("system_log").subscribe(
       "*",
       function (e) {
-        if (e.action === "create") {
-          const newLog = buildLogEntry(e.record);
-          setLogs((prevLogs) => [newLog, ...prevLogs.slice(0, 14)]);
+        if (e.action !== "create") return;
 
-          if (isSuccessfulLogin(e.record)) {
-            setLoginLogs((prev) => [slimLogin(e.record), ...prev]);
-          }
+        const newLog = buildLogEntry(e.record);
+        setLogs((prevLogs) => {
+          // Kalau id sudah ada, jangan prepend lagi (mencegah duplicate key
+          // akibat double subscription / race dengan fetchInitialLogs).
+          if (prevLogs.some((l) => l.id === newLog.id)) return prevLogs;
+          return [newLog, ...prevLogs.slice(0, 14)];
+        });
+
+        if (isSuccessfulLogin(e.record)) {
+          const slim = slimLogin(e.record);
+          setLoginLogs((prev) => {
+            if (prev.some((l) => l.id === slim.id)) return prev;
+            return [slim, ...prev];
+          });
         }
       },
       { expand: "user_id" },
     );
 
     return () => {
-      pb.collection("system_logs").unsubscribe("*");
+      // FIX: nama koleksi harus sama dengan yang di-subscribe ("system_log",
+      // bukan "system_logs") supaya handler benar-benar dilepas dan tidak
+      // menumpuk saat React StrictMode / re-mount.
+      pb.collection("system_log").unsubscribe("*");
     };
   }, []);
 
@@ -835,8 +865,18 @@ export default function IctDashboard() {
   );
 
   const filteredLogs = useMemo(() => {
+    // Safety net: dedup berdasarkan id sebelum dirender, supaya Fragment
+    // key={log.id} dijamin unik walau ada race condition.
+    const seen = new Set();
+    const deduped = [];
+    for (const l of logs) {
+      if (seen.has(l.id)) continue;
+      seen.add(l.id);
+      deduped.push(l);
+    }
+
     const q = logSearch.trim().toLowerCase();
-    return logs.filter((l) => {
+    return deduped.filter((l) => {
       if (logLevel !== "semua" && l.level !== logLevel) return false;
       if (!q) return true;
       return (
