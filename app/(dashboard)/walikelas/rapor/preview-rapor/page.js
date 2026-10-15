@@ -25,7 +25,7 @@ import { createPortal } from "react-dom";
 import { getCurrentUser, pb } from "@/lib/pocketbase";
 
 // ✅ TTD kepala sekolah dari folder assets (static import Next.js)
-import ttdKepsekAsset from "@/assets/TTD BUNDA AHDA_STAMPEL.png";
+import ttdKepsekAsset from "@/assets/TTD BUNDA AHDA_STAMPEL_BOLD.png";
 
 /* ───────────── konfigurasi ───────────── */
 const SEKOLAH_DEFAULT = {
@@ -719,13 +719,14 @@ const RaporPreview = ({ siswa, rapor, innerRef }) => {
             <div className="ttd-col">
               <p>&nbsp;</p>
               <p>&nbsp;</p>
-              <p>&nbsp;</p>
               <p>Orang Tua,</p>
               <div className="ttd-space" />
+              <p>&nbsp;</p>
+              <p>&nbsp;</p>
               <p>……………………….</p>
             </div>
             <div className="ttd-col">
-              <p className="text-left top-[-10px]">
+              <p className="text-center top-[-10px]">
                 {rapor.kota || SEKOLAH_DEFAULT.kota},{" "}
                 {rapor.tanggal_rapor
                   ? formatTanggal(rapor.tanggal_rapor)
@@ -743,7 +744,7 @@ const RaporPreview = ({ siswa, rapor, innerRef }) => {
                   />
                 )}
               </div>
-              <p className="text-left">{rapor.wali_kelas || "-"}</p>
+              <p className="text-center">{rapor.wali_kelas || "-"}</p>
             </div>
           </div>
           <div className="ttd-kepsek">
@@ -1915,36 +1916,45 @@ const CSS = `
     /* ✅ Label "Wali Kelas," di bawah tanggal — sejajar kiri dengan tanggal */
     .ttd-jabatan {
       margin-top: 6px;
-      margin-left: -6px;
       margin-bottom: 2px;
       text-align: center;
     }
     /* Default: ruang TTD kecil (dipakai Orang Tua & Kepala Sekolah) */
+        /* Ruang TTD: gambar selalu rata tengah horizontal & vertikal */
     .ttd-space {
       height: 58px;
       display: flex;
       align-items: center;
       justify-content: center;
       position: relative;
+      overflow: visible;
     }
-    /* ✅ Ruang khusus TTD wali kelas — lebih tinggi untuk gambar besar */
     .ttd-space-wali {
       height: 90px;
     }
-    /* ✅ Foto TTD wali kelas — diperbesar */
+    /* Foto TTD: tanpa margin manual, dipusatkan oleh flex parent */
     .ttd-img {
-      max-height: 110px;
+      display: block;
+      flex: none;
+      margin: 0;
+      max-height: 320px;
       max-width: 240px;
       object-fit: contain;
-      margin-bottom: -10px;
       opacity: 1 !important;
       -webkit-text-fill-color: initial !important;
       mix-blend-mode: normal;
     }
+    .ttd-img-kepsek {
+      max-height: 230px;
+      max-width: 290px;
+      margin: 0;
+    }
     /* ✅ Foto TTD kepala sekolah — ukuran besar */
     .ttd-img-kepsek {
-      max-height: 150px;
+      max-height: 230px;
       max-width: 290px;
+      margin-top: -50px;
+      margin-left: -80px;
     }
     .ttd-kepsek {
       margin-top: 8px;
@@ -2015,15 +2025,15 @@ const CSS = `
       .rapor-table th,
       .rapor-table td {
         background-color: transparent !important;
-      }
-      /* ✅ Pastikan kedua foto TTD muncul & ukurannya terkontrol saat print */
       .ttd-img {
         max-height: 110px !important;
         max-width: 240px !important;
+        margin: 0 !important;
       }
       .ttd-img-kepsek {
         max-height: 150px !important;
         max-width: 290px !important;
+        margin: 0 !important;
       }
     }
   `;
