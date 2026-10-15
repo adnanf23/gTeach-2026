@@ -50,7 +50,6 @@ const icons = {
 };
 
 // ── Struktur navigasi admin: array of groups ──
-// href anak = /admin/<group-key>/<child-key>
 const NAV_GROUPS = [
   {
     key: "overview",
@@ -235,7 +234,6 @@ const SectionLabel = ({ children }) => (
   </p>
 );
 
-// ── Konten sidebar: dipakai bersama desktop & drawer mobile ──
 const SidebarContent = ({
   user,
   navGroups,
@@ -261,7 +259,6 @@ const SidebarContent = ({
 
   return (
     <>
-      {/* Logo */}
       <div className="flex items-center gap-2.5 px-5 pt-5 pb-2">
         <div className="min-w-0">
           <h1 className="text-[16px] font-bold text-gray-800 leading-tight truncate">
@@ -273,12 +270,10 @@ const SidebarContent = ({
         </div>
       </div>
 
-      {/* Menu */}
       <nav className="px-3 flex-1">
         <SectionLabel>Menu</SectionLabel>
         <div className="flex flex-col gap-1">
           {navGroups.map((group) => {
-            // ── Item standalone (Overview / Catatan Kasus) ──
             if (group.standalone) {
               const isActive = activeKey === group.key && !isProfileActive;
               return (
@@ -295,7 +290,6 @@ const SidebarContent = ({
               );
             }
 
-            // ── Group dengan children (dropdown) ──
             const isOpen = !!openGroups[group.key];
             const hasActiveChild = group.children.some(
               (c) => c.key === activeKey && !isProfileActive,
@@ -328,7 +322,6 @@ const SidebarContent = ({
                   </span>
                 </button>
 
-                {/* Children (collapsible) */}
                 <div
                   className={`overflow-hidden transition-all duration-300 ease-out ${
                     isOpen ? "max-h-96 opacity-100" : "max-h-0 opacity-0"
@@ -385,7 +378,6 @@ const SidebarContent = ({
         </div>
       </nav>
 
-      {/* Kartu bawah */}
       <div className="p-3">
         <div className="rounded-2xl bg-[#1c2033] text-white p-4">
           <div className="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center">
@@ -419,7 +411,6 @@ export default function AdminLayout({ children }) {
   const [user, setUser] = useState(null);
   const [checked, setChecked] = useState(false);
 
-  // Gesture swipe untuk drawer mobile
   const touchStartX = useRef(null);
   const touchStartY = useRef(null);
 
@@ -445,12 +436,10 @@ export default function AdminLayout({ children }) {
     touchStartY.current = null;
   };
 
-  // Tutup drawer setiap pindah halaman
   useEffect(() => {
     setNavOpen(false);
   }, [pathname]);
 
-  // Lock scroll body saat drawer mobile terbuka
   useEffect(() => {
     if (typeof document === "undefined") return;
     if (navOpen) {
@@ -475,7 +464,6 @@ export default function AdminLayout({ children }) {
     try {
       const currentEndpoint =
         typeof window !== "undefined" ? window.location.pathname : "-";
-
       const targetUser = user || pb.authStore.model;
 
       createSystemLog({
@@ -506,16 +494,13 @@ export default function AdminLayout({ children }) {
     setNavOpen(false);
   };
 
-  // ── Gabungkan group sesuai role ──
   const navGroups =
     user?.role === "ict" ? [...NAV_GROUPS, ICT_GROUP] : NAV_GROUPS;
 
-  // ── Flatten semua item untuk lookup ──
   const allNavItems = navGroups.flatMap((g) =>
     g.standalone ? [g] : g.children,
   );
 
-  // ── Cari item aktif ──
   const activeItem =
     allNavItems.find((n) => pathname === n.href) ||
     allNavItems.find(
@@ -527,7 +512,6 @@ export default function AdminLayout({ children }) {
 
   const activeKey = activeItem?.key ?? "overview";
 
-  // ── Cari group yang berisi item aktif (untuk auto-expand) ──
   const activeGroupKey = navGroups.find((g) =>
     g.standalone
       ? g.key === activeKey
@@ -570,7 +554,6 @@ export default function AdminLayout({ children }) {
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
     >
-      {/* ── SIDEBAR DESKTOP ── */}
       <aside className="hidden lg:flex relative flex-col w-[240px] min-w-[240px] bg-white overflow-y-auto no-scrollbar my-4 ml-4 rounded-3xl shadow-[0_8px_30px_rgba(99,120,200,0.10)]">
         <SidebarContent
           user={user}
@@ -584,7 +567,6 @@ export default function AdminLayout({ children }) {
         />
       </aside>
 
-      {/* ── DRAWER MOBILE ── */}
       <div
         className={`lg:hidden fixed inset-0 z-50 ${
           navOpen ? "pointer-events-auto" : "pointer-events-none"
@@ -617,9 +599,7 @@ export default function AdminLayout({ children }) {
         </aside>
       </div>
 
-      {/* ── MAIN CONTENT ── */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        {/* Topbar DESKTOP */}
         <header className="no-print hidden lg:flex items-center gap-4 px-6 pt-5 pb-3 flex-shrink-0">
           <div className="min-w-0">
             <h2 className="text-[22px] font-bold text-gray-900 leading-tight truncate">
@@ -656,7 +636,6 @@ export default function AdminLayout({ children }) {
           </div>
         </header>
 
-        {/* Topbar MOBILE */}
         <header className="no-print lg:hidden sticky top-0 z-30 bg-[#eef1fc] flex-shrink-0 pt-[env(safe-area-inset-top)]">
           <div className="flex items-center gap-3 px-4 pt-3 pb-3">
             <button
@@ -686,7 +665,6 @@ export default function AdminLayout({ children }) {
           </div>
         </header>
 
-        {/* Page content */}
         <div className="flex-1 no-scrollbar overflow-y-auto p-4 sm:p-5 lg:px-6 lg:pt-2 lg:pb-6">
           {children}
         </div>

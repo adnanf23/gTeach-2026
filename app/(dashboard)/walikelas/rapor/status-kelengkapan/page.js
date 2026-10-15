@@ -37,6 +37,12 @@ const TONE = {
     pill: "bg-slate-100 text-slate-600 ring-slate-500/20",
     label: "Tidak ada data",
   },
+  almost: {
+    bar: "bg-amber-500",
+    dot: "bg-amber-500",
+    pill: "bg-amber-50 text-amber-700 ring-amber-600/20",
+    label: "Hampir selesai",
+  },
 };
 
 /* ------------------------------------------------------------------ */
@@ -53,8 +59,18 @@ const hasText = (v) => typeof v === "string" && v.trim().length > 0;
 const terisi = (v) =>
   v !== null && v !== undefined && v !== "" && Number(v) > 0;
 
-const stateOf = (done, total) =>
-  total === 0 ? "na" : done >= total ? "ok" : done === 0 ? "empty" : "partial";
+const stateOf = (done, total) => {
+  if (total === 0) return "na";
+  if (done >= total) return "ok";
+
+  const percent = (done / total) * 100;
+
+  if (percent > 90) return "almost";
+  if (done === 0) return "empty";
+
+  return "partial";
+};
+
 const pct = (done, total) => (total ? Math.floor((done / total) * 100) : 0);
 
 const ujianLabel = (u) =>
@@ -257,9 +273,15 @@ function buildReport({ base, kelasList, ujian, nilaiUjian }) {
           }
         });
 
-        const state = noPlot
-          ? "empty"
-          : stateOf(fDone + sDone + uDone, fExpected + sExpected + uExpected);
+        const totalDone = fDone + sDone + uDone;
+        const totalExpected = fExpected + sExpected + uExpected;
+
+        const state =
+          totalDone > 0
+            ? stateOf(totalDone, totalExpected)
+            : noPlot
+              ? "empty"
+              : stateOf(totalDone, totalExpected);
 
         return {
           id: mapelId,
@@ -399,6 +421,7 @@ const STROKE = {
   partial: "stroke-blue-500",
   empty: "stroke-rose-500",
   na: "stroke-slate-300",
+  almost: "stroke-amber-500",
 };
 
 const SOFT = {
@@ -406,6 +429,7 @@ const SOFT = {
   partial: "bg-blue-50 text-blue-600",
   empty: "bg-rose-50 text-rose-600",
   na: "bg-slate-100 text-slate-400",
+  almost: "bg-amber-50 text-amber-600",
 };
 
 function Bar({ percent, state }) {
