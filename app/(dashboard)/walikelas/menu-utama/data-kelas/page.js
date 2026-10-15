@@ -7,6 +7,16 @@ import { pb, isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
 // Role yang boleh mengakses halaman ini
 const ALLOWED_ROLES = ["guru walikelas", "guru pendamping"];
 
+// Warna header export (samakan dengan CLR di halaman export nilai mentah kalau nilainya berbeda)
+const CLR = {
+  GREEN: "FFC6E0B4",
+  GREEN_ALT: "FFA9D08E",
+  ORANGE: "FFF8CBAD",
+  BLUE: "FFBDD7EE",
+  YELLOW_LIGHT: "FFFFF2CC",
+  GRAY_LIGHT: "FFEEEEEE",
+};
+
 function firstOf(val) {
   return Array.isArray(val) ? val[0] : val;
 }
@@ -14,6 +24,23 @@ function firstOf(val) {
 function toArray(val) {
   if (Array.isArray(val)) return val;
   return val ? [val] : [];
+}
+
+// Nama sheet Excel: maks 31 karakter, tanpa karakter terlarang, harus unik
+function safeSheetName(name, usedNames) {
+  let base =
+    String(name || "Sheet")
+      .replace(/[\\/?*[\]:]/g, "-")
+      .trim()
+      .slice(0, 31) || "Sheet";
+  let finalName = base;
+  let i = 2;
+  while (usedNames.has(finalName.toLowerCase())) {
+    const suffix = ` (${i++})`;
+    finalName = base.slice(0, 31 - suffix.length) + suffix;
+  }
+  usedNames.add(finalName.toLowerCase());
+  return finalName;
 }
 
 export default function KelasSayaPage() {
@@ -35,6 +62,10 @@ export default function KelasSayaPage() {
 
   // State untuk toggle sedang loading per waliId
   const [togglingWaliId, setTogglingWaliId] = useState(null);
+
+  // State export
+  const [exporting, setExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState("");
 
   // Sub-menu Utama: 'overview', 'siswa', atau 'mapel'
   const [activeTab, setActiveTab] = useState("overview");
@@ -140,7 +171,6 @@ export default function KelasSayaPage() {
                 .collection("wali_murid")
                 .getFullList({
                   filter: chunk.map((id) => `siswa_id ~ "${id}"`).join(" || "),
-                  // ✅ Tambah field verified
                   fields: "id,username,siswa_id,verified",
                   requestKey: null,
                 })
@@ -277,6 +307,242 @@ export default function KelasSayaPage() {
     setSearchTerm("");
   };
 
+  // Filter siswa berdasarkan pencarian (dipakai tabel & export)
+  const filterSiswa = (siswaList) => {
+    if (!searchTerm.trim()) return siswaList;
+    const q = searchTerm.toLowerCase();
+    return siswaList.filter((s) => {
+      const waliUsernames = (waliMuridBySiswa[s.id] || [])
+        .map((w) => w.username || "")
+        .join(" ");
+      return (
+        s.nama_siswa?.toLowerCase().includes(q) ||
+        s.nis?.toLowerCase().includes(q) ||
+        s.nisn?.toLowerCase().includes(q) ||
+        waliUsernames.toLowerCase().includes(q)
+      );
+    });
+  };
+
+  // ─── Export data siswa ke Excel (1 sheet per kelas, mengikuti filter pencarian) ───
+  async function handleExportSiswa() {
+    if (kelasList.length === 0) return;
+
+    try {
+      setExporting(true);
+      setExportProgress("Menyiapkan file...");
+
+      const ExcelJS = (await import("exceljs")).default;
+      const { saveAs } = await import("file-saver");
+
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = "Sistem Penilaian";
+      workbook.created = new Date();
+
+      const usedNames = new Set();
+      const border = {
+        top: { style: "thin", color: { argb: "FF000000" } },
+        left: { style: "thin", color: { argb: "FF000000" } },
+        bottom: { style: "thin", color: { argb: "FF000000" } },
+        right: { style: "thin", color: { argb: "FF000000" } },
+      };
+
+      function styleHead(cell, argb) {
+        cell.font = { bold: true, size: 10 };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb } };
+        cell.alignment = {
+          horizontal: "center",
+          vertical: "middle",
+          wrapText: true,
+        };
+        cell.border = border;
+      }
+
+      function fillCell(cell, argb) {
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb } };
+      }
+
+      const collator = new Intl.Collator("id", { numeric: true });
+
+      // Layout kolom:
+      // 1 No | 2 NIS | 3 NISN | 4 Nama Siswa | 5 L/P | 6 Username Wali | 7 Status
+      const FIXED = 5;
+      const LAST_COL = 7;
+
+      for (let ki = 0; ki < kelasList.length; ki++) {
+        const kelas = kelasList[ki];
+        const namaKelas = (kelas.nama_kelas || `Kelas ${ki + 1}`).trim();
+
+        setExportProgress(
+          `Menyusun sheet ${ki + 1}/${kelasList.length}: ${namaKelas}`,
+        );
+        await new Promise((r) => setTimeout(r, 0));
+
+        const siswaSorted = [...filterSiswa(siswaByKelas[kelas.id] || [])].sort(
+          (a, b) => collator.compare(a.nama_siswa || "", b.nama_siswa || ""),
+        );
+
+        const ta = kelas.expand?.tahun_ajaran_id;
+        const taText = ta ? `${ta.tahun} · Sem. ${ta.semester}` : "—";
+        const namaWali = kelas.expand?.walikelas_id?.nama_lengkap || "—";
+        const namaPendamping = kelas.expand?.pendamping_id?.nama_lengkap || "—";
+
+        const sheet = workbook.addWorksheet(
+          safeSheetName(namaKelas, usedNames),
+        );
+
+        // =========================
+        // HEADER 1: Info Kelas (row 1, digabung full)
+        // =========================
+        const infoRow = sheet.getRow(1);
+        sheet.mergeCells(1, 1, 1, LAST_COL);
+        infoRow.getCell(1).value =
+          `Kelas: ${namaKelas}   |   Tahun Ajaran: ${taText}   |   Wali Kelas: ${namaWali}   |   Guru Pendamping: ${namaPendamping}`;
+        for (let c = 1; c <= LAST_COL; c++) {
+          const cell = infoRow.getCell(c);
+          cell.font = { bold: true, size: 10 };
+          fillCell(cell, CLR.YELLOW_LIGHT);
+          cell.alignment = {
+            horizontal: "left",
+            vertical: "middle",
+            wrapText: true,
+          };
+          cell.border = border;
+        }
+        infoRow.height = 30;
+
+        // =========================
+        // HEADER 2: Kolom (row 2-3)
+        // =========================
+        const h1 = sheet.getRow(2);
+        const h2 = sheet.getRow(3);
+
+        // Kolom tetap (hijau), header digabung 2 baris
+        ["No", "NIS", "NISN", "Nama Siswa", "L/P"].forEach((label, c) => {
+          sheet.mergeCells(2, c + 1, 3, c + 1);
+          h1.getCell(c + 1).value = label;
+          styleHead(h1.getCell(c + 1), CLR.GREEN);
+          styleHead(h2.getCell(c + 1), CLR.GREEN);
+        });
+
+        // Grup akun wali murid (oranye)
+        sheet.mergeCells(2, FIXED + 1, 2, LAST_COL);
+        h1.getCell(FIXED + 1).value = "AKUN WALI MURID";
+        styleHead(h1.getCell(FIXED + 1), CLR.ORANGE);
+        styleHead(h1.getCell(LAST_COL), CLR.ORANGE);
+        h2.getCell(FIXED + 1).value = "Username";
+        h2.getCell(FIXED + 2).value = "Status";
+        styleHead(h2.getCell(FIXED + 1), CLR.ORANGE);
+        styleHead(h2.getCell(FIXED + 2), CLR.ORANGE);
+
+        h1.height = 22;
+        h2.height = 26;
+
+        // =========================
+        // DATA mulai row 4
+        // =========================
+        let r = 4;
+
+        if (siswaSorted.length === 0) {
+          sheet.mergeCells(r, 1, r, LAST_COL);
+          const cell = sheet.getRow(r).getCell(1);
+          cell.value = searchTerm.trim()
+            ? "Tidak ada siswa yang cocok dengan pencarian."
+            : "Belum ada siswa di kelas ini.";
+          cell.font = { italic: true, color: { argb: "FF888888" } };
+          cell.alignment = { horizontal: "center", vertical: "middle" };
+          cell.border = border;
+        } else {
+          siswaSorted.forEach((s, idx) => {
+            const waliList = waliMuridBySiswa[s.id] || [];
+            const span = Math.max(waliList.length, 1);
+            const startRow = r;
+
+            for (let i = 0; i < span; i++) {
+              const w = waliList[i];
+              const row = sheet.getRow(r);
+
+              if (i === 0) {
+                row.getCell(1).value = idx + 1;
+                row.getCell(2).value = s.nis ? String(s.nis) : "";
+                row.getCell(3).value = s.nisn ? String(s.nisn) : "";
+                row.getCell(4).value = s.nama_siswa || "";
+                row.getCell(5).value = s.jenis_kelamin || "";
+              }
+
+              let statusText = "—";
+              let statusColor = CLR.GRAY_LIGHT;
+              if (w) {
+                statusText = w.verified ? "Verified" : "Unverified";
+                statusColor = w.verified ? CLR.GREEN : CLR.YELLOW_LIGHT;
+              }
+
+              row.getCell(FIXED + 1).value = w
+                ? w.username || "(tanpa username)"
+                : "Belum ada akun";
+              row.getCell(FIXED + 2).value = statusText;
+
+              for (let c = 1; c <= LAST_COL; c++) {
+                const cell = row.getCell(c);
+                cell.border = border;
+                cell.alignment = {
+                  horizontal: c === 4 || c === FIXED + 1 ? "left" : "center",
+                  vertical: "middle",
+                };
+              }
+              fillCell(row.getCell(FIXED + 2), statusColor);
+              if (!w) {
+                row.getCell(FIXED + 1).font = {
+                  italic: true,
+                  color: { argb: "FF888888" },
+                };
+              }
+              r++;
+            }
+
+            // Siswa dengan >1 akun wali: gabungkan kolom data siswa secara vertikal
+            if (span > 1) {
+              for (let c = 1; c <= FIXED; c++) {
+                sheet.mergeCells(startRow, c, r - 1, c);
+              }
+            }
+          });
+        }
+
+        sheet.getColumn(1).width = 6;
+        sheet.getColumn(2).width = 14;
+        sheet.getColumn(3).width = 16;
+        sheet.getColumn(4).width = 32;
+        sheet.getColumn(5).width = 7;
+        sheet.getColumn(6).width = 24;
+        sheet.getColumn(7).width = 14;
+
+        // Freeze sampai baris header selesai (row 3)
+        sheet.views = [{ state: "frozen", xSplit: 4, ySplit: 3 }];
+      }
+
+      setExportProgress("Membuat file...");
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+
+      const fileLabel =
+        kelasList.length === 1
+          ? kelasList[0].nama_kelas || "Kelas"
+          : "Kelas_Saya";
+      saveAs(blob, `Data_Siswa_${fileLabel}.xlsx`.replace(/\s+/g, "_"));
+    } catch (err) {
+      console.error("Gagal export data siswa:", err);
+      alert(
+        "Gagal export. Pastikan package 'exceljs' dan 'file-saver' sudah terinstall.",
+      );
+    } finally {
+      setExporting(false);
+      setExportProgress("");
+    }
+  }
+
   if (!authChecked) {
     return (
       <div className="flex min-h-[60vh] items-center justify-center text-slate-500">
@@ -384,34 +650,89 @@ export default function KelasSayaPage() {
         </div>
 
         {activeTab !== "overview" && kelasList.length > 0 && (
-          <div className="relative w-full sm:w-64 z-10">
-            <input
-              type="text"
-              placeholder={
-                activeTab === "siswa"
-                  ? "Cari nama siswa / NIS..."
-                  : "Cari kode / nama mata pelajaran..."
-              }
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2 pl-9 text-xs outline-none focus:border-blue-500 transition shadow-sm"
-            />
-            <svg
-              className="absolute left-3 top-3 h-3.5 w-3.5 text-slate-400"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center relative z-10">
+            <div className="relative w-full sm:w-64">
+              <input
+                type="text"
+                placeholder={
+                  activeTab === "siswa"
+                    ? "Cari nama siswa / NIS..."
+                    : "Cari kode / nama mata pelajaran..."
+                }
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2 pl-9 text-xs outline-none focus:border-blue-500 transition shadow-sm"
               />
-            </svg>
+              <svg
+                className="absolute left-3 top-3 h-3.5 w-3.5 text-slate-400"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                />
+              </svg>
+            </div>
+
+            {activeTab === "siswa" && (
+              <button
+                type="button"
+                onClick={handleExportSiswa}
+                disabled={exporting || loading}
+                title="Export data siswa ke Excel (mengikuti pencarian yang aktif)"
+                className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-wait disabled:opacity-60"
+              >
+                {exporting ? (
+                  <svg
+                    className="h-3.5 w-3.5 animate-spin"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+                    />
+                  </svg>
+                ) : (
+                  <svg
+                    className="h-3.5 w-3.5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V4"
+                    />
+                  </svg>
+                )}
+                <span>{exporting ? "Mengekspor..." : "Export Excel"}</span>
+              </button>
+            )}
           </div>
         )}
       </div>
+
+      {exporting && exportProgress && (
+        <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs text-emerald-700">
+          {exportProgress}
+        </div>
+      )}
 
       {error && (
         <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
@@ -432,19 +753,7 @@ export default function KelasSayaPage() {
             const siswaList = siswaByKelas[kelas.id] || [];
             const mapelList = mapelByKelas[kelas.id] || [];
 
-            const filteredSiswa = siswaList.filter((s) => {
-              if (!searchTerm.trim()) return true;
-              const q = searchTerm.toLowerCase();
-              const waliUsernames = (waliMuridBySiswa[s.id] || [])
-                .map((w) => w.username || "")
-                .join(" ");
-              return (
-                s.nama_siswa?.toLowerCase().includes(q) ||
-                s.nis?.toLowerCase().includes(q) ||
-                s.nisn?.toLowerCase().includes(q) ||
-                waliUsernames.toLowerCase().includes(q)
-              );
-            });
+            const filteredSiswa = filterSiswa(siswaList);
 
             const filteredMapel = mapelList.filter((m) => {
               if (!searchTerm.trim()) return true;
