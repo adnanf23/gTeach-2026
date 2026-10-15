@@ -723,7 +723,7 @@ export default function OverviewWaliMuridPage() {
             {hariIndo()}
           </p>
           <h1 className="mt-1 text-2xl font-bold text-slate-900">
-            {getGreetingByTime()}, Ayah atau Mama! 👋
+            {getGreetingByTime()}, Ayah Mama! 👋
           </h1>
           <p className="mt-1 text-sm text-slate-500">
             Pantau perkembangan & raport anak Anda di sekolah
