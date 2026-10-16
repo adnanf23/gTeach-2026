@@ -79,13 +79,28 @@ const LoginWaliMuridPage = () => {
 
   async function handleLogin(e) {
     e.preventDefault();
+
+    // ✅ Trim spasi di awal & akhir sebelum dikirim
+    const cleanUsername = username.trim();
+    const cleanPassword = password.trim();
+
+    // Sinkronkan state agar yang tampil di input juga sudah bersih
+    if (cleanUsername !== username) setUsername(cleanUsername);
+    if (cleanPassword !== password) setPassword(cleanPassword);
+
+    // Validasi tambahan: kalau kosong setelah di-trim
+    if (!cleanUsername || !cleanPassword) {
+      setErrorMsg("Username dan password tidak boleh kosong.");
+      return;
+    }
+
     setIsLoading(true);
     setErrorMsg("");
 
     try {
       const authData = await pb
         .collection("wali_murid")
-        .authWithPassword(username, password);
+        .authWithPassword(cleanUsername, cleanPassword);
       const userRecord = authData.record;
 
       // Validasi status aktif (kalau field ada)
@@ -98,7 +113,7 @@ const LoginWaliMuridPage = () => {
       // ✅ Validasi verified — kalau false, tolak akses
       if (!userRecord.verified) {
         pb.authStore.clear();
-        setBlockedUsername(userRecord.username || username);
+        setBlockedUsername(userRecord.username || cleanUsername);
         setShowBlockedModal(true);
         return;
       }
@@ -214,6 +229,7 @@ const LoginWaliMuridPage = () => {
                   required
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
+                  onBlur={(e) => setUsername(e.target.value.trim())}
                   disabled={isLoading}
                   className={inputClass}
                 />
@@ -235,6 +251,7 @@ const LoginWaliMuridPage = () => {
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
+                    onBlur={(e) => setPassword(e.target.value.trim())}
                     disabled={isLoading}
                     className={`${inputClass} pr-11`}
                   />
