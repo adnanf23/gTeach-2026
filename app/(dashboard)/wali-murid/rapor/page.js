@@ -2,9 +2,9 @@
 
 // app/wali-murid/rapor/page.js
 // Preview rapor (tabel) + download PDF.
-// Perhitungan nilai akhir per mapel: rata-rata berbobot dari Formatif, Sumatif,
-// UTS (AHB), UAS (ASAS), dan Kehadiran — bobot dari collection
-// `presentase_penilaian`. Sumber "periode" adalah pengaturan_ujian yang
+// Perhitungan nilai akhir per mapel DISAMAKAN dengan halaman walikelas & leger:
+// rata-rata sederhana dari Formatif, Sumatif, UTS (AHB), UAS (ASAS) — per mapel.
+// Kehadiran TIDAK ikut dihitung. Sumber "periode" adalah pengaturan_ujian yang
 // akses_rapor = true. Header (nama sekolah, alamat, kepala sekolah, tanggal,
 // tahun ajaran) dari pengaturan_rapor bila tersedia, fallback ke SEKOLAH_DEFAULT.
 //
@@ -35,14 +35,6 @@ const TEXT_RENDAH = "Ananda membutuhkan bimbingan dalam";
 
 const JENIS_UTS = "ahb";
 const JENIS_UAS = "asas";
-
-const NAMA_BOBOT = {
-  formatif: "Formatif",
-  sumatif: "Sumatif",
-  uts: "Ujian Tengah Semester",
-  uas: "Ujian Akhir Semester",
-  kehadiran: "Kehadiran",
-};
 
 const KATEGORI_RAPOR = ["umum", "koding"];
 
@@ -254,14 +246,17 @@ function useBottomInset(active) {
   return inset;
 }
 
-/* ───────────── nilai akhir per mapel untuk SATU siswa ───────────── */
+/* ───────────── nilai akhir per mapel untuk SATU siswa ─────────────
+   Rumus disamakan dengan halaman walikelas (dan leger):
+   rata-rata sederhana dari Formatif, Sumatif, AHB, ASAS — per mapel.
+   Kehadiran TIDAK ikut dihitung. */
 async function hitungNilaiAkhirSiswa(siswa, kelas) {
   const kelasId = kelas.id;
   const tingkat = String(kelas.tingkat);
   const sid = siswa.id;
 
-  const [mapelKhusus, mapelTingkat, plotingData, presentaseData, ujianData] =
-    await Promise.all([
+  const [mapelKhusus, mapelTingkat, plotingData, ujianData] = await Promise.all(
+    [
       pb.collection("mata_pelajaran").getFullList({
         filter: `spesifik_kelas_id ~ "${kelasId}"`,
         requestKey: null,
@@ -274,12 +269,12 @@ async function hitungNilaiAkhirSiswa(siswa, kelas) {
         filter: `kelas_id ~ "${kelasId}"`,
         requestKey: null,
       }),
-      pb.collection("presentase_penilaian").getFullList({ requestKey: null }),
       pb.collection("pengaturan_ujian").getFullList({
         filter: `status_akses = "buka" && (target_kelas_id ~ "${kelasId}" || target_tingkat ~ "${tingkat}")`,
         requestKey: null,
       }),
-    ]);
+    ],
+  );
 
   const combined = [...mapelKhusus, ...mapelTingkat];
   const uniqueMapel = Array.from(
@@ -308,29 +303,6 @@ async function hitungNilaiAkhirSiswa(siswa, kelas) {
   });
   const mapelList = Array.from(mapelByName.values());
 
-  const getBobot = (nama) => {
-    const found = presentaseData.find(
-      (p) =>
-        (p.nama_presentase || "").trim().toLowerCase() === nama.toLowerCase(),
-    );
-    return found ? Number(found.angka_presentase) || 0 : 0;
-  };
-  const bobotFormatif = getBobot(NAMA_BOBOT.formatif);
-  const bobotSumatif = getBobot(NAMA_BOBOT.sumatif);
-  const bobotUts = getBobot(NAMA_BOBOT.uts);
-  const bobotUas = getBobot(NAMA_BOBOT.uas);
-  const bobotKehadiran = getBobot(NAMA_BOBOT.kehadiran);
-
-  const absensiData = await pb.collection("absensi").getFullList({
-    filter: `siswa_id = "${sid}"`,
-    requestKey: null,
-  });
-  let kehadiran = null;
-  if (absensiData.length > 0) {
-    const hadir = absensiData.filter((a) => a.status === "hadir").length;
-    kehadiran = (hadir / absensiData.length) * 100;
-  }
-
   const utsIds = ujianData
     .filter((u) => u.jenis_ujian === JENIS_UTS)
     .map((u) => u.id);
@@ -338,6 +310,7 @@ async function hitungNilaiAkhirSiswa(siswa, kelas) {
     .filter((u) => u.jenis_ujian === JENIS_UAS)
     .map((u) => u.id);
 
+  // ✅ nilai_ujian di-index per [mapel_id][pengaturan_ujian_id][siswa_id]
   let nilaiUjianData = [];
   if (ujianData.length > 0) {
     nilaiUjianData = await pb.collection("nilai_ujian").getFullList({
@@ -349,13 +322,17 @@ async function hitungNilaiAkhirSiswa(siswa, kelas) {
   }
   const ujianMap = {};
   nilaiUjianData.forEach((n) => {
-    if (n.siswa_id !== sid) return;
-    ujianMap[n.pengaturan_ujian_id] = n.nilai;
+    const mId = Array.isArray(n.mapel_id) ? n.mapel_id[0] : n.mapel_id;
+    if (!mId) return;
+    if (!ujianMap[mId]) ujianMap[mId] = {};
+    if (!ujianMap[mId][n.pengaturan_ujian_id])
+      ujianMap[mId][n.pengaturan_ujian_id] = {};
+    ujianMap[mId][n.pengaturan_ujian_id][n.siswa_id] = n.nilai;
   });
-  const avgUjian = (ids) =>
+  const avgUjian = (ids, mapelId) =>
     average(
       ids
-        .map((uid) => ujianMap[uid])
+        .map((uid) => ujianMap[mapelId]?.[uid]?.[sid])
         .filter((v) => typeof v === "number" && !isNaN(v) && v !== -1),
     );
 
@@ -415,37 +392,20 @@ async function hitungNilaiAkhirSiswa(siswa, kelas) {
     }
   });
 
+  // ✅ Rata-rata sederhana, tanpa bobot, tanpa kehadiran
   const nilaiAkhir = {};
   mapelList.forEach((m) => {
-    const others = [
-      { value: average(formatifValues[m.id] || []), bobot: bobotFormatif },
-      { value: average(sumatifValues[m.id] || []), bobot: bobotSumatif },
-      { value: avgUjian(utsIds), bobot: bobotUts },
-      { value: avgUjian(uasIds), bobot: bobotUas },
-    ].filter(
-      (k) =>
-        k.value !== null &&
-        k.value !== undefined &&
-        !isNaN(k.value) &&
-        k.bobot > 0,
-    );
+    const komponen = [
+      average(formatifValues[m.id] || []),
+      average(sumatifValues[m.id] || []),
+      avgUjian(utsIds, m.id),
+      avgUjian(uasIds, m.id),
+    ].filter((v) => v !== null && v !== undefined && !isNaN(v) && v !== -1);
 
-    const komponen = [...others];
-    if (
-      others.length > 0 &&
-      kehadiran !== null &&
-      kehadiran !== undefined &&
-      !isNaN(kehadiran) &&
-      bobotKehadiran > 0
-    ) {
-      komponen.push({ value: kehadiran, bobot: bobotKehadiran });
-    }
-
-    const totalBobot = komponen.reduce((a, k) => a + k.bobot, 0);
     nilaiAkhir[m.id] =
-      totalBobot === 0
+      komponen.length === 0
         ? null
-        : komponen.reduce((a, k) => a + k.value * k.bobot, 0) / totalBobot;
+        : komponen.reduce((a, b) => a + b, 0) / komponen.length;
   });
 
   return { mapelList, nilaiAkhir };
