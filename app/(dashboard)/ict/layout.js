@@ -514,7 +514,10 @@ export default function AdminLayout({ children }) {
   }
 
   return (
-    <div className="flex h-dvh bg-slate-50 text-[13px] font-sans overflow-hidden text-black">
+    <div
+      translate="no"
+      className="flex h-dvh bg-slate-50 text-[13px] font-sans overflow-hidden text-black"
+    >
       {/* Overlay mobile */}
       {sidebarOpen && (
         <div

@@ -345,6 +345,7 @@ export default function WaliMuridLayout({ children }) {
       className="flex h-screen min-h-[600px] bg-gray-50 text-[13px] font-sans overflow-hidden text-black"
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
+      translate="no"
     >
       {/* ── SIDEBAR DESKTOP (kartu melayang) ── */}
       <aside className="hidden lg:flex relative flex-col w-[240px] min-w-[240px] bg-white overflow-y-auto no-scrollbar my-4 ml-4 rounded-3xl shadow-[0_8px_30px_rgba(99,120,200,0.10)]">
