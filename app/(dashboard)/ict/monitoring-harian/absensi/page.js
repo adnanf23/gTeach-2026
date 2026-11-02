@@ -1,7 +1,13 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { pb, getCurrentUser } from "@/lib/pocketbase";
+import { getCurrentUser } from "@/lib/pocketbase";
+import {
+  getBaseData,
+  getAbsensiRange,
+  getAbsensiTanggal,
+  getAbsensiExport,
+} from "@/actions/ict-monitoring-absensi.action";
 
 // ------------------------------------------------------------------
 // Helper tanggal & sistem absensi
@@ -41,19 +47,6 @@ function isHoliday(date, hariLiburList) {
     if (h.hari && h.hari === dayKey) return true;
   }
   return false;
-}
-function countEffectiveDays(startStr, endStr, hariLiburList) {
-  if (!startStr || !endStr) return 0;
-  const start = parseISODate(startStr);
-  const end = parseISODate(endStr);
-  if (!start || !end || end < start) return 0;
-  let count = 0;
-  const cur = new Date(start);
-  while (cur <= end) {
-    if (!isWeekend(cur) && !isHoliday(cur, hariLiburList)) count++;
-    cur.setDate(cur.getDate() + 1);
-  }
-  return count;
 }
 
 // ------------------------------------------------------------------
@@ -145,12 +138,9 @@ async function exportAbsensiWorkbook({
 }) {
   const XLSX = await import("xlsx-js-style");
 
-  const kelasFilter = kelasId !== "semua" ? ` && kelas_id = "${kelasId}"` : "";
-  const filter = `tanggal >= "${startDate} 00:00:00" && tanggal <= "${endDate} 23:59:59"${kelasFilter}`;
-
-  const records = await pb
-    .collection("absensi")
-    .getFullList({ filter, requestKey: null });
+  const res = await getAbsensiExport({ kelasId, startDate, endDate });
+  if (res.error) throw new Error(res.error);
+  const records = res.records;
 
   const targetKelas =
     kelasId === "semua" ? kelasList : kelasList.filter((k) => k.id === kelasId);
@@ -185,7 +175,7 @@ async function exportAbsensiWorkbook({
   let noUrut = 1;
 
   for (const k of targetKelas) {
-    const siswaKelas = (siswaPerKelas.get(k.id) || [])
+    const siswaKelas = (siswaPerKelas[k.id] || [])
       .slice()
       .sort((a, b) => a.nama_siswa.localeCompare(b.nama_siswa));
 
@@ -590,7 +580,7 @@ function StatusListCard({
                     {k.nama_kelas}
                   </p>
                   <p className="text-xs text-slate-400">
-                    {siswaPerKelas.get(k.id)?.length || 0} siswa
+                    {siswaPerKelas[k.id]?.length || 0} siswa
                   </p>
                 </div>
               </div>
@@ -919,11 +909,14 @@ function AbsensiContent({
   selectedDate,
   kelasList,
   siswaPerKelas,
+  siswaCountPerKelas,
   totalSiswa,
   hariLiburList,
+  hariEfektif30,
 }) {
-  const [absensiRange, setAbsensiRange] = useState([]);
-  const [absensiTanggal, setAbsensiTanggal] = useState([]);
+  const [statistikKelas, setStatistikKelas] = useState([]);
+  const [absensiPerKelas, setAbsensiPerKelas] = useState({});
+  const [kelasLengkapIds, setKelasLengkapIds] = useState(() => new Set());
   const [loadingRange, setLoadingRange] = useState(true);
   const [loadingTanggal, setLoadingTanggal] = useState(false);
 
@@ -947,66 +940,51 @@ function AbsensiContent({
   const loadRange = useCallback(async () => {
     setLoadingRange(true);
     try {
-      const records = await pb.collection("absensi").getFullList({
-        filter: `tanggal >= "${daysAgoStr(30)} 00:00:00" && tanggal <= "${todayStr()} 23:59:59"`,
-        sort: "-tanggal",
-        requestKey: null,
+      const res = await getAbsensiRange({
+        kelasList,
+        siswaCountPerKelas,
+        hariEfektif30,
       });
-      setAbsensiRange(records);
+      if (res.error) console.error(res.error);
+      setStatistikKelas(res.statistikKelas);
     } catch (err) {
       console.error(err);
-      setAbsensiRange([]);
+      setStatistikKelas([]);
     } finally {
       setLoadingRange(false);
     }
-  }, []);
+  }, [kelasList, siswaCountPerKelas, hariEfektif30]);
 
   useEffect(() => {
     loadRange();
   }, [loadRange]);
 
-  const loadTanggal = useCallback(async (dateStr) => {
-    setLoadingTanggal(true);
-    try {
-      const records = await pb.collection("absensi").getFullList({
-        filter: `tanggal >= "${dateStr} 00:00:00" && tanggal <= "${dateStr} 23:59:59"`,
-        expand: "siswa_id,kelas_id",
-        requestKey: null,
-      });
-      setAbsensiTanggal(records);
-    } catch (err) {
-      console.error(err);
-      setAbsensiTanggal([]);
-    } finally {
-      setLoadingTanggal(false);
-    }
-  }, []);
+  const loadTanggal = useCallback(
+    async (dateStr) => {
+      setLoadingTanggal(true);
+      try {
+        const res = await getAbsensiTanggal({
+          dateStr,
+          kelasList,
+          siswaCountPerKelas,
+        });
+        if (res.error) console.error(res.error);
+        setAbsensiPerKelas(res.absensiPerKelas);
+        setKelasLengkapIds(new Set(res.kelasLengkapIds));
+      } catch (err) {
+        console.error(err);
+        setAbsensiPerKelas({});
+        setKelasLengkapIds(new Set());
+      } finally {
+        setLoadingTanggal(false);
+      }
+    },
+    [kelasList, siswaCountPerKelas],
+  );
 
   useEffect(() => {
     loadTanggal(selectedDate);
   }, [selectedDate, loadTanggal]);
-
-  const hariEfektif30 = useMemo(
-    () => countEffectiveDays(daysAgoStr(30), todayStr(), hariLiburList),
-    [hariLiburList],
-  );
-
-  const kelasLengkapIds = useMemo(() => {
-    const recordsPerKelas = new Map();
-    for (const a of absensiTanggal) {
-      const kid = firstOf(a.kelas_id);
-      if (!kid) continue;
-      recordsPerKelas.set(kid, (recordsPerKelas.get(kid) || 0) + 1);
-    }
-    const lengkap = new Set();
-    for (const k of kelasList) {
-      const jumlahSiswa = siswaPerKelas.get(k.id)?.length || 0;
-      if (jumlahSiswa > 0 && (recordsPerKelas.get(k.id) || 0) >= jumlahSiswa) {
-        lengkap.add(k.id);
-      }
-    }
-    return lengkap;
-  }, [absensiTanggal, kelasList, siswaPerKelas]);
 
   const kelasSudah = useMemo(() => {
     if (!selectedIsWorkday) return [];
@@ -1018,46 +996,8 @@ function AbsensiContent({
     return kelasList.filter((k) => !kelasLengkapIds.has(k.id));
   }, [kelasList, kelasLengkapIds, selectedIsWorkday]);
 
-  const statistikKelas = useMemo(() => {
-    if (hariEfektif30 === 0) return [];
-    const map = new Map();
-    for (const a of absensiRange) {
-      const kid = firstOf(a.kelas_id);
-      if (!kid) continue;
-      if (!map.has(kid)) map.set(kid, { hadir: 0 });
-      const entry = map.get(kid);
-      if (a.status === "hadir") entry.hadir += 1;
-    }
-    const result = [];
-    for (const k of kelasList) {
-      const jumlahSiswa = siswaPerKelas.get(k.id)?.length || 0;
-      if (jumlahSiswa === 0) continue;
-      const entry = map.get(k.id) || { hadir: 0 };
-      const denom = hariEfektif30 * jumlahSiswa;
-      result.push({
-        kelas: k,
-        rate: denom > 0 ? (entry.hadir / denom) * 100 : 0,
-        total: denom,
-        hadir: entry.hadir,
-      });
-    }
-    result.sort((a, b) => b.rate - a.rate);
-    return result;
-  }, [absensiRange, kelasList, siswaPerKelas, hariEfektif30]);
-
   const terbaik = statistikKelas.slice(0, 5);
   const terendah = [...statistikKelas].reverse().slice(0, 5);
-
-  const absensiPerKelas = useMemo(() => {
-    const map = new Map();
-    for (const a of absensiTanggal) {
-      const kid = firstOf(a.kelas_id);
-      if (!kid) continue;
-      if (!map.has(kid)) map.set(kid, []);
-      map.get(kid).push(a);
-    }
-    return map;
-  }, [absensiTanggal]);
 
   const kelasUntukDitampilkan = useMemo(() => {
     let list =
@@ -1072,7 +1012,7 @@ function AbsensiContent({
       const q = searchSiswa.trim().toLowerCase();
       list = list.filter((k) => {
         if (k.nama_kelas.toLowerCase().includes(q)) return true;
-        return (siswaPerKelas.get(k.id) || []).some((s) =>
+        return (siswaPerKelas[k.id] || []).some((s) =>
           s.nama_siswa.toLowerCase().includes(q),
         );
       });
@@ -1284,8 +1224,8 @@ function AbsensiContent({
               <KelasAbsensiCard
                 key={k.id}
                 kelas={k}
-                siswaKelas={siswaPerKelas.get(k.id) || []}
-                records={absensiPerKelas.get(k.id) || []}
+                siswaKelas={siswaPerKelas[k.id] || []}
+                records={absensiPerKelas[k.id] || []}
                 lengkap={kelasLengkapIds.has(k.id)}
                 expanded={expandedKelas.has(k.id)}
                 onToggle={() => toggleExpand(k.id)}
@@ -1492,8 +1432,11 @@ function KelasAbsensiCard({
 // ------------------------------------------------------------------
 export default function AbsensiPage() {
   const [kelasList, setKelasList] = useState([]);
-  const [siswaList, setSiswaList] = useState([]);
+  const [siswaPerKelas, setSiswaPerKelas] = useState({});
+  const [siswaCountPerKelas, setSiswaCountPerKelas] = useState({});
   const [hariLiburList, setHariLiburList] = useState([]);
+  const [totalSiswa, setTotalSiswa] = useState(0);
+  const [hariEfektif30, setHariEfektif30] = useState(0);
   const [loadingBase, setLoadingBase] = useState(true);
   const [errorBase, setErrorBase] = useState("");
 
@@ -1509,24 +1452,17 @@ export default function AbsensiPage() {
     setLoadingBase(true);
     setErrorBase("");
     try {
-      const [kelas, siswa, hariLibur] = await Promise.all([
-        pb.collection("kelas").getFullList({
-          sort: "tingkat,nama_kelas",
-          expand: "walikelas_id,pendamping_id",
-          requestKey: null,
-        }),
-        pb.collection("siswa").getFullList({
-          sort: "nama_siswa",
-          requestKey: null,
-        }),
-        pb
-          .collection("hari_libur")
-          .getFullList({ requestKey: null })
-          .catch(() => []),
-      ]);
-      setKelasList(kelas);
-      setSiswaList(siswa);
-      setHariLiburList(hariLibur);
+      const res = await getBaseData();
+      if (res.error) {
+        setErrorBase(res.error);
+      } else {
+        setKelasList(res.kelasList);
+        setSiswaPerKelas(res.siswaPerKelas);
+        setSiswaCountPerKelas(res.siswaCountPerKelas);
+        setHariLiburList(res.hariLiburList);
+        setTotalSiswa(res.totalSiswa);
+        setHariEfektif30(res.hariEfektif30);
+      }
     } catch (err) {
       console.error(err);
       setErrorBase(
@@ -1540,19 +1476,6 @@ export default function AbsensiPage() {
   useEffect(() => {
     loadBaseData();
   }, [loadBaseData]);
-
-  const siswaPerKelas = useMemo(() => {
-    const map = new Map();
-    for (const s of siswaList) {
-      const kid = firstOf(s.kelas_id);
-      if (!kid) continue;
-      if (!map.has(kid)) map.set(kid, []);
-      map.get(kid).push(s);
-    }
-    return map;
-  }, [siswaList]);
-
-  const totalSiswa = siswaList.length;
 
   return (
     <div className="min-h-screen text-slate-900">
@@ -1582,8 +1505,10 @@ export default function AbsensiPage() {
             selectedDate={selectedDate}
             kelasList={kelasList}
             siswaPerKelas={siswaPerKelas}
+            siswaCountPerKelas={siswaCountPerKelas}
             totalSiswa={totalSiswa}
             hariLiburList={hariLiburList}
+            hariEfektif30={hariEfektif30}
           />
         )}
 

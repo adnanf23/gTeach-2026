@@ -234,6 +234,13 @@ const NAV_SECTIONS = [
         icon: "log",
       },
       {
+        type: "item",
+        key: "onboarding",
+        label: "Onboarding Semester",
+        href: "/ict/onboarding",
+        icon: "log",
+      },
+      {
         type: "group",
         key: "server-monitoring",
         label: "Server Monitoring",

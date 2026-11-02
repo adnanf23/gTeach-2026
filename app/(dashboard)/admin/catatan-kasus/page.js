@@ -1,8 +1,9 @@
 "use client";
 
+import { db } from "@/lib/db";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { pb, isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
+import { isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
 import { createSystemLog } from "@/lib/logger";
 
 // =========================================================
@@ -707,15 +708,15 @@ export default function AdminCatatanKasusPage() {
       setLoadingKelas(true);
       try {
         const [kelasData, siswaData, catatanData] = await Promise.all([
-          pb.collection("kelas").getFullList({
+          db.getFullList("kelas", {
             sort: "tingkat,nama_kelas",
             requestKey: null,
           }),
-          pb.collection("siswa").getFullList({
+          db.getFullList("siswa", {
             fields: "id,kelas_id",
             requestKey: null,
           }),
-          pb.collection("catatan_kasus").getFullList({
+          db.getFullList("catatan_kasus", {
             fields: "id,kelas_id,jenis_kasus,sync_sias,date",
             requestKey: null,
           }),
@@ -752,13 +753,13 @@ export default function AdminCatatanKasusPage() {
     setLoadingCatatan(true);
     try {
       const [catatanRes, siswaRes] = await Promise.all([
-        pb.collection("catatan_kasus").getFullList({
+        db.getFullList("catatan_kasus", {
           filter: `kelas_id="${selectedKelasId}"`,
           expand: "siswa_id,tahun_ajaran_id",
           sort: "-date",
           requestKey: null,
         }),
-        pb.collection("siswa").getFullList({
+        db.getFullList("siswa", {
           filter: `kelas_id="${selectedKelasId}"`,
           sort: "nama_siswa",
           requestKey: null,
@@ -789,9 +790,7 @@ export default function AdminCatatanKasusPage() {
     const newValue = !item.sync_sias;
     setTogglingId(item.id);
     try {
-      await pb
-        .collection("catatan_kasus")
-        .update(item.id, { sync_sias: newValue }, { requestKey: null });
+      await db.update("catatan_kasus", item.id, { sync_sias: newValue }, { requestKey: null });
 
       setCatatanList((prev) =>
         prev.map((c) => (c.id === item.id ? { ...c, sync_sias: newValue } : c)),

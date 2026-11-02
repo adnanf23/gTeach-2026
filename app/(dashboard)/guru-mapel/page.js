@@ -1,8 +1,9 @@
 "use client";
 
+import { getGuruMapelDashboard } from "@/actions/guru-mapel.action";
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { pb, getCurrentUser, isAuthenticated } from "@/lib/pocketbase";
+import { getCurrentUser, isAuthenticated } from "@/lib/pocketbase";
 
 const ALLOWED_ROLES = ["guru mapel", "admin", "ict"];
 
@@ -41,7 +42,6 @@ const HARI_PANJANG = [
   "Jumat",
   "Sabtu",
 ];
-const HARI_SINGKAT = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
 
 function pad(n) {
   return String(n).padStart(2, "0");
@@ -75,56 +75,6 @@ function hariIndo(date = new Date()) {
   return `${HARI_PANJANG[date.getDay()]}, ${date.getDate()} ${
     BULAN[date.getMonth()]
   } ${date.getFullYear()}`;
-}
-function dayRangeISO(date) {
-  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  return {
-    start: `${toISODate(d)} 00:00:00`,
-    end: `${toISODate(d)} 23:59:59`,
-  };
-}
-function weekBuckets() {
-  const days = [];
-  const now = new Date();
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
-    const key = toISODate(d);
-    const next = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
-    days.push({
-      key,
-      label: HARI_SINGKAT[d.getDay()],
-      dateLabel: `${d.getDate()}/${d.getMonth() + 1}`,
-      start: `${key} 00:00:00`,
-      end: `${toISODate(next)} 00:00:00`,
-    });
-  }
-  return days;
-}
-function monthBuckets() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth();
-  const lastDay = new Date(year, month + 1, 0).getDate();
-  const days = [];
-  for (let i = 1; i <= lastDay; i++) {
-    const d = new Date(year, month, i);
-    const key = toISODate(d);
-    const next = new Date(year, month, i + 1);
-    days.push({
-      key,
-      label: String(i),
-      dateLabel: BULAN[month].slice(0, 3),
-      start: `${key} 00:00:00`,
-      end: `${toISODate(next)} 00:00:00`,
-    });
-  }
-  return days;
-}
-function firstOf(val) {
-  return Array.isArray(val) ? val[0] : val;
-}
-function numOrNull(v) {
-  return typeof v === "number" && !isNaN(v) && v !== -1 ? v : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -394,25 +344,6 @@ export default function OverviewGuruMapelPage() {
     setAuthChecked(true);
   }, [router]);
 
-  // Load hari libur
-  useEffect(() => {
-    if (!authChecked || unauthorized) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const list = await pb.collection("hari_libur").getFullList({
-          requestKey: null,
-        });
-        if (!cancelled) setHariLiburList(list);
-      } catch (e) {
-        if (!cancelled) setHariLiburList([]);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [authChecked, unauthorized]);
-
   // Load dashboard
   useEffect(() => {
     if (!authChecked || unauthorized || !guru) return;
@@ -423,348 +354,30 @@ export default function OverviewGuruMapelPage() {
         setLoading(true);
         setErrorMsg("");
 
-        const user = guru;
-
-        // ----------------------------------------------------------------
-        // 1. Ploting guru
-        // ----------------------------------------------------------------
-        const plotingSaya = await pb.collection("ploting_guru").getFullList({
-          filter: `guru_id="${user.id}"`,
-          expand: "mapel_id,kelas_id",
-          requestKey: null,
+        // Seluruh pengambilan data + agregasi dilakukan di server action.
+        const res = await getGuruMapelDashboard({
+          userId: guru.id,
+          todayIso: toISODate(today),
         });
+        if (!isMounted) return;
 
-        const kelasIdSet = new Set();
-        const mapelIdSet = new Set();
-        const mapelMap = {};
-        const myCombos = new Set(); // "mapelId|kelasId"
-
-        plotingSaya.forEach((p) => {
-          const mapelId = firstOf(p.mapel_id);
-          if (mapelId && p.expand?.mapel_id) {
-            mapelMap[mapelId] = p.expand.mapel_id;
-            mapelIdSet.add(mapelId);
-          }
-          const kelasArr = Array.isArray(p.expand?.kelas_id)
-            ? p.expand.kelas_id
-            : p.expand?.kelas_id
-              ? [p.expand.kelas_id]
-              : [];
-          kelasArr.forEach((k) => {
-            kelasIdSet.add(k.id);
-            if (mapelId) myCombos.add(`${mapelId}|${k.id}`);
-          });
-        });
-
-        if (isMounted) {
-          setJumlahKelas(kelasIdSet.size);
-          setJumlahMapel(mapelIdSet.size);
-        }
-
-        const kelasIds = Array.from(kelasIdSet);
-        const mapelIds = Array.from(mapelIdSet);
-
-        // ----------------------------------------------------------------
-        // 2. Siswa di kelas yang diajar
-        // ----------------------------------------------------------------
-        let siswaList = [];
-        if (kelasIds.length > 0) {
-          siswaList = await pb.collection("siswa").getFullList({
-            filter: kelasIds.map((id) => `kelas_id="${id}"`).join(" || "),
-            requestKey: null,
-          });
-        }
-        if (isMounted) setJumlahSiswa(siswaList.length);
-
-        const siswaMap = {};
-        siswaList.forEach((s) => {
-          siswaMap[s.id] = s;
-        });
-
-        if (mapelIds.length === 0 || kelasIds.length === 0) {
-          if (isMounted) setLoading(false);
+        if (res.error) {
+          setErrorMsg(res.error);
+          setLoading(false);
           return;
         }
 
-        // ----------------------------------------------------------------
-        // 3. TP & LM untuk mapel yang diajar
-        // ----------------------------------------------------------------
-        const mapelFilter = mapelIds
-          .map((id) => `mapel_id ~ "${id}"`)
-          .join(" || ");
-
-        const [tpAll, lmAll] = await Promise.all([
-          pb.collection("tujuan_pembelajaran").getFullList({
-            filter: mapelFilter,
-            requestKey: null,
-          }),
-          pb.collection("lingkup_materi").getFullList({
-            filter: mapelFilter,
-            requestKey: null,
-          }),
-        ]);
-
-        // Filter client-side: hanya TP/LM yang cocok dengan kombinasi mapel+kelas guru
-        const myTps = tpAll.filter((tp) => {
-          const mid = firstOf(tp.mapel_id);
-          const kid = firstOf(tp.kelas_id);
-          return myCombos.has(`${mid}|${kid}`);
-        });
-        const myLms = lmAll.filter((lm) => {
-          const mid = firstOf(lm.mapel_id);
-          const kid = firstOf(lm.kelas_id);
-          return myCombos.has(`${mid}|${kid}`);
-        });
-
-        const tpToMapel = {};
-        tpAll.forEach((tp) => {
-          tpToMapel[tp.id] = firstOf(tp.mapel_id);
-        });
-        const lmToMapel = {};
-        lmAll.forEach((lm) => {
-          lmToMapel[lm.id] = firstOf(lm.mapel_id);
-        });
-
-        // ----------------------------------------------------------------
-        // 4. Ambil nilai_formatif, nilai_sumatif, nilai_ujian
-        // ----------------------------------------------------------------
-        const kelasFilter = kelasIds
-          .map((id) => `kelas_id ~ "${id}"`)
-          .join(" || ");
-
-        const nfFilter =
-          myTps.length > 0
-            ? `(${kelasFilter}) && (${myTps
-                .map((tp) => `tp_id ~ "${tp.id}"`)
-                .join(" || ")})`
-            : null;
-        const nsFilter =
-          myLms.length > 0
-            ? `(${kelasFilter}) && (${myLms
-                .map((lm) => `lm_id ~ "${lm.id}"`)
-                .join(" || ")})`
-            : null;
-
-        const [nfData, nsData, nuData] = await Promise.all([
-          nfFilter
-            ? pb.collection("nilai_formatif").getFullList({
-                filter: nfFilter,
-                requestKey: null,
-              })
-            : Promise.resolve([]),
-          nsFilter
-            ? pb.collection("nilai_sumatif").getFullList({
-                filter: nsFilter,
-                requestKey: null,
-              })
-            : Promise.resolve([]),
-          pb.collection("nilai_ujian").getFullList({
-            filter: mapelIds.map((id) => `mapel_id = "${id}"`).join(" || "),
-            requestKey: null,
-          }),
-        ]);
-
-        // ----------------------------------------------------------------
-        // 5. Agregasi per siswa (dan per mapel)
-        // ----------------------------------------------------------------
-        const siswaAgg = {};
-        siswaList.forEach((s) => {
-          siswaAgg[s.id] = { total: 0, count: 0, perMapel: {} };
-        });
-
-        function addValue(siswaId, mapelId, val) {
-          const v = numOrNull(val);
-          if (v === null) return;
-          if (!siswaAgg[siswaId]) return;
-          siswaAgg[siswaId].total += v;
-          siswaAgg[siswaId].count += 1;
-          if (mapelId) {
-            if (!siswaAgg[siswaId].perMapel[mapelId]) {
-              siswaAgg[siswaId].perMapel[mapelId] = { total: 0, count: 0 };
-            }
-            siswaAgg[siswaId].perMapel[mapelId].total += v;
-            siswaAgg[siswaId].perMapel[mapelId].count += 1;
-          }
-        }
-
-        // Formatif: K1..K4 per TP
-        nfData.forEach((n) => {
-          const mid = tpToMapel[firstOf(n.tp_id)];
-          const sid = firstOf(n.siswa_id);
-          ["k1", "k2", "k3", "k4"].forEach((k) => addValue(sid, mid, n[k]));
-        });
-
-        // Sumatif: nilai per LM
-        nsData.forEach((n) => {
-          const mid = lmToMapel[firstOf(n.lm_id)];
-          const sid = firstOf(n.siswa_id);
-          addValue(sid, mid, n.nilai);
-        });
-
-        // Ujian
-        nuData.forEach((n) => {
-          const sid = firstOf(n.siswa_id);
-          const mid = firstOf(n.mapel_id);
-          addValue(sid, mid, n.nilai);
-        });
-
-        // Ranking siswa
-        const rankingHitung = Object.entries(siswaAgg)
-          .map(([sid, agg]) => ({
-            siswa: siswaMap[sid],
-            rataRata:
-              agg.count > 0
-                ? Math.round((agg.total / agg.count) * 10) / 10
-                : null,
-            jumlahNilai: agg.count,
-          }))
-          .filter((r) => r.siswa && r.rataRata !== null)
-          .sort((a, b) => b.rataRata - a.rataRata);
-
-        if (isMounted) setRankingSiswa(rankingHitung);
-
-        // Rata-rata per mapel
-        const mapelAgg = {};
-        Object.values(siswaAgg).forEach((agg) => {
-          Object.entries(agg.perMapel).forEach(([mid, v]) => {
-            if (!mapelAgg[mid]) mapelAgg[mid] = { total: 0, count: 0 };
-            mapelAgg[mid].total += v.total;
-            mapelAgg[mid].count += v.count;
-          });
-        });
-
-        const rataRataHitung = Object.entries(mapelAgg)
-          .map(([mid, agg]) => ({
-            mapel: mapelMap[mid],
-            rataRata:
-              agg.count > 0 ? Math.round((agg.total / agg.count) * 10) / 10 : 0,
-            jumlahNilai: agg.count,
-          }))
-          .filter((r) => r.mapel)
-          .sort((a, b) => b.rataRata - a.rataRata);
-
-        if (isMounted) setRataRataPerMapel(rataRataHitung);
-
-        // ----------------------------------------------------------------
-        // 6. Jadwal & agenda hari ini
-        // ----------------------------------------------------------------
-        const todayName = HARI_KEY[today.getDay()];
-        let jadwalToday = [];
-        try {
-          jadwalToday = await pb.collection("jadwal_pelajaran").getFullList({
-            filter: `guru_id="${user.id}" && hari="${todayName}"`,
-            requestKey: null,
-          });
-        } catch (e) {
-          jadwalToday = [];
-        }
-        if (isMounted) setJadwalHariIni(jadwalToday);
-
-        const { start: todayStart, end: todayEnd } = dayRangeISO(today);
-        let allAgendaToday = [];
-        try {
-          allAgendaToday = await pb.collection("agenda_mengajar").getFullList({
-            filter: `date>="${todayStart}" && date<="${todayEnd}"`,
-            requestKey: null,
-          });
-        } catch (e) {
-          allAgendaToday = [];
-        }
-        const myAgendaToday = allAgendaToday.filter((a) => {
-          const mid = firstOf(a.mapel_id);
-          const kid = firstOf(a.kelas_id);
-          return myCombos.has(`${mid}|${kid}`);
-        });
-        if (isMounted) setAgendaHariIni(myAgendaToday);
-
-        // ----------------------------------------------------------------
-        // 7. Chart agenda
-        // ----------------------------------------------------------------
-        const allPloting = await pb
-          .collection("ploting_guru")
-          .getFullList({ requestKey: null });
-
-        const plotingKeyToGuru = {};
-        allPloting.forEach((p) => {
-          const mapelIdsP = Array.isArray(p.mapel_id)
-            ? p.mapel_id
-            : p.mapel_id
-              ? [p.mapel_id]
-              : [];
-          const kelasIdsP = Array.isArray(p.kelas_id)
-            ? p.kelas_id
-            : p.kelas_id
-              ? [p.kelas_id]
-              : [];
-          mapelIdsP.forEach((mid) => {
-            kelasIdsP.forEach((kid) => {
-              if (mid && kid) plotingKeyToGuru[`${mid}|${kid}`] = p.guru_id;
-            });
-          });
-        });
-
-        const allGuruIds = new Set(
-          allPloting.map((p) => p.guru_id).filter(Boolean),
-        );
-        const jumlahGuru = allGuruIds.size || 1;
-
-        const weekly = weekBuckets();
-        const monthly = monthBuckets();
-
-        const rangeStart =
-          weekly[0].start < monthly[0].start
-            ? weekly[0].start
-            : monthly[0].start;
-        const rangeEnd =
-          weekly[weekly.length - 1].end > monthly[monthly.length - 1].end
-            ? weekly[weekly.length - 1].end
-            : monthly[monthly.length - 1].end;
-
-        const allAgendaRange = await pb
-          .collection("agenda_mengajar")
-          .getFullList({
-            filter: `date>="${rangeStart}" && date<"${rangeEnd}"`,
-            requestKey: null,
-          });
-
-        const countPerDateGuru = {};
-        allAgendaRange.forEach((a) => {
-          const mid = firstOf(a.mapel_id);
-          const kid = firstOf(a.kelas_id);
-          const guruId = plotingKeyToGuru[`${mid}|${kid}`];
-          if (!guruId) return;
-          const dateKey = (a.date || "").slice(0, 10);
-          if (!dateKey) return;
-          if (!countPerDateGuru[dateKey]) countPerDateGuru[dateKey] = {};
-          countPerDateGuru[dateKey][guruId] =
-            (countPerDateGuru[dateKey][guruId] || 0) + 1;
-        });
-
-        function buildTrend(buckets) {
-          return buckets.map((b) => {
-            const perGuru = countPerDateGuru[b.key] || {};
-            const saya = perGuru[user.id] || 0;
-            const totalSekolah = Object.values(perGuru).reduce(
-              (s, v) => s + v,
-              0,
-            );
-            const avg = totalSekolah / jumlahGuru;
-            return {
-              key: b.key,
-              label: b.label,
-              dateLabel: b.dateLabel,
-              saya,
-              avg,
-            };
-          });
-        }
-
-        if (isMounted) {
-          setWeeklyTrend(buildTrend(weekly));
-          setMonthlyTrend(buildTrend(monthly));
-        }
-
-        if (isMounted) setLoading(false);
+        setHariLiburList(res.hariLiburList);
+        setJadwalHariIni(res.jadwalHariIni);
+        setJumlahKelas(res.jumlahKelas);
+        setJumlahMapel(res.jumlahMapel);
+        setJumlahSiswa(res.jumlahSiswa);
+        setAgendaHariIni(res.agendaHariIni);
+        setRankingSiswa(res.rankingSiswa);
+        setRataRataPerMapel(res.rataRataPerMapel);
+        setWeeklyTrend(res.weeklyTrend);
+        setMonthlyTrend(res.monthlyTrend);
+        setLoading(false);
       } catch (err) {
         console.error(err);
         if (isMounted) {
@@ -780,7 +393,7 @@ export default function OverviewGuruMapelPage() {
     return () => {
       isMounted = false;
     };
-  }, [authChecked, unauthorized, guru, today, hariLiburList]);
+  }, [authChecked, unauthorized, guru, today]);
 
   const todayIsWorkday = useMemo(() => {
     if (isWeekend(today)) return false;

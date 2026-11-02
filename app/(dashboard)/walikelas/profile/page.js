@@ -1,9 +1,13 @@
 "use client";
 
+import { db } from "@/lib/db";
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { pb, isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
-import { uploadTtdAction, updateProfileAction } from "./actions";
+import {
+  uploadTtdAsAdmin as uploadTtdAction,
+  updateProfileAsAdmin as updateProfileAction,
+} from "@/actions/profile.action";
 
 export default function EditProfilePage() {
   const router = useRouter();
@@ -186,7 +190,7 @@ export default function EditProfilePage() {
       if (passwordData.newPassword !== passwordData.confirmPassword)
         throw new Error("Konfirmasi password tidak sesuai");
 
-      await pb.collection("users").update(user.id, {
+      await db.update("users", user.id, {
         oldPassword: passwordData.oldPassword,
         password: passwordData.newPassword,
         passwordConfirm: passwordData.confirmPassword,

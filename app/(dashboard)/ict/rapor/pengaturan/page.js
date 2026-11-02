@@ -1,8 +1,13 @@
 "use client";
 
+import { db } from "@/lib/db";
+import {
+  getPengaturanRaporInit,
+  getPengaturanRaporData,
+} from "@/actions/ict-rapor-pengaturan.action";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { pb, isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
+import { isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
 
 const ALLOWED_ROLES = ["admin", "ict"];
 
@@ -113,14 +118,15 @@ export default function PengaturanRaporPage() {
       setLoadingTahunAjaran(true);
       setError("");
       try {
-        const taRecords = await pb.collection("tahun_ajaran").getFullList({
-          sort: "-tahun,-semester",
-          requestKey: null,
-        });
+        // Baca tahun ajaran + penentuan tahun ajaran aktif dilakukan di action.
+        const res = await getPengaturanRaporInit();
         if (!isMounted) return;
-        setTahunAjaranList(taRecords);
-        const aktif = taRecords.find((t) => t.is_aktif);
-        setSelectedTahunAjaranId((aktif || taRecords[0])?.id || null);
+        if (res.error) {
+          setError(res.error);
+          return;
+        }
+        setTahunAjaranList(res.tahunAjaranList);
+        setSelectedTahunAjaranId(res.selectedTahunAjaranId);
       } catch (err) {
         console.error("Error fetching tahun_ajaran:", err);
         if (isMounted) setError("Gagal memuat data tahun ajaran.");
@@ -148,33 +154,15 @@ export default function PengaturanRaporPage() {
       setLoadingData(true);
       setError("");
       try {
-        const ujianRecords = await pb
-          .collection("pengaturan_ujian")
-          .getFullList({
-            filter: `tahun_ajaran_id = "${selectedTahunAjaranId}"`,
-            sort: "jenis_ujian,nama_ujian",
-            requestKey: null,
-          });
+        // Baca pengaturan_ujian + pengaturan_rapor turunannya dilakukan di action.
+        const res = await getPengaturanRaporData(selectedTahunAjaranId);
         if (!isMounted) return;
-        setUjianList(ujianRecords);
-
-        if (ujianRecords.length === 0) {
-          setRaporList([]);
+        if (res.error) {
+          setError(res.error);
           return;
         }
-
-        const filterStr = ujianRecords
-          .map((u) => `ujian_id = "${u.id}"`)
-          .join(" || ");
-
-        const raporRecords = await pb
-          .collection("pengaturan_rapor")
-          .getFullList({
-            filter: filterStr,
-            requestKey: null,
-          });
-        if (!isMounted) return;
-        setRaporList(raporRecords);
+        setUjianList(res.ujianList);
+        setRaporList(res.raporList);
       } catch (err) {
         console.error("Error fetching pengaturan_rapor:", err);
         if (isMounted) setError("Gagal memuat data pengaturan rapor.");
@@ -231,14 +219,12 @@ export default function PengaturanRaporPage() {
         (r) => getUjianIdOfRapor(r) === form.ujian_id,
       );
       if (existing) {
-        const updated = await pb
-          .collection("pengaturan_rapor")
-          .update(existing.id, payload);
+        const updated = await db.update("pengaturan_rapor", existing.id, payload);
         setRaporList((prev) =>
           prev.map((r) => (r.id === updated.id ? updated : r)),
         );
       } else {
-        const created = await pb.collection("pengaturan_rapor").create(payload);
+        const created = await db.create("pengaturan_rapor", payload);
         setRaporList((prev) => [...prev, created]);
       }
       closeForm();
@@ -255,7 +241,7 @@ export default function PengaturanRaporPage() {
     setDeletingId(raporId);
     setError("");
     try {
-      await pb.collection("pengaturan_rapor").delete(raporId);
+      await db.remove("pengaturan_rapor", raporId);
       setRaporList((prev) => prev.filter((r) => r.id !== raporId));
       if (editingUjianId) {
         const stillExists = raporList.find((r) => r.id === raporId);
@@ -274,7 +260,7 @@ export default function PengaturanRaporPage() {
     setError("");
     try {
       const nextAkses = !u.akses_rapor;
-      const updated = await pb.collection("pengaturan_ujian").update(u.id, {
+      const updated = await db.update("pengaturan_ujian", u.id, {
         akses_rapor: nextAkses,
         status_akses: nextAkses ? "buka" : "tutup",
       });

@@ -2,7 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { pb, isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
+import { isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
+import {
+  getPlotingGuru,
+  getKelasOptions,
+  getAbsensiBulan,
+} from "@/actions/guru-mapel-harian-absensi.action";
 
 // =========================================================
 // Konfigurasi status absensi (warna & label)
@@ -223,19 +228,15 @@ export default function MapelAbsensiPage() {
       setLoadingPloting(true);
       setError("");
       try {
-        const records = await pb.collection("ploting_guru").getFullList({
-          filter: `guru_id = "${user.id}"`,
-          expand: "mapel_id,kelas_id",
-          requestKey: null,
-        });
-        records.sort((a, b) =>
-          (a.expand?.mapel_id?.nama_mapel || "").localeCompare(
-            b.expand?.mapel_id?.nama_mapel || "",
-          ),
-        );
+        const res = await getPlotingGuru(user.id);
         if (!isMounted) return;
-        setPlotingList(records);
-        if (records.length === 1) setSelectedPlotingId(records[0].id);
+        if (res.error) {
+          setError(res.error);
+          return;
+        }
+        setPlotingList(res.plotingList);
+        if (res.plotingList.length === 1)
+          setSelectedPlotingId(res.plotingList[0].id);
       } catch (err) {
         console.error("Error fetching ploting_guru:", err);
         if (isMounted) setError("Gagal memuat daftar mata pelajaran Anda.");
@@ -266,40 +267,15 @@ export default function MapelAbsensiPage() {
       setError("");
       setSelectedKelasId(null);
       try {
-        const kelasArr = Array.isArray(selectedPloting.expand?.kelas_id)
-          ? selectedPloting.expand.kelas_id
-          : selectedPloting.expand?.kelas_id
-            ? [selectedPloting.expand.kelas_id]
-            : [];
-
-        const counts = await Promise.all(
-          kelasArr.map((k) =>
-            pb
-              .collection("siswa")
-              .getList(1, 1, {
-                filter: `kelas_id = "${k.id}"`,
-                requestKey: null,
-                fields: "id",
-              })
-              .then((r) => r.totalItems)
-              .catch(() => 0),
-          ),
-        );
-
-        const options = kelasArr
-          .map((k, idx) => ({ kelas: k, siswaCount: counts[idx] }))
-          .sort((a, b) => {
-            const t =
-              (Number(a.kelas.tingkat) || 0) - (Number(b.kelas.tingkat) || 0);
-            if (t !== 0) return t;
-            return (a.kelas.nama_kelas || "").localeCompare(
-              b.kelas.nama_kelas || "",
-            );
-          });
-
+        const res = await getKelasOptions(selectedPloting);
         if (!isMounted) return;
-        setKelasOptions(options);
-        if (options.length === 1) setSelectedKelasId(options[0].kelas.id);
+        if (res.error) {
+          setError(res.error);
+          return;
+        }
+        setKelasOptions(res.kelasOptions);
+        if (res.kelasOptions.length === 1)
+          setSelectedKelasId(res.kelasOptions[0].kelas.id);
       } catch (err) {
         console.error("Error building kelas options:", err);
         if (isMounted)
@@ -330,37 +306,18 @@ export default function MapelAbsensiPage() {
     setError("");
 
     try {
-      const year = viewDate.getFullYear();
-      const month = viewDate.getMonth();
-      const first = new Date(year, month, 1);
-      const last = new Date(year, month + 1, 0);
-      const startStr = `${toISODate(first)} 00:00:00`;
-      const endStr = `${toISODate(last)} 23:59:59`;
-
-      // Ambil siswa
-      const siswa = await pb.collection("siswa").getFullList({
-        filter: `kelas_id = "${selectedKelas.id}"`,
-        sort: "nama_siswa",
-        requestKey: null,
+      const res = await getAbsensiBulan({
+        kelasId: selectedKelas.id,
+        year: viewDate.getFullYear(),
+        month: viewDate.getMonth(),
       });
-
-      // Ambil absensi
-      const records = await pb.collection("absensi").getFullList({
-        filter: `kelas_id = "${selectedKelas.id}" && tanggal >= "${startStr}" && tanggal <= "${endStr}"`,
-        requestKey: null,
-      });
-
-      // Group absensi per tanggal: { dateStr: { siswaId: status } }
-      const grouped = {};
-      for (const r of records) {
-        const key = toISODate(new Date(r.tanggal));
-        if (!grouped[key]) grouped[key] = {};
-        grouped[key][r.siswa_id] = r.status;
-      }
-
       if (!isMounted) return;
-      setSiswaList(siswa);
-      setMonthAbsensi(grouped);
+      if (res.error) {
+        setError(res.error);
+        return;
+      }
+      setSiswaList(res.siswa);
+      setMonthAbsensi(res.monthAbsensi);
     } catch (err) {
       console.error("Error loading absensi:", err);
       if (isMounted) setError("Gagal memuat data absensi. Silakan coba lagi.");

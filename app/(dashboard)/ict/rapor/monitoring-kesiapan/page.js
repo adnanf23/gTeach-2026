@@ -2,14 +2,17 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { pb, getCurrentUser } from "@/lib/pocketbase";
+import {
+  getMonitoringKesiapanBase,
+  getMonitoringKesiapanInit,
+  getMonitoringKesiapanNilaiUjian,
+  getMonitoringKesiapanReports,
+} from "@/actions/ict-monitoring-kesiapan.action";
 
 /* ------------------------------------------------------------------ */
 /* Konfigurasi                                                         */
 /* ------------------------------------------------------------------ */
 
-const MAPEL_KATEGORI_DIPAKAI = ["umum"];
-const KOLOM_FORMATIF = ["k1", "k2", "k3", "k4"];
-const FORMATIF_SKIP = -1;
 const ROLE_ADMIN = new Set(["admin", "ict"]);
 
 const TONE = {
@@ -43,291 +46,13 @@ const TONE = {
 /* Helper                                                              */
 /* ------------------------------------------------------------------ */
 
-const full = (collection, options = {}) =>
-  pb
-    .collection(collection)
-    .getFullList({ batch: 500, requestKey: null, ...options });
-
 const ids = (v) => (Array.isArray(v) ? v : v ? [v] : []);
-const hasText = (v) => typeof v === "string" && v.trim().length > 0;
-const terisi = (v) =>
-  v !== null && v !== undefined && v !== "" && Number(v) > 0;
-
-const stateOf = (done, total) =>
-  total === 0 ? "na" : done >= total ? "ok" : done === 0 ? "empty" : "partial";
-const pct = (done, total) => (total ? Math.floor((done / total) * 100) : 0);
 
 const ujianLabel = (u) =>
   u.jenis_ujian
     ? `${u.nama_ujian} (${u.jenis_ujian.toUpperCase()})`
     : u.nama_ujian;
 const tahunLabel = (t) => `${t.tahun} semester ${t.semester}`;
-const mapelTitle = (m) =>
-  (m?.Label && String(m.Label).trim()) || m?.nama_mapel || "(tanpa nama)";
-
-function ujianBerlaku(ujian, kelas) {
-  const tingkatOk =
-    !kelas.tingkat ||
-    ids(ujian.target_tingkat).map(String).includes(String(kelas.tingkat));
-  const targetKelas = ids(ujian.target_kelas_id);
-  const kelasOk = targetKelas.length === 0 || targetKelas.includes(kelas.id);
-  return tingkatOk && kelasOk;
-}
-
-/* ------------------------------------------------------------------ */
-/* Hitung kelengkapan (logika sama dengan halaman per kelas)           */
-/* ------------------------------------------------------------------ */
-
-function buildReport({ base, kelasList, ujian, nilaiUjian }) {
-  const {
-    siswa,
-    ploting,
-    tp,
-    lm,
-    formatif,
-    sumatif,
-    capaian,
-    catatan,
-    mapelAll,
-  } = base;
-
-  const siswaByKelas = {};
-  siswa.forEach((s) => {
-    const k = ids(s.kelas_id)[0];
-    if (k) (siswaByKelas[k] ||= []).push(s);
-  });
-
-  const groupBy = (list) => {
-    const out = {};
-    list.forEach((x) =>
-      ids(x.kelas_id).forEach((k) =>
-        ids(x.mapel_id).forEach((m) => (out[`${k}|${m}`] ||= []).push(x)),
-      ),
-    );
-    return out;
-  };
-  const tpByKey = groupBy(tp);
-  const lmByKey = groupBy(lm);
-
-  const plotByKelas = {};
-  ploting.forEach((p) =>
-    ids(p.kelas_id).forEach((k) => (plotByKelas[k] ||= []).push(p)),
-  );
-
-  const formatifKosong = {};
-  formatif.forEach((f) => {
-    const kosong = KOLOM_FORMATIF.filter(
-      (c) => Number(f[c]) !== FORMATIF_SKIP && !terisi(f[c]),
-    ).length;
-    const key = `${ids(f.siswa_id)[0]}|${ids(f.tp_id)[0]}`;
-    formatifKosong[key] = Math.min(formatifKosong[key] ?? Infinity, kosong);
-  });
-
-  const sumatifSet = new Set();
-  sumatif.forEach((n) => {
-    if (terisi(n.nilai))
-      sumatifSet.add(`${ids(n.siswa_id)[0]}|${ids(n.lm_id)[0]}`);
-  });
-
-  const ujianPloting = new Set();
-  const ujianMapel = new Set();
-  nilaiUjian.forEach((n) => {
-    if (!terisi(n.nilai)) return;
-    const s = ids(n.siswa_id)[0];
-    const p = ids(n.ploting_guru_id);
-    if (p.length) p.forEach((x) => ujianPloting.add(`${s}|${x}`));
-    else ids(n.mapel_id).forEach((m) => ujianMapel.add(`${s}|${m}`));
-  });
-
-  const capMap = {};
-  capaian.forEach((c) =>
-    ids(c.kelas_id).forEach((k) =>
-      ids(c.mapel_id).forEach((m) => {
-        const cur = (capMap[`${k}|${m}`] ||= { tinggi: false, rendah: false });
-        if (hasText(c.capaian_tinggi)) cur.tinggi = true;
-        if (hasText(c.capaian_rendah)) cur.rendah = true;
-      }),
-    ),
-  );
-
-  const catSet = new Set();
-  catatan.forEach((c) => {
-    if (!hasText(c.catatan)) return;
-    const s = ids(c.siswa_id)[0];
-    const k = ids(c.kelas_id);
-    if (!k.length) catSet.add(`${s}|*`);
-    else k.forEach((x) => catSet.add(`${s}|${x}`));
-  });
-
-  return kelasList.map((k) => {
-    const students = siswaByKelas[k.id] || [];
-    const uApplies = !!ujian && ujianBerlaku(ujian, k);
-
-    const fallbackGuru =
-      k.expand?.walikelas_id?.nama_lengkap ||
-      k.expand?.pendamping_id?.nama_lengkap ||
-      null;
-
-    const plotByMapel = new Map();
-    (plotByKelas[k.id] || []).forEach((p) => {
-      const mid = ids(p.mapel_id)[0];
-      if (mid && !plotByMapel.has(mid)) plotByMapel.set(mid, p);
-    });
-
-    const seenMapel = new Set();
-    const relevantMapels = [];
-    (mapelAll || []).forEach((m) => {
-      if (seenMapel.has(m.id)) return;
-      if (!MAPEL_KATEGORI_DIPAKAI.includes(m.kategori)) return;
-      const spesifik = ids(m.spesifik_kelas_id);
-      if (spesifik.length && !spesifik.includes(k.id)) return;
-      const tingkatOk = k.tingkat
-        ? ids(m.target_tingkat).map(String).includes(String(k.tingkat))
-        : false;
-      if (!tingkatOk && !plotByMapel.has(m.id)) return;
-      seenMapel.add(m.id);
-      relevantMapels.push(m);
-    });
-
-    const rows = relevantMapels
-      .map((m) => {
-        const p = plotByMapel.get(m.id);
-        const mapelId = m.id;
-        const tps = tpByKey[`${k.id}|${mapelId}`] || [];
-        const lms = lmByKey[`${k.id}|${mapelId}`] || [];
-        const noTp = tps.length === 0;
-        const noLm = lms.length === 0;
-        const noPlot = !p;
-        const n = students.length;
-
-        const plottedGuru = p?.expand?.guru_id?.nama_lengkap || null;
-        const isFallback = !plottedGuru && !!fallbackGuru;
-        const guru = plottedGuru || fallbackGuru || "Belum diploting";
-
-        const fExpected = noTp ? n : n * tps.length;
-        const sExpected = noLm ? n : n * lms.length;
-        const uExpected = uApplies ? n : 0;
-        let fDone = 0;
-        let sDone = 0;
-        let uDone = 0;
-
-        students.forEach((s) => {
-          tps.forEach((t) => {
-            if (formatifKosong[`${s.id}|${t.id}`] === 0) fDone++;
-          });
-          lms.forEach((l) => {
-            if (sumatifSet.has(`${s.id}|${l.id}`)) sDone++;
-          });
-          if (uApplies) {
-            const ok = p
-              ? ujianPloting.has(`${s.id}|${p.id}`) ||
-                ujianMapel.has(`${s.id}|${mapelId}`)
-              : ujianMapel.has(`${s.id}|${mapelId}`);
-            if (ok) uDone++;
-          }
-        });
-
-        const state = noPlot
-          ? "empty"
-          : stateOf(fDone + sDone + uDone, fExpected + sExpected + uExpected);
-
-        const todo = [];
-        if (noTp) todo.push("TP belum dibuat");
-        else if (fDone < fExpected) todo.push(`${fExpected - fDone} formatif`);
-        if (noLm) todo.push("lingkup materi belum dibuat");
-        else if (sDone < sExpected) todo.push(`${sExpected - sDone} sumatif`);
-        if (uApplies && uDone < uExpected)
-          todo.push(`${uExpected - uDone} ujian`);
-
-        return {
-          id: mapelId,
-          mapel: mapelTitle(m),
-          guru,
-          isFallback,
-          noPlot,
-          todo,
-          fDone,
-          sDone,
-          uDone,
-          fExpected,
-          sExpected,
-          uExpected,
-          state,
-        };
-      })
-      .sort((a, b) => a.mapel.localeCompare(b.mapel, "id"));
-
-    const pDone = rows.reduce((a, r) => a + r.fDone + r.sDone + r.uDone, 0);
-    const pTotal = rows.reduce(
-      (a, r) => a + r.fExpected + r.sExpected + r.uExpected,
-      0,
-    );
-    const penilaian = {
-      rows,
-      done: pDone,
-      total: pTotal,
-      percent: pct(pDone, pTotal),
-      state: rows.length ? stateOf(pDone, pTotal) : "empty",
-      issues: rows.filter((r) => r.state !== "ok").length,
-    };
-
-    const items = rows.map((r) => {
-      const c = capMap[`${k.id}|${r.id}`] || {};
-      return {
-        id: r.id,
-        mapel: r.mapel,
-        state:
-          c.tinggi && c.rendah
-            ? "ok"
-            : c.tinggi || c.rendah
-              ? "partial"
-              : "empty",
-      };
-    });
-    const cDone = items.filter((i) => i.state === "ok").length;
-    const cap = {
-      items,
-      done: cDone,
-      total: items.length,
-      percent: pct(cDone, items.length),
-      state: items.length ? stateOf(cDone, items.length) : "empty",
-      issues: items.length - cDone,
-    };
-
-    const missingCat = students.filter(
-      (s) => !(catSet.has(`${s.id}|${k.id}`) || catSet.has(`${s.id}|*`)),
-    );
-    const catDone = students.length - missingCat.length;
-    const cat = {
-      missing: missingCat,
-      done: catDone,
-      total: students.length,
-      percent: pct(catDone, students.length),
-      state: stateOf(catDone, students.length),
-      issues: missingCat.length,
-    };
-
-    const ready = [penilaian, cap, cat].every((s) => s.state === "ok");
-    const anyDone = penilaian.done + cap.done + cat.done > 0;
-
-    return {
-      id: k.id,
-      nama: k.nama_kelas || "(tanpa nama)",
-      tingkat: k.tingkat,
-      tahun: k.expand?.tahun_ajaran_id
-        ? tahunLabel(k.expand.tahun_ajaran_id)
-        : "Tanpa tahun ajaran",
-      walikelas: k.expand?.walikelas_id?.nama_lengkap || "-",
-      siswaCount: students.length,
-      penilaian,
-      cap,
-      cat,
-      ready,
-      overall: Math.floor((penilaian.percent + cap.percent + cat.percent) / 3),
-      state: ready ? "ok" : anyDone ? "partial" : "empty",
-    };
-  });
-}
 
 /* ------------------------------------------------------------------ */
 /* Komponen dasar                                                      */
@@ -641,6 +366,7 @@ export default function MonitoringKesiapanRaporAdminPage() {
   const [ujianId, setUjianId] = useState("");
   const [base, setBase] = useState(null);
   const [nilaiUjian, setNilaiUjian] = useState([]);
+  const [reports, setReports] = useState(null);
   const [initLoading, setInitLoading] = useState(true);
   const [baseLoading, setBaseLoading] = useState(false);
   const [ujianLoading, setUjianLoading] = useState(false);
@@ -677,26 +403,26 @@ export default function MonitoringKesiapanRaporAdminPage() {
       setInitLoading(true);
       setError("");
       try {
-        const [tahunAll, kelas, ujian] = await Promise.all([
-          full("tahun_ajaran", { sort: "-tahun,-semester" }),
-          full("kelas", {
-            expand: "walikelas_id,pendamping_id,tahun_ajaran_id",
-            sort: "nama_kelas",
-          }),
-          full("pengaturan_ujian"),
-        ]);
+        // Fetch tahun ajaran, kelas, dan ujian dilakukan di server action.
+        const res = await getMonitoringKesiapanInit();
         if (off) return;
-        const aktif = tahunAll.find((x) => x.is_aktif) || tahunAll[0] || null;
-        setTahunList(tahunAll);
-        setKelasAll(kelas);
-        setUjianAll(ujian);
-        setScope((prev) => {
-          if (prev === "all" || tahunAll.some((t) => t.id === prev))
-            return prev;
-          const adaKelas =
-            aktif && kelas.some((k) => ids(k.tahun_ajaran_id)[0] === aktif.id);
-          return adaKelas ? aktif.id : "all";
-        });
+        if (res.error) {
+          setError(res.error);
+        } else {
+          const tahunAll = res.tahunList;
+          const kelas = res.kelasAll;
+          const aktif = tahunAll.find((x) => x.is_aktif) || tahunAll[0] || null;
+          setTahunList(tahunAll);
+          setKelasAll(kelas);
+          setUjianAll(res.ujianAll);
+          setScope((prev) => {
+            if (prev === "all" || tahunAll.some((t) => t.id === prev))
+              return prev;
+            const adaKelas =
+              aktif && kelas.some((k) => ids(k.tahun_ajaran_id)[0] === aktif.id);
+            return adaKelas ? aktif.id : "all";
+          });
+        }
       } catch (e) {
         if (!off) setError(e?.message || "Gagal memuat data kelas");
       } finally {
@@ -756,71 +482,11 @@ export default function MonitoringKesiapanRaporAdminPage() {
     (async () => {
       setBaseLoading(true);
       try {
-        const kIds = kelasKey.split(",");
-        const anyOf = (field, op) =>
-          kIds.map((id) => `${field} ${op} "${id}"`).join(" || ");
-        const bySiswa = anyOf("siswa_id.kelas_id", "=");
-        const byKelas = anyOf("kelas_id", "~");
-        const [
-          siswa,
-          ploting,
-          tp,
-          lm,
-          formatif,
-          sumatif,
-          capaian,
-          catatan,
-          mapelAll,
-        ] = await Promise.all([
-          full("siswa", {
-            filter: anyOf("kelas_id", "="),
-            sort: "nama_siswa",
-            fields: "id,nama_siswa,kelas_id",
-          }),
-          full("ploting_guru", { filter: byKelas, expand: "guru_id,mapel_id" }),
-          full("tujuan_pembelajaran", {
-            filter: byKelas,
-            fields: "id,no_tp,mapel_id,kelas_id",
-          }),
-          full("lingkup_materi", {
-            filter: byKelas,
-            fields: "id,nama,mapel_id,kelas_id",
-          }),
-          full("nilai_formatif", {
-            filter: bySiswa,
-            fields: "id,tp_id,siswa_id,k1,k2,k3,k4",
-          }),
-          full("nilai_sumatif", {
-            filter: bySiswa,
-            fields: "id,lm_id,siswa_id,nilai",
-          }),
-          full("capaian_kompetensi", {
-            filter: byKelas,
-            fields: "id,mapel_id,kelas_id,capaian_tinggi,capaian_rendah",
-          }),
-          full("catatan_siswa", {
-            filter: bySiswa,
-            fields: "id,siswa_id,kelas_id,catatan",
-          }),
-          full("mata_pelajaran", {
-            sort: "nama_mapel",
-            fields:
-              "id,nama_mapel,Label,kategori,target_tingkat,spesifik_kelas_id",
-          }),
-        ]);
+        // Fetch beberapa koleksi sekaligus dilakukan di server action.
+        const res = await getMonitoringKesiapanBase(kelasKey.split(","));
         if (off) return;
-        setBase({
-          key: kelasKey,
-          siswa,
-          ploting,
-          tp,
-          lm,
-          formatif,
-          sumatif,
-          capaian,
-          catatan,
-          mapelAll,
-        });
+        if (res.error) setError(res.error);
+        else setBase({ key: kelasKey, ...res.base });
       } catch (e) {
         if (!off) setError(e?.message || "Gagal memuat data penilaian");
       } finally {
@@ -840,11 +506,12 @@ export default function MonitoringKesiapanRaporAdminPage() {
     }
     let off = false;
     setUjianLoading(true);
-    full("nilai_ujian", {
-      filter: `pengaturan_ujian_id ~ "${ujianId}"`,
-      fields: "id,siswa_id,ploting_guru_id,mapel_id,nilai",
-    })
-      .then((r) => !off && setNilaiUjian(r))
+    getMonitoringKesiapanNilaiUjian({ ujianId })
+      .then((res) => {
+        if (off) return;
+        if (res.error) setError(res.error);
+        else setNilaiUjian(res.nilaiUjian);
+      })
       .catch((e) => !off && setError(e?.message || "Gagal memuat nilai ujian"))
       .finally(() => !off && setUjianLoading(false));
     return () => {
@@ -852,12 +519,37 @@ export default function MonitoringKesiapanRaporAdminPage() {
     };
   }, [isAdmin, ujianId, reloadKey]);
 
-  const reports = useMemo(() => {
-    if (initLoading) return null;
-    if (!kelasList.length) return [];
-    if (!base || base.key !== kelasKey) return null;
-    const ujian = ujianList.find((u) => u.id === ujianId);
-    return buildReport({ base, kelasList, ujian, nilaiUjian });
+  /* 4. Agregasi kesiapan rapor untuk kelas + ujian terpilih */
+  useEffect(() => {
+    if (initLoading) {
+      setReports(null);
+      return;
+    }
+    if (!kelasList.length) {
+      setReports([]);
+      return;
+    }
+    if (!base || base.key !== kelasKey) {
+      setReports(null);
+      return;
+    }
+    let off = false;
+    const ujian = ujianList.find((u) => u.id === ujianId) || null;
+    (async () => {
+      // Agregasi dilakukan di server action.
+      const res = await getMonitoringKesiapanReports({
+        base,
+        kelasList,
+        ujian,
+        nilaiUjian,
+      });
+      if (off) return;
+      if (res.error) setError(res.error);
+      else setReports(res.reports);
+    })();
+    return () => {
+      off = true;
+    };
   }, [initLoading, base, kelasKey, kelasList, ujianList, ujianId, nilaiUjian]);
 
   const summary = useMemo(() => {

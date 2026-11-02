@@ -1,3 +1,4 @@
+import { db } from "@/lib/db";
 // "use client";
 
 // import { useCallback, useEffect, useMemo, useState } from "react";
@@ -436,7 +437,7 @@ export default function AbsensiPage() {
 //         const startStr = `${toISODate(earliest)} 00:00:00`;
 //         const endStr = `${toISODate(t)} 23:59:59`;
 
-//         const records = await pb.collection("absensi").getFullList({
+//         const records = await db.getFullList("absensi", {
 //           filter: `siswa_id="${siswa.id}" && tanggal >= "${startStr}" && tanggal <= "${endStr}"`,
 //           requestKey: null,
 //         });
@@ -517,7 +518,7 @@ export default function AbsensiPage() {
 //     try {
 //       const startStr = `${rekapStart} 00:00:00`;
 //       const endStr = `${rekapEnd} 23:59:59`;
-//       const records = await pb.collection("absensi").getFullList({
+//       const records = await db.getFullList("absensi", {
 //         filter: `siswa_id="${siswa.id}" && tanggal >= "${startStr}" && tanggal <= "${endStr}"`,
 //         sort: "-tanggal",
 //         requestKey: null,

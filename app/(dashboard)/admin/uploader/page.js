@@ -1,5 +1,6 @@
 "use client";
 
+import { db } from "@/lib/db";
 import { useEffect, useMemo, useState } from "react";
 import ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
@@ -127,10 +128,8 @@ export default function UploadNilaiPage() {
     (async () => {
       try {
         const [tahun, mapel] = await Promise.all([
-          pb
-            .collection("tahun_ajaran")
-            .getFullList({ sort: "-tahun,-semester" }),
-          pb.collection("mata_pelajaran").getFullList({ sort: "nama_mapel" }),
+          db.getFullList("tahun_ajaran", { sort: "-tahun,-semester" }),
+          db.getFullList("mata_pelajaran", { sort: "nama_mapel" }),
         ]);
         setTahunList(tahun);
         setMapelAll(mapel);
@@ -138,9 +137,7 @@ export default function UploadNilaiPage() {
 
         const user = pb.authStore.record;
         if (user && ["guru mapel", "guru pendamping"].includes(user.role)) {
-          const p = await pb
-            .collection("ploting_guru")
-            .getFullList({ filter: `guru_id="${user.id}"` });
+          const p = await db.getFullList("ploting_guru", { filter: `guru_id="${user.id}"` });
           setPlot(p);
         }
       } catch (e) {
@@ -176,9 +173,9 @@ export default function UploadNilaiPage() {
       (async () => {
         try {
           const [siswa, kelas, wali] = await Promise.all([
-            pb.collection("siswa").getFullList({ sort: "nama_siswa" }),
-            pb.collection("kelas").getFullList({ sort: "tingkat,nama_kelas" }),
-            pb.collection("wali_murid").getFullList(),
+            db.getFullList("siswa", { sort: "nama_siswa" }),
+            db.getFullList("kelas", { sort: "tingkat,nama_kelas" }),
+            db.getFullList("wali_murid"),
           ]);
           if (batal) return;
           const kelasOrder = new Map(kelas.map((k, i) => [k.id, i]));
@@ -234,7 +231,7 @@ export default function UploadNilaiPage() {
           kelasFilter = "";
         }
 
-        let kelasRecs = await pb.collection("kelas").getFullList({
+        let kelasRecs = await db.getFullList("kelas", {
           filter: kelasFilter,
           sort: "tingkat,nama_kelas",
         });
@@ -266,13 +263,9 @@ export default function UploadNilaiPage() {
           `)`;
 
         const [siswaRaw, tpRaw, lp] = await Promise.all([
-          pb.collection("siswa").getFullList({ filter: siswaFilter }),
-          pb
-            .collection("tujuan_pembelajaran")
-            .getFullList({ filter: `mapel_id~"${mapelId}"` }),
-          pb
-            .collection("lingkup_materi")
-            .getFullList({ filter: lmFilter, sort: "created" }),
+          db.getFullList("siswa", { filter: siswaFilter }),
+          db.getFullList("tujuan_pembelajaran", { filter: `mapel_id~"${mapelId}"` }),
+          db.getFullList("lingkup_materi", { filter: lmFilter, sort: "created" }),
         ]);
         if (batal) return;
 
@@ -1102,7 +1095,7 @@ export default function UploadNilaiPage() {
         if (tpCache.has(key)) return tpCache.get(key);
         const fb = `${noTp}|*`;
         if (tpCache.has(fb)) return tpCache.get(fb);
-        const rec = await pb.collection("tujuan_pembelajaran").create({
+        const rec = await db.create("tujuan_pembelajaran", {
           no_tp: noTp,
           mapel_id: [mapelId],
           kelas_id: [kelasId],
@@ -1155,7 +1148,7 @@ export default function UploadNilaiPage() {
         });
         for (const [key, info] of needed) {
           if (lmCache.has(key)) continue;
-          const rec = await pb.collection("lingkup_materi").create({
+          const rec = await db.create("lingkup_materi", {
             nama: info.asli,
             mapel_id: [mapelId],
             kelas_id: [info.kelasId],
@@ -1177,9 +1170,7 @@ export default function UploadNilaiPage() {
           chunk.map((id) => `${fk}~"${id}"`).join(" || ") +
           `)`;
         try {
-          const recs = await pb
-            .collection(koleksi)
-            .getFullList({ filter }, { requestKey: null });
+          const recs = await db.getFullList(koleksi, { filter });
           existing.push(...recs);
         } catch (err) {
           console.warn("Lookup existing gagal untuk chunk", chunk, err);
@@ -1209,34 +1200,27 @@ export default function UploadNilaiPage() {
         if (isTP) {
           if (id) {
             ops.push(() =>
-              pb.collection(koleksi).update(
-                id,
-                {
-                  ...val,
-                  tp_id: [targetId],
-                  siswa_id: [siswa.id],
-                  kelas_id: [siswaKelasId],
-                  tahun_ajaran_id: [tahunId],
-                },
-                { requestKey: null },
-              ),
+              db.update(koleksi, id, {
+                ...val,
+                tp_id: [targetId],
+                siswa_id: [siswa.id],
+                kelas_id: [siswaKelasId],
+                tahun_ajaran_id: [tahunId],
+              }),
             );
           } else {
             ops.push(() =>
-              pb.collection(koleksi).create(
-                {
-                  k1: -1,
-                  k2: -1,
-                  k3: -1,
-                  k4: -1,
-                  ...val,
-                  tp_id: [targetId],
-                  siswa_id: [siswa.id],
-                  kelas_id: [siswaKelasId],
-                  tahun_ajaran_id: [tahunId],
-                },
-                { requestKey: null },
-              ),
+              db.create(koleksi, {
+                k1: -1,
+                k2: -1,
+                k3: -1,
+                k4: -1,
+                ...val,
+                tp_id: [targetId],
+                siswa_id: [siswa.id],
+                kelas_id: [siswaKelasId],
+                tahun_ajaran_id: [tahunId],
+              }),
             );
           }
         } else {
@@ -1249,8 +1233,8 @@ export default function UploadNilaiPage() {
           };
           ops.push(() =>
             id
-              ? pb.collection(koleksi).update(id, body, { requestKey: null })
-              : pb.collection(koleksi).create(body, { requestKey: null }),
+              ? db.update(koleksi, id, body)
+              : db.create(koleksi, body),
           );
         }
       });
@@ -1323,12 +1307,10 @@ export default function UploadNilaiPage() {
         };
         if (r.aksi === "update" && r.existing) {
           return () =>
-            pb
-              .collection("wali_murid")
-              .update(r.existing.id, body, { requestKey: null });
+            db.update("wali_murid", r.existing.id, body, { requestKey: null });
         }
         return () =>
-          pb.collection("wali_murid").create(body, { requestKey: null });
+          db.create("wali_murid", body, { requestKey: null });
       });
 
       let selesai = 0;
@@ -1391,12 +1373,10 @@ export default function UploadNilaiPage() {
       const ops = preview.valid.map((r) => {
         if (r.aksi === "update" && r.existing) {
           return () =>
-            pb
-              .collection("siswa")
-              .update(r.existing.id, r.perubahan, { requestKey: null });
+            db.update("siswa", r.existing.id, r.perubahan, { requestKey: null });
         }
         return () =>
-          pb.collection("siswa").create(r.perubahan, { requestKey: null });
+          db.create("siswa", r.perubahan, { requestKey: null });
       });
 
       let selesai = 0;

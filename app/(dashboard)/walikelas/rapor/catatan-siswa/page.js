@@ -1,7 +1,9 @@
 "use client";
 
+import { db } from "@/lib/db";
+import { getCatatanSiswaData } from "@/actions/walikelas-catatan-siswa.action";
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { pb } from "@/lib/pocketbase";
+import { getCurrentUser } from "@/lib/pocketbase";
 import * as XLSX from "xlsx-js-style";
 
 // ------------------------------------------------------------------
@@ -23,10 +25,6 @@ function firstErrorMessage(err) {
     if (firstKey) return data[firstKey]?.message || "Data tidak valid.";
   }
   return err?.message || "Terjadi kesalahan. Coba lagi.";
-}
-
-function pbQuote(str) {
-  return String(str).replace(/"/g, '\\"');
 }
 
 // Format tanggal untuk kolom Excel
@@ -83,60 +81,19 @@ export default function CatatanSiswaPage() {
     setLoading(true);
     setErrorBase("");
     try {
-      const currentUser = pb.authStore.model;
+      const currentUser = getCurrentUser();
       if (!currentUser) {
         setErrorBase("Kamu belum login.");
         setLoading(false);
         return;
       }
 
-      const kelasGuru = await pb.collection("kelas").getFullList({
-        filter: `walikelas_id = "${pbQuote(currentUser.id)}" || pendamping_id = "${pbQuote(currentUser.id)}"`,
-        sort: "tingkat,nama_kelas",
-        requestKey: null,
-      });
-      setGuruKelasList(kelasGuru);
-
-      if (kelasGuru.length === 0) {
-        setSiswaList([]);
-        setList([]);
-        setLoading(false);
-        return;
-      }
-
-      const myKelasIds = kelasGuru.map((k) => k.id);
-
-      const siswaRes = await pb.collection("siswa").getFullList({
-        filter: myKelasIds
-          .map((id) => `kelas_id = "${pbQuote(id)}"`)
-          .join(" || "),
-        sort: "nama_siswa",
-        expand: "kelas_id",
-        requestKey: null,
-      });
-      setSiswaList(siswaRes);
-
-      if (siswaRes.length === 0) {
-        setList([]);
-        setLoading(false);
-        return;
-      }
-
-      const mySiswaIds = siswaRes.map((s) => s.id);
-
-      const filterCatatan =
-        `(${mySiswaIds.map((id) => `siswa_id = "${pbQuote(id)}"`).join(" || ")})` +
-        ` && ` +
-        `(${myKelasIds.map((id) => `kelas_id = "${pbQuote(id)}"`).join(" || ")})`;
-
-      const catatanRes = await pb.collection("catatan_siswa").getFullList({
-        filter: filterCatatan,
-        sort: "-created",
-        expand: "siswa_id,kelas_id",
-        requestKey: null,
-      });
-
-      setList(catatanRes);
+      // Fetch + filter + agregasi dilakukan di server action.
+      const res = await getCatatanSiswaData({ userId: currentUser.id });
+      setGuruKelasList(res.guruKelasList);
+      setSiswaList(res.siswaList);
+      setList(res.list);
+      if (res.error) setErrorBase(res.error);
     } catch (err) {
       console.error(err);
       setErrorBase(
@@ -498,14 +455,12 @@ export default function CatatanSiswaPage() {
         }
 
         try {
-          const created = await pb.collection("catatan_siswa").create({
+          const created = await db.create("catatan_siswa", {
             siswa_id: siswa.id,
             kelas_id: kelasId,
             catatan,
           });
-          const full = await pb
-            .collection("catatan_siswa")
-            .getOne(created.id, { expand: "siswa_id,kelas_id" });
+          const full = await db.getOne("catatan_siswa", created.id, { expand: "siswa_id,kelas_id" });
           createdItems.push(full);
           success++;
         } catch (err) {
@@ -608,19 +563,13 @@ export default function CatatanSiswaPage() {
       };
 
       if (isEditing) {
-        const updated = await pb
-          .collection("catatan_siswa")
-          .update(form.id, payload);
-        const full = await pb
-          .collection("catatan_siswa")
-          .getOne(updated.id, { expand: "siswa_id,kelas_id" });
+        const updated = await db.update("catatan_siswa", form.id, payload);
+        const full = await db.getOne("catatan_siswa", updated.id, { expand: "siswa_id,kelas_id" });
         setList((prev) => prev.map((c) => (c.id === full.id ? full : c)));
         setToast("Catatan siswa berhasil diperbarui.");
       } else {
-        const created = await pb.collection("catatan_siswa").create(payload);
-        const full = await pb
-          .collection("catatan_siswa")
-          .getOne(created.id, { expand: "siswa_id,kelas_id" });
+        const created = await db.create("catatan_siswa", payload);
+        const full = await db.getOne("catatan_siswa", created.id, { expand: "siswa_id,kelas_id" });
         setList((prev) => [full, ...prev]);
         setToast("Catatan siswa berhasil ditambahkan.");
       }
@@ -640,7 +589,7 @@ export default function CatatanSiswaPage() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      await pb.collection("catatan_siswa").delete(deleteTarget.id);
+      await db.remove("catatan_siswa", deleteTarget.id);
       setList((prev) => prev.filter((c) => c.id !== deleteTarget.id));
       setToast("Catatan siswa berhasil dihapus.");
       setDeleteTarget(null);

@@ -1,5 +1,7 @@
 "use client";
 
+import { db } from "@/lib/db";
+import { getUsersTtd } from "@/actions/ict-rapor-ttd.action";
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { pb, getCurrentUser } from "@/lib/pocketbase";
 
@@ -219,12 +221,13 @@ export default function UploadTtdPage() {
     setUsersLoading(true);
     setUsersError("");
     try {
-      const list = await pb.collection("users").getFullList({
-        sort: "nama_lengkap",
-        batch: 200,
-        requestKey: null,
-      });
-      setUsers(list);
+      // Daftar pengguna dibaca lewat server action.
+      const res = await getUsersTtd();
+      if (res.error) {
+        setUsersError(res.error);
+      } else {
+        setUsers(res.users || []);
+      }
     } catch (err) {
       setUsersError(err?.message || "Gagal memuat data pengguna");
     } finally {
@@ -398,7 +401,7 @@ export default function UploadTtdPage() {
       // Pakai FormData (multipart) seperti saat upload, bukan JSON.
       const formData = new FormData();
       formData.append("ttd", "");
-      await pb.collection("users").update(toDelete.id, formData);
+      await db.update("users", toDelete.id, formData);
       setUsers((prev) =>
         prev.map((u) => (u.id === toDelete.id ? { ...u, ttd: "" } : u)),
       );

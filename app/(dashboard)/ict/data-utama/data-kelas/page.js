@@ -1,5 +1,11 @@
 "use client";
 
+import { db } from "@/lib/db";
+import {
+  getIctDataKelas,
+  countSiswaKelas,
+  getSemuaUser,
+} from "@/actions/ict-data-kelas.action";
 import { pb } from "@/lib/pocketbase";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -449,15 +455,15 @@ function ImportModal({ onImport, onCancel, loading }) {
   );
 }
 
-function SiswaCount({ kelasId, pb }) {
+function SiswaCount({ kelasId }) {
   const [count, setCount] = useState(null);
 
   useEffect(() => {
     let alive = true;
-    pb.collection("siswa")
-      .getList(1, 1, { filter: `kelas_id = "${kelasId}"`, requestKey: null })
+    // Jumlah siswa dibaca lewat server action.
+    countSiswaKelas(kelasId)
       .then((res) => {
-        if (alive) setCount(res.totalItems);
+        if (alive) setCount(res?.totalItems ?? 0);
       })
       .catch(() => {
         if (alive) setCount(0);
@@ -465,7 +471,7 @@ function SiswaCount({ kelasId, pb }) {
     return () => {
       alive = false;
     };
-  }, [kelasId, pb]);
+  }, [kelasId]);
 
   if (count === null) {
     return (
@@ -543,7 +549,7 @@ function KelasCard({ item, onDetail, onEdit, onDelete }) {
               Total Siswa
             </p>
             <div className="text-[13px] font-semibold text-gray-800">
-              <SiswaCount kelasId={item.id} pb={pb} />
+              <SiswaCount kelasId={item.id} />
             </div>
           </div>
         </div>
@@ -649,11 +655,13 @@ export default function DataKelasPage() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const data = await pb.collection("kelas").getFullList({
-        expand: "walikelas_id,pendamping_id",
-        requestKey: null,
-      });
-      setKelas(data);
+      // Baca data kelas + guru (beserta perhitungan turunannya) via server action.
+      const res = await getIctDataKelas();
+      if (res.error) {
+        console.error("Gagal mengambil data kelas:", res.error);
+      }
+      setKelas(res.kelasList || []);
+      setGuruList(res.guruList || []);
     } catch (err) {
       console.error("Gagal mengambil data kelas:", err);
     } finally {
@@ -661,21 +669,8 @@ export default function DataKelasPage() {
     }
   };
 
-  const fetchGuru = async () => {
-    try {
-      const data = await pb.collection("users").getList(1, 100, {
-        filter: 'role = "guru walikelas" || role = "guru pendamping"',
-        requestKey: null,
-      });
-      setGuruList(data.items);
-    } catch (err) {
-      console.error("Gagal mengambil data guru:", err);
-    }
-  };
-
   useEffect(() => {
     fetchData();
-    fetchGuru();
   }, []);
 
   const filteredKelas = kelas.filter((item) => {
@@ -693,7 +688,7 @@ export default function DataKelasPage() {
   const handleTambah = async (form) => {
     try {
       setSubmitLoading(true);
-      await pb.collection("kelas").create(form);
+      await db.create("kelas", form);
       const user = currentUser();
       await createSystemLog({
         type: "succes",
@@ -716,7 +711,7 @@ export default function DataKelasPage() {
   const handleEdit = async (form) => {
     try {
       setSubmitLoading(true);
-      await pb.collection("kelas").update(editTarget.id, form);
+      await db.update("kelas", editTarget.id, form);
       showToast("Data kelas berhasil diperbarui!");
       setModalEdit(false);
       const user = currentUser();
@@ -740,7 +735,7 @@ export default function DataKelasPage() {
   const handleDelete = async () => {
     try {
       setSubmitLoading(true);
-      await pb.collection("kelas").delete(deleteTarget.id);
+      await db.remove("kelas", deleteTarget.id);
       const user = currentUser();
       await createSystemLog({
         type: "succes",
@@ -765,7 +760,10 @@ export default function DataKelasPage() {
     try {
       setSubmitLoading(true);
       let success = 0;
-      const allUsers = await pb.collection("users").getFullList();
+      // Daftar seluruh user (untuk memetakan nama -> id) dibaca lewat server action.
+      const { users, error: usersError } = await getSemuaUser();
+      if (usersError) throw new Error(usersError);
+      const allUsers = users;
       for (const row of rows) {
         try {
           const waliNama =
@@ -778,7 +776,7 @@ export default function DataKelasPage() {
           const pendampingUser = allUsers.find(
             (u) => u.nama_lengkap === pendampingNama,
           );
-          await pb.collection("kelas").create({
+          await db.create("kelas", {
             nama_kelas: row.nama_kelas || row["nama kelas"] || "",
             walikelas_id: waliUser?.id || "",
             pendamping_id: pendampingUser?.id || "",

@@ -1,8 +1,10 @@
 "use client";
 
+import { db } from "@/lib/db";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { pb, isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
+import { isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
+import { updateProfileAsAdmin } from "@/actions/profile.action";
 
 export default function EditProfilePage() {
   const router = useRouter();
@@ -71,39 +73,18 @@ export default function EditProfilePage() {
     }));
   };
 
-  // Submit profile update
-  // Submit profile update
-  // Submit profile update via Admin Bypass SDK
-  // Submit profile update via Admin Bypass SDK
+  // Submit profile update (server action dengan bypass admin)
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSaving(true);
     setError("");
     setSuccess("");
 
-    // 1. SIMPAN SESI LOGIN USER SAAT INI (Backup token & record asli)
-    const currentUserAuth = pb.authStore.token;
-    const currentUserRecord = pb.authStore.record;
-
     try {
       if (!formData.nama_lengkap.trim())
         throw new Error("Nama lengkap wajib diisi");
       if (!formData.username.trim()) throw new Error("Username wajib diisi");
 
-      // 2. MASUK SEMENTARA SEBAGAI SUPERUSER / ADMIN
-      try {
-        await pb
-          .collection("_superusers")
-          .authWithPassword(
-            process.env.NEXT_PUBLIC_POCKETBASE_ADMIN_EMAIL,
-            process.env.NEXT_PUBLIC_POCKETBASE_ADMIN_PASSWORD,
-          );
-      } catch (authError) {
-        console.error("Gagal Login Admin:", authError.message);
-        throw new Error("Sistem gagal memverifikasi hak akses Superuser.");
-      }
-
-      // 3. SIAPKAN PAYLOAD DATA UPDATE (Termasuk email)
       const updateData = {
         nama_lengkap: formData.nama_lengkap.trim(),
         username: formData.username.trim(),
@@ -114,27 +95,13 @@ export default function EditProfilePage() {
         updateData.email = formData.email.trim();
       }
 
-      // Eksekusi update data ke database menggunakan authority Superuser
-      const updated = await pb.collection("users").update(user.id, updateData);
+      const result = await updateProfileAsAdmin(user.id, updateData);
+      if (!result.success) throw new Error(result.error);
 
       // Gabungkan data terbaru ke dalam LocalStorage
-      const mergedUser = { ...user, ...updated };
+      const mergedUser = { ...user, ...result.record };
       localStorage.setItem("pb_user", JSON.stringify(mergedUser));
 
-      // 4. KRUSIAL: TIMPA DATA RECORD LAMA DENGAN DATA TERBARU DARI DATABASE
-      // Ini dilakukan agar memori internal AuthStore membawa email yang baru diupdate
-      if (currentUserRecord) {
-        Object.assign(currentUserRecord, updated);
-      }
-
-      // 5. KEMBALIKAN SESI LOGIN USER SEMULA (Sukses)
-      if (currentUserAuth && currentUserRecord) {
-        pb.authStore.save(currentUserAuth, currentUserRecord);
-      } else {
-        pb.authStore.clear();
-      }
-
-      // Update state local untuk sinkronisasi instan sebelum reload
       setSuccess("Profil dan Email berhasil diperbarui!");
       setUser(mergedUser);
 
@@ -145,14 +112,6 @@ export default function EditProfilePage() {
     } catch (err) {
       console.error("Error updating profile:", err);
       setError(err.message || "Gagal memperbarui profil. Silakan coba lagi.");
-
-      // KEMBALIKAN SESI USER SEMULA (Jika terjadi error di tengah jalan)
-      // Hal ini mencegah user ter-logout otomatis akibat gagal hit API
-      if (currentUserAuth && currentUserRecord) {
-        pb.authStore.save(currentUserAuth, currentUserRecord);
-      } else {
-        pb.authStore.clear();
-      }
     } finally {
       setSaving(false);
     }
@@ -181,7 +140,7 @@ export default function EditProfilePage() {
       }
 
       // Update password
-      await pb.collection("users").update(user.id, {
+      await db.update("users", user.id, {
         oldPassword: passwordData.oldPassword,
         password: passwordData.newPassword,
         passwordConfirm: passwordData.confirmPassword,

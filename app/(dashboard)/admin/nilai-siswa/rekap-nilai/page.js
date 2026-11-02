@@ -1,6 +1,7 @@
 "use client";
 
-import { getCurrentUser, pb } from "@/lib/pocketbase";
+import { db } from "@/lib/db";
+import { getCurrentUser } from "@/lib/pocketbase";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import * as ExcelJS from "exceljs";
@@ -145,11 +146,11 @@ export default function RekapNilaiPage() {
       try {
         setLoadingKelas(true);
         const [kelasData, siswaData] = await Promise.all([
-          pb.collection("kelas").getFullList({
+          db.getFullList("kelas", {
             sort: "tingkat,nama_kelas",
             requestKey: null,
           }),
-          pb.collection("siswa").getFullList({
+          db.getFullList("siswa", {
             fields: "id,kelas_id",
             requestKey: null,
           }),
@@ -209,25 +210,25 @@ export default function RekapNilaiPage() {
 
         const [siswaData, mapelKhusus, mapelTingkat, plotingData, ujianData] =
           await Promise.all([
-            pb.collection("siswa").getFullList({
+            db.getFullList("siswa", {
               filter: `kelas_id = "${kelasData.id}"`,
               sort: "nama_siswa",
               requestKey: null,
             }),
-            pb.collection("mata_pelajaran").getFullList({
+            db.getFullList("mata_pelajaran", {
               filter: `spesifik_kelas_id ~ "${kelasData.id}"`,
               requestKey: null,
             }),
-            pb.collection("mata_pelajaran").getFullList({
+            db.getFullList("mata_pelajaran", {
               filter: `target_tingkat ~ "${String(kelasData.tingkat)}"`,
               requestKey: null,
             }),
-            pb.collection("ploting_guru").getFullList({
+            db.getFullList("ploting_guru", {
               filter: `kelas_id ~ "${kelasData.id}"`,
               expand: "guru_id",
               requestKey: null,
             }),
-            pb.collection("pengaturan_ujian").getFullList({
+            db.getFullList("pengaturan_ujian", {
               filter: `status_akses = "buka" && (target_kelas_id ~ "${kelasData.id}" || target_tingkat ~ "${String(kelasData.tingkat)}")`,
               requestKey: null,
             }),
@@ -307,7 +308,7 @@ export default function RekapNilaiPage() {
           const ujianFilter = ujianData
             .map((u) => `pengaturan_ujian_id = "${u.id}"`)
             .join(" || ");
-          nilaiUjianData = await pb.collection("nilai_ujian").getFullList({
+          nilaiUjianData = await db.getFullList("nilai_ujian", {
             filter: ujianFilter,
             requestKey: null,
           });
@@ -341,11 +342,11 @@ export default function RekapNilaiPage() {
             .map((m) => `mapel_id ~ "${m.id}"`)
             .join(" || ");
           [tpAll, lpAll] = await Promise.all([
-            pb.collection("tujuan_pembelajaran").getFullList({
+            db.getFullList("tujuan_pembelajaran", {
               filter: `(${mapelFilter}) && kelas_id ~ "${kelasData.id}"`,
               requestKey: null,
             }),
-            pb.collection("lingkup_materi").getFullList({
+            db.getFullList("lingkup_materi", {
               filter: `(${mapelFilter}) && kelas_id ~ "${kelasData.id}"`,
               requestKey: null,
             }),
@@ -363,11 +364,11 @@ export default function RekapNilaiPage() {
         });
 
         const [nfData, nsData] = await Promise.all([
-          pb.collection("nilai_formatif").getFullList({
+          db.getFullList("nilai_formatif", {
             filter: `kelas_id = "${kelasData.id}"`,
             requestKey: null,
           }),
-          pb.collection("nilai_sumatif").getFullList({
+          db.getFullList("nilai_sumatif", {
             filter: `kelas_id = "${kelasData.id}"`,
             requestKey: null,
           }),
@@ -663,18 +664,12 @@ export default function RekapNilaiPage() {
 
       const [siswaAll, mapelAll, tpAll, lmAll, nfAll, nsAll] =
         await Promise.all([
-          pb
-            .collection("siswa")
-            .getFullList({ sort: "nama_siswa", requestKey: null }),
-          pb.collection("mata_pelajaran").getFullList({ requestKey: null }),
-          pb
-            .collection("tujuan_pembelajaran")
-            .getFullList({ requestKey: null }),
-          pb
-            .collection("lingkup_materi")
-            .getFullList({ sort: "created", requestKey: null }),
-          pb.collection("nilai_formatif").getFullList({ requestKey: null }),
-          pb.collection("nilai_sumatif").getFullList({ requestKey: null }),
+          db.getFullList("siswa", { sort: "nama_siswa", requestKey: null }),
+          db.getFullList("mata_pelajaran", { requestKey: null }),
+          db.getFullList("tujuan_pembelajaran", { requestKey: null }),
+          db.getFullList("lingkup_materi", { sort: "created", requestKey: null }),
+          db.getFullList("nilai_formatif", { requestKey: null }),
+          db.getFullList("nilai_sumatif", { requestKey: null }),
         ]);
 
       const mapelById = new Map(mapelAll.map((m) => [m.id, m]));

@@ -1,5 +1,6 @@
 "use client";
 
+import { db } from "@/lib/db";
 import { pb } from "@/lib/pocketbase";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -103,7 +104,7 @@ function KelasCard({ item, onDetail, onEdit, onDelete }) {
               Total Siswa
             </p>
             <div className="text-[13px] font-semibold text-gray-800">
-              <SiswaCount kelasId={item.id} pb={pb} />
+              <SiswaCount kelasId={item.id} />
             </div>
           </div>
         </div>
@@ -212,7 +213,7 @@ export default function DataKelasPage() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const data = await pb.collection("kelas").getFullList({
+      const data = await db.getFullList("kelas", {
         expand: "walikelas_id",
         requestKey: null,
       });
@@ -226,7 +227,7 @@ export default function DataKelasPage() {
 
   const fetchGuru = async () => {
     try {
-      const data = await pb.collection("users").getList(1, 100, {
+      const data = await db.getList("users", 1, 100, {
         filter: 'role = "guru_walikelas"',
         requestKey: null,
       });
@@ -260,7 +261,7 @@ export default function DataKelasPage() {
   const handleTambah = async (form) => {
     try {
       setSubmitLoading(true);
-      await pb.collection("kelas").create(form);
+      await db.create("kelas", form);
       const user = currentUser();
       await createSystemLog({
         type: "succes",
@@ -283,7 +284,7 @@ export default function DataKelasPage() {
   const handleEdit = async (form) => {
     try {
       setSubmitLoading(true);
-      await pb.collection("kelas").update(editTarget.id, form);
+      await db.update("kelas", editTarget.id, form);
       showToast("Data kelas berhasil diperbarui!");
       setModalEdit(false);
       const user = currentUser();
@@ -307,7 +308,7 @@ export default function DataKelasPage() {
   const handleDelete = async () => {
     try {
       setSubmitLoading(true);
-      await pb.collection("kelas").delete(deleteTarget.id);
+      await db.remove("kelas", deleteTarget.id);
       const user = currentUser();
       await createSystemLog({
         type: "succes",
@@ -332,7 +333,7 @@ export default function DataKelasPage() {
     try {
       setSubmitLoading(true);
       let success = 0;
-      const allUsers = await pb.collection("users").getFullList();
+      const allUsers = await db.getFullList("users");
       for (const row of rows) {
         try {
           const waliNama =
@@ -345,7 +346,7 @@ export default function DataKelasPage() {
           const pendampingUser = allUsers.find(
             (u) => u.nama_lengkap === pendampingNama,
           );
-          await pb.collection("kelas").create({
+          await db.create("kelas", {
             nama_kelas: row.nama_kelas || row["nama kelas"] || "",
             walikelas_id: waliUser?.id || "",
             pendamping_id: pendampingUser?.id || "",

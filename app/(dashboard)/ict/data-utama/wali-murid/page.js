@@ -1,5 +1,10 @@
 "use client";
 
+import { db } from "@/lib/db";
+import {
+  getIctWaliMurid,
+  getIctSiswaOptions,
+} from "@/actions/ict-wali-murid.action";
 import { useEffect, useState, useCallback } from "react";
 import { pb } from "@/lib/pocketbase";
 import { createSystemLog } from "@/lib/logger";
@@ -265,6 +270,7 @@ export default function AkunWaliMuridPage() {
   const [loadData, setLoadData] = useState(false);
   const [dataWali, setDataWali] = useState([]);
   const [siswaList, setSiswaList] = useState([]);
+  const [siswaSudahPunyaAkunIds, setSiswaSudahPunyaAkunIds] = useState([]);
   const [toast, setToast] = useState(null);
   const [fetchError, setFetchError] = useState(null);
 
@@ -295,11 +301,17 @@ export default function AkunWaliMuridPage() {
     try {
       setLoadData(true);
       setFetchError(null);
-      const data = await pb.collection("wali_murid").getFullList({
-        expand: "siswa_id,siswa_id.kelas_id",
-        requestKey: null,
-      });
-      setDataWali(data);
+      // Baca data wali murid (+ derived: id siswa yang sudah punya akun)
+      // dilakukan di server action.
+      const res = await getIctWaliMurid();
+      if (res.error) {
+        setFetchError(res.error);
+        setDataWali([]);
+        setSiswaSudahPunyaAkunIds([]);
+      } else {
+        setDataWali(res.dataWali);
+        setSiswaSudahPunyaAkunIds(res.siswaSudahPunyaAkunIds);
+      }
     } catch (error) {
       console.error("[wali_murid] gagal fetch:", error);
       setFetchError(
@@ -308,6 +320,7 @@ export default function AkunWaliMuridPage() {
           "Gagal mengambil data wali murid",
       );
       setDataWali([]);
+      setSiswaSudahPunyaAkunIds([]);
     } finally {
       setLoadData(false);
     }
@@ -315,12 +328,13 @@ export default function AkunWaliMuridPage() {
 
   const fetchSiswa = useCallback(async () => {
     try {
-      const data = await pb.collection("siswa").getFullList({
-        expand: "kelas_id",
-        requestKey: null,
-        sort: "nama_siswa",
-      });
-      setSiswaList(data);
+      // Baca daftar siswa (expand kelas) dilakukan di server action.
+      const res = await getIctSiswaOptions();
+      if (res.error) {
+        console.error("[siswa] gagal fetch:", res.error);
+      } else {
+        setSiswaList(res.siswaList);
+      }
     } catch (error) {
       console.error("[siswa] gagal fetch:", error);
     }
@@ -354,14 +368,6 @@ export default function AkunWaliMuridPage() {
 
     return matchTingkat && matchSearch;
   });
-
-  const siswaSudahPunyaAkun = new Set(
-    dataWali.flatMap((w) => {
-      const raw = w.siswa_id;
-      if (Array.isArray(raw)) return raw;
-      return raw ? [raw] : [];
-    }),
-  );
 
   function handleChange(e) {
     const { name, value, type, checked } = e.target;
@@ -403,7 +409,7 @@ export default function AkunWaliMuridPage() {
   async function handleToggleVerified(item) {
     const newVal = !item.verified;
     try {
-      await pb.collection("wali_murid").update(item.id, { verified: newVal });
+      await db.update("wali_murid", item.id, { verified: newVal });
       setDataWali((prev) =>
         prev.map((d) => (d.id === item.id ? { ...d, verified: newVal } : d)),
       );
@@ -454,7 +460,7 @@ export default function AkunWaliMuridPage() {
         passwordConfirm: form.password,
       };
 
-      await pb.collection("wali_murid").create(payload);
+      await db.create("wali_murid", payload);
       const user = currentUser();
       await createSystemLog({
         type: "succes",
@@ -492,7 +498,7 @@ export default function AkunWaliMuridPage() {
   async function handleDelete(e) {
     e.preventDefault();
     try {
-      await pb.collection("wali_murid").delete(deleteTarget);
+      await db.remove("wali_murid", deleteTarget);
       showToast("Berhasil menghapus akun wali murid");
       handleCloseModal();
       fetchWali();
@@ -771,7 +777,7 @@ export default function AkunWaliMuridPage() {
                 >
                   <option value="">Pilih Siswa</option>
                   {siswaList.map((s) => {
-                    const sudahAda = siswaSudahPunyaAkun.has(s.id);
+                    const sudahAda = siswaSudahPunyaAkunIds.includes(s.id);
                     const namaKelas = s.expand?.kelas_id?.nama_kelas;
                     return (
                       <option key={s.id} value={s.id} disabled={sudahAda}>

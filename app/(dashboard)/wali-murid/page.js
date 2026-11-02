@@ -1,8 +1,9 @@
 "use client";
 
+import { db } from "@/lib/db";
 import { useEffect, /* useMemo, */ useState } from "react";
 import { useRouter } from "next/navigation";
-import { pb, getCurrentUser, isAuthenticated } from "@/lib/pocketbase";
+import { getCurrentUser, isAuthenticated } from "@/lib/pocketbase";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -541,28 +542,34 @@ export default function OverviewWaliMuridPage() {
           return;
         }
 
-        const siswaData = await pb.collection("siswa").getOne(siswaId);
+        const siswaData = await db.getOne("siswa", siswaId);
         if (isMounted) setSiswa(siswaData);
 
-        let kelasData = null;
+        // Ujian yang akses raportnya dibuka + data kelas (paralel)
+        const [ujianBuka, kelasData] = await Promise.all([
+          db.getFullList("pengaturan_ujian", {
+            filter: "akses_rapor=true",
+            sort: "nama_ujian",
+          }),
+          (Array.isArray(siswaData.kelas_id)
+            ? siswaData.kelas_id[0]
+            : siswaData.kelas_id
+          )
+            ? db
+                .getOne(
+                  "kelas",
+                  Array.isArray(siswaData.kelas_id)
+                    ? siswaData.kelas_id[0]
+                    : siswaData.kelas_id,
+                )
+                .catch(() => null)
+            : Promise.resolve(null),
+        ]);
+        if (isMounted && kelasData) setKelas(kelasData);
+
         const kelasId = Array.isArray(siswaData.kelas_id)
           ? siswaData.kelas_id[0]
           : siswaData.kelas_id;
-        if (kelasId) {
-          try {
-            kelasData = await pb.collection("kelas").getOne(kelasId);
-            if (isMounted) setKelas(kelasData);
-          } catch (e) {
-            console.warn("Gagal memuat kelas:", e);
-          }
-        }
-
-        // ===== RAPORT =====
-        // Ujian yang akses raportnya dibuka (akses_rapor = true)
-        const ujianBuka = await pb.collection("pengaturan_ujian").getFullList({
-          filter: "akses_rapor=true",
-          sort: "nama_ujian",
-        });
 
         // Cocokkan dengan tingkat / kelas anak.
         // target_tingkat & target_kelas_id keduanya multi-value (array).
@@ -594,10 +601,10 @@ export default function OverviewWaliMuridPage() {
         const { start: monthStart, end: monthEnd } = monthRange();
 
         const [todayList, bulanList] = await Promise.all([
-          pb.collection("absensi").getFullList({
+          db.getFullList("absensi", {
             filter: `siswa_id="${siswaId}" && tanggal>="${todayStart}" && tanggal<"${todayEnd}"`,
           }),
-          pb.collection("absensi").getFullList({
+          db.getFullList("absensi", {
             filter: `siswa_id="${siswaId}" && tanggal>="${monthStart}" && tanggal<"${monthEnd}"`,
             sort: "-tanggal",
           }),
@@ -625,7 +632,7 @@ export default function OverviewWaliMuridPage() {
             .sort()
             .pop() + " 23:59:59";
 
-        const absensiRange = await pb.collection("absensi").getFullList({
+        const absensiRange = await db.getFullList("absensi", {
           filter: `siswa_id="${siswaId}" && tanggal>="${minStart}" && tanggal<="${maxEnd}"`,
         });
 

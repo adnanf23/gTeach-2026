@@ -1,9 +1,10 @@
 "use client";
 
+import { getKelasDetailData } from "@/actions/guru-mapel-daftar-kelas-detail.action";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 // Sesuaikan path import berikut dengan lokasi file pocketbase client di project-mu
-import { pb, isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
+import { isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
 
 // =========================================================
 // Helper
@@ -157,37 +158,23 @@ export default function DetailKelasPage() {
     setErrorMsg(null);
     setNotFound(false);
     try {
-      const [kelasRec, siswaRec, plotingRecRaw] = await Promise.all([
-        pb.collection("kelas").getOne(id, {
-          expand: "walikelas_id,pendamping_id,tahun_ajaran_id",
-          requestKey: null,
-        }),
-        pb.collection("siswa").getFullList({
-          filter: `kelas_id="${id}"`,
-          sort: "nama_siswa",
-          requestKey: null,
-        }),
-        pb.collection("ploting_guru").getFullList({
-          filter: `kelas_id~"${id}"`,
-          expand: "guru_id,mapel_id",
-          requestKey: null,
-        }),
-      ]);
+      const res = await getKelasDetailData(id);
 
-      const plotingRec = plotingRecRaw.filter((p) => {
-        const kelasIds = Array.isArray(p.kelas_id) ? p.kelas_id : [p.kelas_id];
-        return kelasIds.includes(id);
-      });
-
-      setKelas(kelasRec);
-      setSiswaList(siswaRec);
-      setPlotingList(plotingRec);
-    } catch (e) {
-      if (e?.status === 404) {
+      if (res.notFound) {
         setNotFound(true);
-      } else {
-        setErrorMsg("Gagal memuat data kelas.");
+        return;
       }
+
+      if (res.error) {
+        setErrorMsg("Gagal memuat data kelas.");
+        return;
+      }
+
+      setKelas(res.kelas);
+      setSiswaList(res.siswaList);
+      setPlotingList(res.plotingList);
+    } catch {
+      setErrorMsg("Gagal memuat data kelas.");
     } finally {
       setLoading(false);
     }

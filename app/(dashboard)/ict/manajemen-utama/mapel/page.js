@@ -1,7 +1,8 @@
 "use client";
 
+import { db } from "@/lib/db";
+import { getIctMapel, getIctMapelItem } from "@/actions/ict-mapel.action";
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { pb } from "@/lib/pocketbase";
 
 /* ═══════════════════════════════════════════════════════════════
    KONSTANTA
@@ -358,27 +359,17 @@ export default function MataPelajaranPage() {
   const loadData = useCallback(async () => {
     setLoading(true);
     setErrorBase("");
-    try {
-      const [mapel, kelas] = await Promise.all([
-        pb.collection("mata_pelajaran").getFullList({
-          sort: "nama_mapel",
-          expand: "spesifik_kelas_id",
-          requestKey: null,
-        }),
-        pb
-          .collection("kelas")
-          .getFullList({ sort: "tingkat,nama_kelas", requestKey: null }),
-      ]);
-      setMapelList(mapel);
-      setKelasList(kelas);
-    } catch (err) {
-      console.error(err);
+    // Baca data (mapel + kelas) dilakukan di server action.
+    const res = await getIctMapel();
+    if (res.error) {
       setErrorBase(
         "Gagal memuat data. Pastikan PocketBase berjalan dan kamu sudah login.",
       );
-    } finally {
-      setLoading(false);
+    } else {
+      setMapelList(res.mapelList);
+      setKelasList(res.kelasList);
     }
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -513,21 +504,19 @@ export default function MataPelajaranPage() {
       };
 
       if (isEditing) {
-        const updated = await pb
-          .collection("mata_pelajaran")
-          .update(form.id, payload);
-        const full = await pb
-          .collection("mata_pelajaran")
-          .getOne(updated.id, { expand: "spesifik_kelas_id" });
-        setMapelList((prev) => prev.map((m) => (m.id === full.id ? full : m)));
+        const updated = await db.update("mata_pelajaran", form.id, payload);
+        const { item, error } = await getIctMapelItem(updated.id);
+        if (error) throw new Error(error);
+        setMapelList((prev) =>
+          prev.map((m) => (m.id === item.id ? item : m)),
+        );
         setToast("Mata pelajaran berhasil diperbarui.");
       } else {
-        const created = await pb.collection("mata_pelajaran").create(payload);
-        const full = await pb
-          .collection("mata_pelajaran")
-          .getOne(created.id, { expand: "spesifik_kelas_id" });
+        const created = await db.create("mata_pelajaran", payload);
+        const { item, error } = await getIctMapelItem(created.id);
+        if (error) throw new Error(error);
         setMapelList((prev) =>
-          [...prev, full].sort((a, b) =>
+          [...prev, item].sort((a, b) =>
             a.nama_mapel.localeCompare(b.nama_mapel),
           ),
         );
@@ -546,7 +535,7 @@ export default function MataPelajaranPage() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      await pb.collection("mata_pelajaran").delete(deleteTarget.id);
+      await db.remove("mata_pelajaran", deleteTarget.id);
       setMapelList((prev) => prev.filter((m) => m.id !== deleteTarget.id));
       setToast("Mata pelajaran berhasil dihapus.");
       setDeleteTarget(null);
@@ -817,7 +806,7 @@ export default function MataPelajaranPage() {
     for (let i = 0; i < valid.length; i++) {
       const item = valid[i];
       try {
-        await pb.collection("mata_pelajaran").create(item.payload);
+        await db.create("mata_pelajaran", item.payload);
         success++;
       } catch (err) {
         failed.push({

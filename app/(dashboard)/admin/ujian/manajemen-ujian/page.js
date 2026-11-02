@@ -1,8 +1,9 @@
 "use client";
 
+import { db } from "@/lib/db";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { pb, isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
+import { isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
 
 const ALLOWED_ROLES = ["admin", "ict"];
 
@@ -97,11 +98,11 @@ export default function ManajemenUjianPage() {
       setError("");
       try {
         const [taRecords, kelasRecords] = await Promise.all([
-          pb.collection("tahun_ajaran").getFullList({
+          db.getFullList("tahun_ajaran", {
             sort: "-tahun,-semester",
             requestKey: null,
           }),
-          pb.collection("kelas").getFullList({
+          db.getFullList("kelas", {
             sort: "tingkat,nama_kelas",
             requestKey: null,
           }),
@@ -137,7 +138,7 @@ export default function ManajemenUjianPage() {
       setLoadingUjian(true);
       setError("");
       try {
-        const records = await pb.collection("pengaturan_ujian").getFullList({
+        const records = await db.getFullList("pengaturan_ujian", {
           filter: `tahun_ajaran_id = "${selectedTahunAjaranId}"`,
           sort: "jenis_ujian,nama_ujian",
           expand: "target_kelas_id",
@@ -226,14 +227,12 @@ export default function ManajemenUjianPage() {
       };
 
       if (editingId) {
-        const updated = await pb
-          .collection("pengaturan_ujian")
-          .update(editingId, payload);
+        const updated = await db.update("pengaturan_ujian", editingId, payload);
         setUjianList((prev) =>
           prev.map((u) => (u.id === updated.id ? updated : u)),
         );
       } else {
-        const created = await pb.collection("pengaturan_ujian").create(payload);
+        const created = await db.create("pengaturan_ujian", payload);
         setUjianList((prev) => [...prev, created]);
       }
       setShowForm(false);
@@ -255,7 +254,7 @@ export default function ManajemenUjianPage() {
     )
       return;
     try {
-      await pb.collection("pengaturan_ujian").delete(id);
+      await db.remove("pengaturan_ujian", id);
       setUjianList((prev) => prev.filter((u) => u.id !== id));
     } catch (err) {
       console.error("Error deleting pengaturan_ujian:", err);
@@ -268,7 +267,7 @@ export default function ManajemenUjianPage() {
     setTogglingId(u.id);
     setError("");
     try {
-      const updated = await pb.collection("pengaturan_ujian").update(u.id, {
+      const updated = await db.update("pengaturan_ujian", u.id, {
         status_akses: nextStatus,
       });
       setUjianList((prev) =>
@@ -287,7 +286,7 @@ export default function ManajemenUjianPage() {
     setTogglingRaporId(u.id);
     setError("");
     try {
-      const updated = await pb.collection("pengaturan_ujian").update(u.id, {
+      const updated = await db.update("pengaturan_ujian", u.id, {
         akses_rapor: next,
       });
       setUjianList((prev) =>
@@ -334,7 +333,7 @@ export default function ManajemenUjianPage() {
     try {
       const created = await Promise.all(
         toCreate.map((item) =>
-          pb.collection("pengaturan_ujian").create({
+          db.create("pengaturan_ujian", {
             nama_ujian: item.nama_ujian,
             tahun_ajaran_id: selectedTahunAjaranId,
             target_tingkat: TINGKAT_OPTIONS,

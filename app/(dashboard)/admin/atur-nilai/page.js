@@ -1,6 +1,7 @@
 "use client";
 
-import { getCurrentUser, pb } from "@/lib/pocketbase";
+import { db } from "@/lib/db";
+import { getCurrentUser } from "@/lib/pocketbase";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -91,7 +92,7 @@ export default function PengaturanPresentasePage() {
   // ================= AMBIL DATA =================
   const fetchData = async () => {
     try {
-      const records = await pb.collection("presentase_penilaian").getFullList({
+      const records = await db.getFullList("presentase_penilaian", {
         sort: "created",
         requestKey: null,
       });
@@ -180,17 +181,13 @@ export default function PengaturanPresentasePage() {
       };
 
       if (editingId) {
-        await pb
-          .collection("presentase_penilaian")
-          .update(editingId, payload, { requestKey: null });
+        await db.update("presentase_penilaian", editingId, payload, { requestKey: null });
         setMessage({
           type: "success",
           text: "Presentase berhasil diperbarui.",
         });
       } else {
-        await pb
-          .collection("presentase_penilaian")
-          .create(payload, { requestKey: null });
+        await db.create("presentase_penilaian", payload, { requestKey: null });
         setMessage({
           type: "success",
           text: "Presentase berhasil ditambahkan.",
@@ -217,9 +214,7 @@ export default function PengaturanPresentasePage() {
   const handleDelete = async (id) => {
     if (!confirm("Yakin ingin menghapus presentase ini?")) return;
     try {
-      await pb
-        .collection("presentase_penilaian")
-        .delete(id, { requestKey: null });
+      await db.remove("presentase_penilaian", id, { requestKey: null });
       setMessage({ type: "success", text: "Presentase berhasil dihapus." });
       await fetchData();
     } catch (error) {

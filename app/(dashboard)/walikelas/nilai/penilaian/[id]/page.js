@@ -1,6 +1,9 @@
 "use client";
 
-import { getCurrentUser, pb } from "@/lib/pocketbase";
+import { db } from "@/lib/db";
+import { getCurrentUser } from "@/lib/pocketbase";
+import { getWalikelasPenilaianDetail } from "@/actions/walikelas-nilai-penilaian-detail.action";
+import { getTahunAjaranList } from "@/actions/tahun-ajaran.action";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as ExcelJS from "exceljs";
@@ -400,6 +403,11 @@ export default function PenilaianMapelPage() {
   const [siswaList, setSiswaList] = useState([]);
   const [activeTab, setActiveTab] = useState("formatif");
 
+  // FILTER SEMESTER (TAHUN AJARAN)
+  const [semesterList, setSemesterList] = useState([]);
+  const [selectedSemesterId, setSelectedSemesterId] = useState("");
+  const [semesterLoaded, setSemesterLoaded] = useState(false);
+
   // TOAST
   const [toast, setToast] = useState(null);
   const toastTimerRef = useRef(null);
@@ -499,9 +507,38 @@ export default function PenilaianMapelPage() {
     };
   }, [quickOpen]);
 
+  // ================= MUAT DAFTAR SEMESTER =================
+  // Muat daftar semester (tahun ajaran) saat mount, lalu pakai yang aktif.
+  useEffect(() => {
+    let cancelled = false;
+    async function loadSemester() {
+      try {
+        const res = await getTahunAjaranList();
+        if (cancelled) return;
+        if (res.error) {
+          console.error("Error fetching tahun ajaran:", res.error);
+          setSemesterList([]);
+          setSelectedSemesterId("");
+          return;
+        }
+        setSemesterList(res.list || []);
+        setSelectedSemesterId(res.defaultId || "");
+      } catch (error) {
+        if (!cancelled) console.error("Error fetching tahun ajaran:", error);
+      } finally {
+        if (!cancelled) setSemesterLoaded(true);
+      }
+    }
+    loadSemester();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // ================= LOAD DATA =================
   useEffect(() => {
     async function loadData() {
+      if (!semesterLoaded) return;
       if (!user || !mapelId) {
         setLoading(false);
         return;
@@ -509,178 +546,31 @@ export default function PenilaianMapelPage() {
       try {
         setLoading(true);
 
-        const kelasData = await pb
-          .collection("kelas")
-          .getFirstListItem(
-            `walikelas_id = "${user.id}" || pendamping_id = "${user.id}"`,
-            { requestKey: null },
-          );
-        setKelas(kelasData);
+        // Fetch + filter + map + agregasi nilai dilakukan di server action.
+        const res = await getWalikelasPenilaianDetail({
+          userId: user.id,
+          mapelId,
+          tahunAjaranId: selectedSemesterId,
+        });
 
-        const mapelData = await pb
-          .collection("mata_pelajaran")
-          .getOne(mapelId, { requestKey: null });
-        setMapel(mapelData);
-
-        const [siswaData, tpData, lpData, ujianData, absensiData] =
-          await Promise.all([
-            pb.collection("siswa").getFullList({
-              filter: `kelas_id = "${kelasData.id}"`,
-              sort: "nama_siswa",
-              requestKey: null,
-            }),
-            pb.collection("tujuan_pembelajaran").getFullList({
-              filter: `mapel_id ~ "${mapelId}" && kelas_id ~ "${kelasData.id}"`,
-              requestKey: null,
-            }),
-            pb.collection("lingkup_materi").getFullList({
-              filter: `mapel_id ~ "${mapelId}" && kelas_id ~ "${kelasData.id}"`,
-              requestKey: null,
-            }),
-            pb.collection("pengaturan_ujian").getFullList({
-              filter: `status_akses = "buka" && (target_kelas_id ~ "${kelasData.id}" || target_tingkat ~ "${String(kelasData.tingkat)}")`,
-              requestKey: null,
-            }),
-            pb.collection("absensi").getFullList({
-              filter: `kelas_id ~ "${kelasData.id}"`,
-              requestKey: null,
-            }),
-          ]);
-
-        setSiswaList(siswaData);
-        setTpList(tpData.sort((a, b) => tpNumber(a) - tpNumber(b)));
-        setLpList(lpData);
-        setUjianAktif(ujianData);
-        setAbsensiList(absensiData);
-
-        // ================= FETCH DAFTAR MAPEL UNTUK PINDAH CEPAT =================
-        try {
-          const [mapelKhusus, mapelTingkat, plotingData] = await Promise.all([
-            pb.collection("mata_pelajaran").getFullList({
-              filter: `spesifik_kelas_id ~ "${kelasData.id}"`,
-              requestKey: null,
-            }),
-            pb.collection("mata_pelajaran").getFullList({
-              filter: `target_tingkat ~ "${String(kelasData.tingkat)}"`,
-              requestKey: null,
-            }),
-            pb.collection("ploting_guru").getFullList({
-              filter: `kelas_id ~ "${kelasData.id}"`,
-              expand: "guru_id",
-              requestKey: null,
-            }),
-          ]);
-
-          const combinedMapel = [...mapelKhusus, ...mapelTingkat];
-          const uniqueMapelRaw = Array.from(
-            new Map(combinedMapel.map((item) => [item.id, item])).values(),
-          );
-
-          const uniqueMapel = uniqueMapelRaw.filter((m) => {
-            const spesifik = m.spesifik_kelas_id;
-            const punyaRestriksi =
-              Array.isArray(spesifik) && spesifik.length > 0;
-            if (!punyaRestriksi) return true;
-            return spesifik.includes(kelasData.id);
-          });
-
-          const guruMap = new Map();
-          plotingData.forEach((plot) => {
-            if (plot.mapel_id && plot.expand?.guru_id) {
-              const guruObj = Array.isArray(plot.expand.guru_id)
-                ? plot.expand.guru_id[0]
-                : plot.expand.guru_id;
-              const namaGuru =
-                guruObj?.nama_lengkap || guruObj?.name || guruObj?.username;
-              if (namaGuru) {
-                if (Array.isArray(plot.mapel_id)) {
-                  plot.mapel_id.forEach((mId) => guruMap.set(mId, namaGuru));
-                } else {
-                  guruMap.set(plot.mapel_id, namaGuru);
-                }
-              }
-            }
-          });
-
-          const mapelWithGuru = uniqueMapel.map((m) => ({
-            ...m,
-            guru_pengampu: guruMap.get(m.id) || "Walikelas",
-          }));
-
-          mapelWithGuru.sort((a, b) =>
-            (a.nama_mapel || a.nama || "").localeCompare(
-              b.nama_mapel || b.nama || "",
-              "id",
-              { numeric: true, sensitivity: "base" },
-            ),
-          );
-
-          setMapelList(mapelWithGuru);
-        } catch (err) {
-          console.error("Gagal fetch mapel list:", err);
+        if (res.error) {
+          console.error("Error loading data:", res.error);
+          return;
         }
 
-        if (tpData.length > 0) {
-          const tpFilter = tpData
-            .map((tp) => `tp_id ~ "${tp.id}"`)
-            .join(" || ");
-          const nfData = await pb.collection("nilai_formatif").getFullList({
-            filter: `kelas_id ~ "${kelasData.id}" && (${tpFilter})`,
-            requestKey: null,
-          });
-          const map = {};
-          nfData.forEach((n) => {
-            if (!map[n.siswa_id]) map[n.siswa_id] = {};
-            map[n.siswa_id][n.tp_id] = {
-              recordId: n.id,
-              k1: n.k1 ?? -1,
-              k2: n.k2 ?? -1,
-              k3: n.k3 ?? -1,
-              k4: n.k4 ?? -1,
-            };
-          });
-          setNilaiFormatif(map);
-        }
-
-        if (lpData.length > 0) {
-          const lpFilter = lpData
-            .map((lp) => `lm_id ~ "${lp.id}"`)
-            .join(" || ");
-          const nsData = await pb.collection("nilai_sumatif").getFullList({
-            filter: `kelas_id ~ "${kelasData.id}" && (${lpFilter})`,
-            requestKey: null,
-          });
-          const map = {};
-          nsData.forEach((n) => {
-            if (!map[n.siswa_id]) map[n.siswa_id] = {};
-            map[n.siswa_id][n.lm_id] = { recordId: n.id, nilai: n.nilai };
-          });
-          setNilaiSumatif(map);
-        }
-
-        if (ujianData.length > 0) {
-          const ujianFilter = ujianData
-            .map((u) => `pengaturan_ujian_id = "${u.id}"`)
-            .join(" || ");
-
-          const siswaFilter = siswaData.length
-            ? siswaData.map((s) => `siswa_id = "${s.id}"`).join(" || ")
-            : `id = ""`;
-
-          const nuData = await pb.collection("nilai_ujian").getFullList({
-            filter: `mapel_id = "${mapelId}" && (${ujianFilter}) && (${siswaFilter})`,
-            requestKey: null,
-          });
-          const map = {};
-          nuData.forEach((n) => {
-            if (!map[n.pengaturan_ujian_id]) map[n.pengaturan_ujian_id] = {};
-            map[n.pengaturan_ujian_id][n.siswa_id] = {
-              recordId: n.id,
-              nilai: n.nilai,
-            };
-          });
-          setNilaiUjian(map);
-          if (!selectedUjianId) setSelectedUjianId(ujianData[0].id);
+        setKelas(res.kelas);
+        setMapel(res.mapel);
+        setSiswaList(res.siswaList);
+        setTpList(res.tpList);
+        setLpList(res.lpList);
+        setUjianAktif(res.ujianAktif);
+        setAbsensiList(res.absensiList);
+        setMapelList(res.mapelList);
+        setNilaiFormatif(res.nilaiFormatif);
+        setNilaiSumatif(res.nilaiSumatif);
+        setNilaiUjian(res.nilaiUjian);
+        if (res.ujianAktif.length > 0 && !selectedUjianId) {
+          setSelectedUjianId(res.ujianAktif[0].id);
         }
       } catch (error) {
         if (!error?.isAbort) console.error("Error loading data:", error);
@@ -691,7 +581,7 @@ export default function PenilaianMapelPage() {
 
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapelId]);
+  }, [mapelId, semesterLoaded, selectedSemesterId]);
 
   // Cleanup object URL
   useEffect(() => {
@@ -829,14 +719,12 @@ export default function PenilaianMapelPage() {
     if (!selectedNoTp || !kelas) return;
     try {
       setSavingTp(true);
-      const created = await pb.collection("tujuan_pembelajaran").create(
-        {
+      const created = await db.create("tujuan_pembelajaran", {
           no_tp: selectedNoTp,
           mapel_id: mapelId,
           kelas_id: kelas.id,
         },
-        { requestKey: null },
-      );
+        { requestKey: null },);
       setTpList((prev) =>
         [...prev, created].sort((a, b) => tpNumber(a) - tpNumber(b)),
       );
@@ -861,18 +749,16 @@ export default function PenilaianMapelPage() {
   async function confirmDeleteTp(tp) {
     setDeleting(true);
     try {
-      const related = await pb.collection("nilai_formatif").getFullList({
+      const related = await db.getFullList("nilai_formatif", {
         filter: `tp_id = "${tp.id}"`,
         requestKey: null,
       });
       await Promise.all(
         related.map((r) =>
-          pb.collection("nilai_formatif").delete(r.id, { requestKey: null }),
+          db.remove("nilai_formatif", r.id, { requestKey: null }),
         ),
       );
-      await pb
-        .collection("tujuan_pembelajaran")
-        .delete(tp.id, { requestKey: null });
+      await db.remove("tujuan_pembelajaran", tp.id, { requestKey: null });
 
       setTpList((prev) => prev.filter((t) => t.id !== tp.id));
       setNilaiFormatif((prev) => {
@@ -925,9 +811,7 @@ export default function PenilaianMapelPage() {
           k4: existing.k4 ?? -1,
         };
         currentValues[kField] = nilaiValue;
-        saved = await pb
-          .collection("nilai_formatif")
-          .update(existing.recordId, currentValues, { requestKey: null });
+        saved = await db.update("nilai_formatif", existing.recordId, currentValues, { requestKey: null });
       } else {
         const data = {
           tp_id: tpId,
@@ -939,9 +823,7 @@ export default function PenilaianMapelPage() {
           k4: -1,
         };
         data[kField] = nilaiValue;
-        saved = await pb
-          .collection("nilai_formatif")
-          .create(data, { requestKey: null });
+        saved = await db.create("nilai_formatif", data, { requestKey: null });
       }
 
       setNilaiFormatif((prev) => ({
@@ -977,15 +859,13 @@ export default function PenilaianMapelPage() {
     if (!namaLp.trim() || !kelas) return;
     try {
       setSavingLp(true);
-      const created = await pb.collection("lingkup_materi").create(
-        {
+      const created = await db.create("lingkup_materi", {
           nama: namaLp.trim(),
           mapel_id: mapelId,
           kelas_id: kelas.id,
           guru_id: user?.id,
         },
-        { requestKey: null },
-      );
+        { requestKey: null },);
       setLpList((prev) => [...prev, created]);
       setNamaLp("");
       setShowAddLp(false);
@@ -1008,16 +888,16 @@ export default function PenilaianMapelPage() {
   async function confirmDeleteLp(lp) {
     setDeleting(true);
     try {
-      const related = await pb.collection("nilai_sumatif").getFullList({
+      const related = await db.getFullList("nilai_sumatif", {
         filter: `lm_id = "${lp.id}"`,
         requestKey: null,
       });
       await Promise.all(
         related.map((r) =>
-          pb.collection("nilai_sumatif").delete(r.id, { requestKey: null }),
+          db.remove("nilai_sumatif", r.id, { requestKey: null }),
         ),
       );
-      await pb.collection("lingkup_materi").delete(lp.id, { requestKey: null });
+      await db.remove("lingkup_materi", lp.id, { requestKey: null });
 
       setLpList((prev) => prev.filter((l) => l.id !== lp.id));
       setNilaiSumatif((prev) => {
@@ -1063,23 +943,17 @@ export default function PenilaianMapelPage() {
     try {
       let saved;
       if (existing?.recordId) {
-        saved = await pb
-          .collection("nilai_sumatif")
-          .update(
-            existing.recordId,
+        saved = await db.update("nilai_sumatif", existing.recordId,
             { nilai: nilaiValue },
-            { requestKey: null },
-          );
+            { requestKey: null },);
       } else {
-        saved = await pb.collection("nilai_sumatif").create(
-          {
+        saved = await db.create("nilai_sumatif", {
             lm_id: lpId,
             siswa_id: siswaId,
             kelas_id: kelas.id,
             nilai: nilaiValue,
           },
-          { requestKey: null },
-        );
+          { requestKey: null },);
       }
       setNilaiSumatif((prev) => ({
         ...prev,
@@ -1125,23 +999,17 @@ export default function PenilaianMapelPage() {
     try {
       let saved;
       if (existing?.recordId) {
-        saved = await pb
-          .collection("nilai_ujian")
-          .update(
-            existing.recordId,
+        saved = await db.update("nilai_ujian", existing.recordId,
             { nilai: nilaiValue },
-            { requestKey: null },
-          );
+            { requestKey: null },);
       } else {
-        saved = await pb.collection("nilai_ujian").create(
-          {
+        saved = await db.create("nilai_ujian", {
             siswa_id: siswaId,
             pengaturan_ujian_id: selectedUjianId,
             mapel_id: mapelId,
             nilai: nilaiValue,
           },
-          { requestKey: null },
-        );
+          { requestKey: null },);
       }
       setNilaiUjian((prev) => ({
         ...prev,
@@ -1468,14 +1336,12 @@ export default function PenilaianMapelPage() {
       let tp = tpList.find((t) => t.no_tp === scanDetectedTp);
       if (!tp) {
         try {
-          tp = await pb.collection("tujuan_pembelajaran").create(
-            {
+          tp = await db.create("tujuan_pembelajaran", {
               no_tp: scanDetectedTp,
               mapel_id: mapelId,
               kelas_id: kelas.id,
             },
-            { requestKey: null },
-          );
+            { requestKey: null },);
           setTpList((prev) =>
             [...prev, tp].sort((a, b) => tpNumber(a) - tpNumber(b)),
           );
@@ -1529,9 +1395,7 @@ export default function PenilaianMapelPage() {
               k4: existingRec.k4 ?? -1,
             };
             for (const [kf, v] of Object.entries(toSave)) payload[kf] = v;
-            const saved = await pb
-              .collection("nilai_formatif")
-              .update(existingRec.recordId, payload, { requestKey: null });
+            const saved = await db.update("nilai_formatif", existingRec.recordId, payload, { requestKey: null });
             existingRec = { recordId: saved.id, ...payload };
             nilaiMap[siswaId][tpId] = existingRec;
           } else {
@@ -1545,9 +1409,7 @@ export default function PenilaianMapelPage() {
               k4: -1,
             };
             for (const [kf, v] of Object.entries(toSave)) payload[kf] = v;
-            const saved = await pb
-              .collection("nilai_formatif")
-              .create(payload, { requestKey: null });
+            const saved = await db.create("nilai_formatif", payload, { requestKey: null });
             existingRec = {
               recordId: saved.id,
               k1: payload.k1,
@@ -1978,14 +1840,12 @@ export default function PenilaianMapelPage() {
     for (const tpNo of neededTp) {
       if (tpMap.has(tpNo)) continue;
       try {
-        const created = await pb.collection("tujuan_pembelajaran").create(
-          {
+        const created = await db.create("tujuan_pembelajaran", {
             no_tp: tpNo,
             mapel_id: mapelId,
             kelas_id: kelas.id,
           },
-          { requestKey: null },
-        );
+          { requestKey: null },);
         tpMap.set(tpNo, created);
         result.created++;
       } catch (err) {
@@ -2036,9 +1896,7 @@ export default function PenilaianMapelPage() {
               k4: existingRec.k4 ?? -1,
             };
             for (const [k, v] of Object.entries(toSave)) payload[k] = v;
-            const saved = await pb
-              .collection("nilai_formatif")
-              .update(existingRec.recordId, payload, { requestKey: null });
+            const saved = await db.update("nilai_formatif", existingRec.recordId, payload, { requestKey: null });
             nilaiMap[siswa.id][tp.id] = { recordId: saved.id, ...payload };
           } else {
             const payload = {
@@ -2051,9 +1909,7 @@ export default function PenilaianMapelPage() {
               k4: -1,
             };
             for (const [k, v] of Object.entries(toSave)) payload[k] = v;
-            const saved = await pb
-              .collection("nilai_formatif")
-              .create(payload, { requestKey: null });
+            const saved = await db.create("nilai_formatif", payload, { requestKey: null });
             nilaiMap[siswa.id][tp.id] = {
               recordId: saved.id,
               k1: payload.k1,
@@ -2110,15 +1966,13 @@ export default function PenilaianMapelPage() {
       let lm = lpMap.get(key);
       if (!lm) {
         try {
-          lm = await pb.collection("lingkup_materi").create(
-            {
+          lm = await db.create("lingkup_materi", {
               nama: c.name.trim(),
               mapel_id: mapelId,
               kelas_id: kelas.id,
               guru_id: user?.id,
             },
-            { requestKey: null },
-          );
+            { requestKey: null },);
           lpMap.set(key, lm);
           newLms.push(lm);
           result.created++;
@@ -2182,23 +2036,17 @@ export default function PenilaianMapelPage() {
           try {
             let saved;
             if (existing?.recordId) {
-              saved = await pb
-                .collection("nilai_sumatif")
-                .update(
-                  existing.recordId,
+              saved = await db.update("nilai_sumatif", existing.recordId,
                   { nilai: nilaiBaru },
-                  { requestKey: null },
-                );
+                  { requestKey: null },);
             } else {
-              saved = await pb.collection("nilai_sumatif").create(
-                {
+              saved = await db.create("nilai_sumatif", {
                   lm_id: lm.id,
                   siswa_id: siswa.id,
                   kelas_id: kelas.id,
                   nilai: nilaiBaru,
                 },
-                { requestKey: null },
-              );
+                { requestKey: null },);
             }
             if (!nilaiMap[siswa.id]) nilaiMap[siswa.id] = {};
             nilaiMap[siswa.id][lm.id] = {
@@ -2300,23 +2148,17 @@ export default function PenilaianMapelPage() {
           try {
             let saved;
             if (existing?.recordId) {
-              saved = await pb
-                .collection("nilai_ujian")
-                .update(
-                  existing.recordId,
+              saved = await db.update("nilai_ujian", existing.recordId,
                   { nilai: nilaiBaru },
-                  { requestKey: null },
-                );
+                  { requestKey: null },);
             } else {
-              saved = await pb.collection("nilai_ujian").create(
-                {
+              saved = await db.create("nilai_ujian", {
                   siswa_id: siswa.id,
                   pengaturan_ujian_id: ujian.id,
                   mapel_id: mapelId,
                   nilai: nilaiBaru,
                 },
-                { requestKey: null },
-              );
+                { requestKey: null },);
             }
             if (!nilaiMap[ujian.id]) nilaiMap[ujian.id] = {};
             nilaiMap[ujian.id][siswa.id] = {
@@ -3118,6 +2960,32 @@ export default function PenilaianMapelPage() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* ================= FILTER SEMESTER ================= */}
+      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+        <label
+          htmlFor="filter-semester"
+          className="text-xs font-bold uppercase tracking-widest text-slate-400"
+        >
+          Semester
+        </label>
+        <select
+          id="filter-semester"
+          value={selectedSemesterId}
+          onChange={(e) => setSelectedSemesterId(e.target.value)}
+          disabled={semesterList.length === 0}
+          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 transition focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+        >
+          {semesterList.length === 0 && (
+            <option value="">Belum ada data semester</option>
+          )}
+          {semesterList.map((t) => (
+            <option key={t.id} value={t.id}>
+              {`${t.tahun} · Semester ${t.semester}`}
+            </option>
+          ))}
+        </select>
       </div>
 
       {/* ================= TABS ================= */}

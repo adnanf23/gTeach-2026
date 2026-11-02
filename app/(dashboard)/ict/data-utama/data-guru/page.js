@@ -1,6 +1,10 @@
 "use client";
 
-import { pb } from "@/lib/pocketbase";
+import { db } from "@/lib/db";
+import {
+  getIctDataGuru,
+  getSemuaUser,
+} from "@/actions/ict-data-guru.action";
 import { useEffect, useState } from "react";
 
 /* ═══════════════════════════════════════════════════════════════
@@ -253,6 +257,8 @@ export default function DataGuru() {
   const [loading, setLoading] = useState(false);
   const [dataGuru, setDataGuru] = useState([]);
   const [kelasList, setKelasList] = useState([]);
+  const [kelasByGuru, setKelasByGuru] = useState({});
+  const [daftarTingkat, setDaftarTingkat] = useState([]);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTingkat, setSelectedTingkat] = useState("semua");
@@ -274,27 +280,19 @@ export default function DataGuru() {
     password: "",
   });
 
-  const getKelasGuru = (guruId) =>
-    kelasList.find(
-      (k) => k.walikelas_id === guruId || k.pendamping_id === guruId,
-    );
-
   async function fetchGuruDanKelas() {
     try {
       setLoadData(true);
       setLoading(true);
-      const [guru, kelas] = await Promise.all([
-        pb.collection("users").getFullList({
-          requestKey: null,
-          filter: `role = "guru walikelas" || role = "guru pendamping" || role = "guru mapel"`,
-        }),
-        pb.collection("kelas").getFullList({
-          expand: "walikelas_id,pendamping_id",
-          requestKey: null,
-        }),
-      ]);
-      setDataGuru(guru);
-      setKelasList(kelas);
+      // Baca data guru + kelas (beserta perhitungan turunannya) via server action.
+      const res = await getIctDataGuru();
+      if (res.error) {
+        console.error("Gagal mengambil data guru & kelas:", res.error);
+      }
+      setDataGuru(res.dataGuru || []);
+      setKelasList(res.kelasList || []);
+      setKelasByGuru(res.kelasByGuru || {});
+      setDaftarTingkat(res.daftarTingkat || []);
     } catch (error) {
       console.error("Gagal mengambil data guru & kelas:", error);
     } finally {
@@ -333,7 +331,7 @@ export default function DataGuru() {
   };
 
   const handleEdit = (item) => {
-    const kelasGuru = getKelasGuru(item.id);
+    const kelasGuru = kelasByGuru[item.id];
     setForm({
       id: item.id,
       nama_siswa: item.nama_lengkap || "",
@@ -389,7 +387,7 @@ export default function DataGuru() {
 
       if (modalMode === "edit") {
         if (form.password) payload.password = form.password;
-        guruRecord = await pb.collection("users").update(form.id, payload);
+        guruRecord = await db.update("users", form.id, payload);
 
         const kelasLama = kelasList.filter(
           (k) => k.walikelas_id === form.id || k.pendamping_id === form.id,
@@ -398,7 +396,7 @@ export default function DataGuru() {
           const updateData = {};
           if (k.walikelas_id === form.id) updateData.walikelas_id = "";
           if (k.pendamping_id === form.id) updateData.pendamping_id = "";
-          await pb.collection("kelas").update(k.id, updateData);
+          await db.update("kelas", k.id, updateData);
         }
 
         if (form.kelas_id) {
@@ -408,14 +406,12 @@ export default function DataGuru() {
           else if (form.role === "guru pendamping")
             updateKelasPayload.pendamping_id = form.id;
           else updateKelasPayload.walikelas_id = form.id;
-          await pb
-            .collection("kelas")
-            .update(form.kelas_id, updateKelasPayload);
+          await db.update("kelas", form.kelas_id, updateKelasPayload);
         }
       } else {
         payload.password = form.password || "PasswordGuru123";
         payload.passwordConfirm = payload.password;
-        guruRecord = await pb.collection("users").create(payload);
+        guruRecord = await db.create("users", payload);
 
         if (form.kelas_id && guruRecord) {
           const updateKelasPayload = {};
@@ -424,9 +420,7 @@ export default function DataGuru() {
           else if (form.role === "guru pendamping")
             updateKelasPayload.pendamping_id = guruRecord.id;
           else updateKelasPayload.walikelas_id = guruRecord.id;
-          await pb
-            .collection("kelas")
-            .update(form.kelas_id, updateKelasPayload);
+          await db.update("kelas", form.kelas_id, updateKelasPayload);
         }
       }
 
@@ -452,9 +446,9 @@ export default function DataGuru() {
         const updateData = {};
         if (k.walikelas_id === deleteTarget.id) updateData.walikelas_id = "";
         if (k.pendamping_id === deleteTarget.id) updateData.pendamping_id = "";
-        await pb.collection("kelas").update(k.id, updateData);
+        await db.update("kelas", k.id, updateData);
       }
-      await pb.collection("users").delete(deleteTarget.id);
+      await db.remove("users", deleteTarget.id);
       await fetchGuruDanKelas();
       handleCloseModal();
     } catch (error) {
@@ -468,9 +462,10 @@ export default function DataGuru() {
     setLoading(true);
     try {
       let successCount = 0;
-      let allUsers = await pb
-        .collection("users")
-        .getFullList({ requestKey: null });
+      // Daftar seluruh user (untuk cek duplikat) dibaca lewat server action.
+      const { users, error: usersError } = await getSemuaUser();
+      if (usersError) throw new Error(usersError);
+      let allUsers = users;
 
       for (const row of rows) {
         try {
@@ -520,7 +515,7 @@ export default function DataGuru() {
           if (no_whatsapp) payload.no_whatsapp = no_whatsapp;
           if (jenis_kelamin) payload.jenis_kelamin = jenis_kelamin;
 
-          const newGuru = await pb.collection("users").create(payload);
+          const newGuru = await db.create("users", payload);
           allUsers.push({
             id: newGuru.id,
             nama_lengkap: payload.nama_lengkap,
@@ -542,9 +537,7 @@ export default function DataGuru() {
               else if (role === "guru pendamping")
                 updateKelasPayload.pendamping_id = newGuru.id;
               if (Object.keys(updateKelasPayload).length > 0) {
-                await pb
-                  .collection("kelas")
-                  .update(kelasTerkait.id, updateKelasPayload);
+                await db.update("kelas", kelasTerkait.id, updateKelasPayload);
               }
             }
           }
@@ -575,7 +568,7 @@ export default function DataGuru() {
     try {
       const XLSX = await import("xlsx");
       const dataToExport = dataGuru.map((item) => {
-        const kelasGuru = getKelasGuru(item.id);
+        const kelasGuru = kelasByGuru[item.id];
         let statusKelas = "-";
         if (kelasGuru) {
           const tipe =
@@ -637,17 +630,13 @@ export default function DataGuru() {
     }
   };
 
-  const daftarTingkat = [
-    ...new Set(kelasList.map((k) => String(k.tingkat || "")).filter(Boolean)),
-  ].sort();
-
   const filteredSiswa = dataGuru.filter((item) => {
     const q = searchQuery.toLowerCase();
     const matchesSearch =
       item.nama_lengkap?.toLowerCase().includes(q) ||
       item.username?.toLowerCase().includes(q) ||
       item.email?.toLowerCase().includes(q);
-    const kelasGuru = getKelasGuru(item.id);
+    const kelasGuru = kelasByGuru[item.id];
     const tingkatKelas = String(kelasGuru?.tingkat || "");
     const matchesTingkat =
       selectedTingkat === "semua" || tingkatKelas === selectedTingkat;
@@ -818,7 +807,7 @@ export default function DataGuru() {
                 </tr>
               ) : (
                 filteredSiswa.map((item) => {
-                  const kelasGuru = getKelasGuru(item.id);
+                  const kelasGuru = kelasByGuru[item.id];
                   return (
                     <tr
                       key={item.id}
@@ -1099,7 +1088,7 @@ export default function DataGuru() {
             <div>
               <span className="text-gray-400">Kelas Diampu:</span>{" "}
               {(() => {
-                const kg = getKelasGuru(detailTarget.id);
+                const kg = kelasByGuru[detailTarget.id];
                 return kg
                   ? `${kg.nama_kelas} (${kg.walikelas_id === detailTarget.id ? "Wali Kelas" : "Pendamping Kelas"})`
                   : "Bukan Wali/Pendamping Kelas";

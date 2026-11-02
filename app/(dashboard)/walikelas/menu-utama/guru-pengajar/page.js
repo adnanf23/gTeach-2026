@@ -1,8 +1,12 @@
 "use client";
 
+import {
+  resolveWalikelasKelas,
+  getGuruPengajarRows,
+} from "@/actions/walikelas-guru-pengajar.action";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { pb, isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
+import { isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
 
 function waLink(nomor, pesanAwal = null) {
   if (!nomor) return null;
@@ -106,38 +110,25 @@ export default function GuruPengajarPage() {
       setResolvingKelas(true);
       setNoKelasAssigned(false);
       setNotAllowedRole(false);
-      const role = user.role;
 
-      if (role === "guru walikelas" || role === "guru pendamping") {
-        try {
-          const rec = await pb
-            .collection("kelas")
-            .getFirstListItem(
-              `walikelas_id="${user.id}" || pendamping_id="${user.id}"`,
-              { requestKey: null },
-            );
-          if (!cancelled) {
-            setKelas(rec);
-            setNeedsKelasPicker(false);
-          }
-        } catch (e) {
-          if (!cancelled) setNoKelasAssigned(true);
-        }
-      } else if (role === "admin" || role === "ict") {
-        try {
-          const list = await pb.collection("kelas").getFullList({
-            sort: "nama_kelas",
-            requestKey: null,
-          });
-          if (!cancelled) {
-            setKelasOptions(list);
-            setNeedsKelasPicker(true);
-          }
-        } catch (e) {
-          if (!cancelled) setErrorMsg("Gagal memuat daftar kelas.");
-        }
+      const res = await resolveWalikelasKelas({
+        userId: user.id,
+        role: user.role,
+      });
+      if (cancelled) return;
+
+      if (res.status === "assigned") {
+        setKelas(res.kelas);
+        setNeedsKelasPicker(false);
+      } else if (res.status === "picker") {
+        setKelasOptions(res.kelasOptions);
+        setNeedsKelasPicker(true);
+      } else if (res.status === "none") {
+        setNoKelasAssigned(true);
+      } else if (res.status === "error") {
+        setErrorMsg(res.message);
       } else {
-        if (!cancelled) setNotAllowedRole(true);
+        setNotAllowedRole(true);
       }
 
       if (!cancelled) setResolvingKelas(false);
@@ -160,38 +151,13 @@ export default function GuruPengajarPage() {
     }
     setLoadingRows(true);
     setErrorMsg(null);
-    try {
-      // Karena kelas_id sekarang multi-select, kita perlu filter yang berbeda
-      // Filter: cari ploting_guru yang memiliki kelas_id mengandung ID kelas yang dipilih
-      const records = await pb.collection("ploting_guru").getFullList({
-        filter: `kelas_id ~ "${kelas.id}"`,
-        expand: "guru_id,mapel_id",
-        requestKey: null,
-      });
 
-      // Filter manual untuk memastikan kelas_id benar-benar mengandung ID kelas
-      const filteredRecords = records.filter((r) => {
-        const kelasIds = Array.isArray(r.kelas_id) ? r.kelas_id : [r.kelas_id];
-        return kelasIds.includes(kelas.id);
-      });
+    // Fetch + filter + map + sort dilakukan di server action.
+    const res = await getGuruPengajarRows(kelas.id);
+    setRows(res.rows);
+    if (res.error) setErrorMsg(res.error);
 
-      const list = filteredRecords.map((r) => ({
-        id: r.id,
-        guru: r.expand?.guru_id || null,
-        mapel: r.expand?.mapel_id || null,
-        kelasIds: r.kelas_id || [],
-      }));
-
-      list.sort((a, b) =>
-        (a.mapel?.nama_mapel || "").localeCompare(b.mapel?.nama_mapel || ""),
-      );
-      setRows(list);
-    } catch (e) {
-      console.error("Error loading pengajar:", e);
-      setErrorMsg("Gagal memuat daftar guru pengajar.");
-    } finally {
-      setLoadingRows(false);
-    }
+    setLoadingRows(false);
   }, [kelas]);
 
   useEffect(() => {

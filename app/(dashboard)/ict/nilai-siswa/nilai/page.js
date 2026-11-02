@@ -1,6 +1,11 @@
 "use client";
 
-import { getCurrentUser, pb } from "@/lib/pocketbase";
+import {
+  getKelasDanSiswaCount,
+  getLegerKelasData,
+  getNilaiMentahExportData,
+} from "@/actions/ict-nilai-siswa.action";
+import { getCurrentUser } from "@/lib/pocketbase";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import * as ExcelJS from "exceljs";
@@ -9,32 +14,15 @@ import { saveAs } from "file-saver";
 // ================================================================
 // KONFIGURASI
 // ================================================================
-const JENIS_UTS = "ahb";
-const JENIS_UAS = "asas";
-
 const TABS = [
   { id: "umum", label: "Umum" },
   { id: "vocab", label: "Vocab" },
   { id: "tahfizh", label: "Tahfizh" },
 ];
 
-const URUTAN_MAPEL = ["matematika", "mtk", "inggris"];
-
 // ================================================================
 // UTIL
 // ================================================================
-function firstOf(val) {
-  return Array.isArray(val) ? val[0] : val;
-}
-
-function average(arr) {
-  const nums = arr.filter(
-    (v) => typeof v === "number" && !isNaN(v) && v !== -1,
-  );
-  if (nums.length === 0) return null;
-  return nums.reduce((a, b) => a + b, 0) / nums.length;
-}
-
 function formatGrade(value) {
   if (value === null || value === undefined || isNaN(Number(value))) return "0";
   return Math.round(Number(value)).toString();
@@ -74,21 +62,6 @@ function safeSheetName(name, used) {
   return final;
 }
 
-function numOrNull(v) {
-  return typeof v === "number" && !isNaN(v) && v !== -1 ? v : null;
-}
-
-function groupBy(arr, keyFn) {
-  const m = new Map();
-  arr.forEach((x) => {
-    const k = keyFn(x);
-    if (!k) return;
-    if (!m.has(k)) m.set(k, []);
-    m.get(k).push(x);
-  });
-  return m;
-}
-
 // ================================================================
 // PAGE
 // ================================================================
@@ -111,6 +84,10 @@ export default function RekapNilaiPage() {
   const [siswaList, setSiswaList] = useState([]);
   const [mapelList, setMapelList] = useState([]);
   const [nilaiAkhirMap, setNilaiAkhirMap] = useState({});
+  const [jumlahMap, setJumlahMap] = useState({});
+  const [rataRataMap, setRataRataMap] = useState({});
+  const [rankMap, setRankMap] = useState({});
+  const [mapelStats, setMapelStats] = useState({});
   const [exporting, setExporting] = useState(false);
   const [exportingAll, setExportingAll] = useState(false);
   const [exportProgress, setExportProgress] = useState("");
@@ -130,25 +107,17 @@ export default function RekapNilaiPage() {
       }
       try {
         setLoadingKelas(true);
-        const [kelasData, siswaData] = await Promise.all([
-          pb.collection("kelas").getFullList({
-            sort: "tingkat,nama_kelas",
-            requestKey: null,
-          }),
-          pb.collection("siswa").getFullList({
-            fields: "id,kelas_id",
-            requestKey: null,
-          }),
-        ]);
 
-        const countMap = {};
-        siswaData.forEach((s) => {
-          const kid = firstOf(s.kelas_id);
-          if (kid) countMap[kid] = (countMap[kid] || 0) + 1;
-        });
+        // Baca + agregasi jumlah siswa dikerjakan di server action.
+        const res = await getKelasDanSiswaCount();
 
-        setKelasList(kelasData);
-        setSiswaCountMap(countMap);
+        if (res.error) {
+          console.error("Gagal memuat kelas:", res.error);
+          return;
+        }
+
+        setKelasList(res.kelasList);
+        setSiswaCountMap(res.siswaCountMap);
       } catch (error) {
         if (!error?.isAbort) console.error("Gagal memuat kelas:", error);
       } finally {
@@ -192,229 +161,32 @@ export default function RekapNilaiPage() {
         setSiswaList([]);
         setMapelList([]);
         setNilaiAkhirMap({});
+        setJumlahMap({});
+        setRataRataMap({});
+        setRankMap({});
+        setMapelStats({});
 
-        const [siswaData, mapelKhusus, mapelTingkat, plotingData, ujianData] =
-          await Promise.all([
-            pb.collection("siswa").getFullList({
-              filter: `kelas_id = "${kelasData.id}"`,
-              sort: "nama_siswa",
-              requestKey: null,
-            }),
-            pb.collection("mata_pelajaran").getFullList({
-              filter: `spesifik_kelas_id ~ "${kelasData.id}"`,
-              requestKey: null,
-            }),
-            pb.collection("mata_pelajaran").getFullList({
-              filter: `target_tingkat ~ "${String(kelasData.tingkat)}"`,
-              requestKey: null,
-            }),
-            pb.collection("ploting_guru").getFullList({
-              filter: `kelas_id ~ "${kelasData.id}"`,
-              expand: "guru_id",
-              requestKey: null,
-            }),
-            pb.collection("pengaturan_ujian").getFullList({
-              filter: `status_akses = "buka" && (target_kelas_id ~ "${kelasData.id}" || target_tingkat ~ "${String(kelasData.tingkat)}")`,
-              requestKey: null,
-            }),
-          ]);
+        // Seluruh baca + agregasi leger dikerjakan di server action.
+        const res = await getLegerKelasData({
+          kelasId: kelasData.id,
+          tingkat: kelasData.tingkat,
+        });
 
         if (cancelled) return;
-        setSiswaList(siswaData);
 
-        const combined = [...mapelKhusus, ...mapelTingkat];
-        const uniqueMapelRaw = Array.from(
-          new Map(combined.map((m) => [m.id, m])).values(),
-        );
-
-        const uniqueMapel = uniqueMapelRaw.filter((m) => {
-          if ((m.kategori || "").toLowerCase() !== "umum") return false;
-          const spesifik = m.spesifik_kelas_id;
-          const punyaRestriksi = Array.isArray(spesifik) && spesifik.length > 0;
-          if (!punyaRestriksi) return true;
-          return spesifik.includes(kelasData.id);
-        });
-
-        const guruMap = new Map();
-        plotingData.forEach((plot) => {
-          if (plot.mapel_id && plot.expand?.guru_id) {
-            const guruObj = Array.isArray(plot.expand.guru_id)
-              ? plot.expand.guru_id[0]
-              : plot.expand.guru_id;
-            const namaGuru =
-              guruObj?.nama_lengkap || guruObj?.name || guruObj?.username;
-            if (namaGuru) {
-              if (Array.isArray(plot.mapel_id)) {
-                plot.mapel_id.forEach((mId) => guruMap.set(mId, namaGuru));
-              } else {
-                guruMap.set(plot.mapel_id, namaGuru);
-              }
-            }
-          }
-        });
-
-        const mapelByName = new Map();
-        uniqueMapel.forEach((m) => {
-          const key = (m.nama_mapel || m.nama || "").trim();
-          if (!mapelByName.has(key)) {
-            mapelByName.set(key, m);
-          } else {
-            const existing = mapelByName.get(key);
-            const existingGuru = guruMap.get(existing.id);
-            const newGuru = guruMap.get(m.id);
-            if (!existingGuru && newGuru) mapelByName.set(key, m);
-          }
-        });
-        const deduplicatedMapel = Array.from(mapelByName.values());
-
-        const sortedMapel = deduplicatedMapel
-          .sort((a, b) =>
-            (a.nama_mapel || a.nama || "").localeCompare(
-              b.nama_mapel || b.nama || "",
-            ),
-          )
-          .map((m) => ({
-            ...m,
-            guru_pengampu: guruMap.get(m.id) || "Walikelas",
-          }));
-
-        if (cancelled) return;
-        setMapelList(sortedMapel);
-
-        const utsIds = ujianData
-          .filter((u) => u.jenis_ujian === JENIS_UTS)
-          .map((u) => u.id);
-        const uasIds = ujianData
-          .filter((u) => u.jenis_ujian === JENIS_UAS)
-          .map((u) => u.id);
-
-        let nilaiUjianData = [];
-        if (ujianData.length > 0) {
-          const ujianFilter = ujianData
-            .map((u) => `pengaturan_ujian_id = "${u.id}"`)
-            .join(" || ");
-          nilaiUjianData = await pb.collection("nilai_ujian").getFullList({
-            filter: ujianFilter,
-            requestKey: null,
-          });
+        if (res.error) {
+          console.error("Gagal memuat data leger:", res.error);
+          setError("Gagal memuat data leger kelas ini.");
+          return;
         }
-        if (cancelled) return;
 
-        const ujianMap = {};
-        nilaiUjianData.forEach((n) => {
-          if (!ujianMap[n.pengaturan_ujian_id])
-            ujianMap[n.pengaturan_ujian_id] = {};
-          ujianMap[n.pengaturan_ujian_id][n.siswa_id] = n.nilai;
-        });
-
-        function avgUjian(ids, siswaId) {
-          const vals = ids
-            .map((uid) => ujianMap[uid]?.[siswaId])
-            .filter((v) => typeof v === "number" && !isNaN(v) && v !== -1);
-          return average(vals);
-        }
-        const utsAvgMap = {};
-        const uasAvgMap = {};
-        siswaData.forEach((s) => {
-          utsAvgMap[s.id] = avgUjian(utsIds, s.id);
-          uasAvgMap[s.id] = avgUjian(uasIds, s.id);
-        });
-
-        let tpAll = [];
-        let lpAll = [];
-        if (sortedMapel.length > 0) {
-          const mapelFilter = sortedMapel
-            .map((m) => `mapel_id ~ "${m.id}"`)
-            .join(" || ");
-          [tpAll, lpAll] = await Promise.all([
-            pb.collection("tujuan_pembelajaran").getFullList({
-              filter: `(${mapelFilter}) && kelas_id ~ "${kelasData.id}"`,
-              requestKey: null,
-            }),
-            pb.collection("lingkup_materi").getFullList({
-              filter: `(${mapelFilter}) && kelas_id ~ "${kelasData.id}"`,
-              requestKey: null,
-            }),
-          ]);
-        }
-        if (cancelled) return;
-
-        const tpToMapel = {};
-        tpAll.forEach((tp) => {
-          tpToMapel[tp.id] = tp.mapel_id;
-        });
-        const lpToMapel = {};
-        lpAll.forEach((lp) => {
-          lpToMapel[lp.id] = lp.mapel_id;
-        });
-
-        const [nfData, nsData] = await Promise.all([
-          pb.collection("nilai_formatif").getFullList({
-            filter: `kelas_id = "${kelasData.id}"`,
-            requestKey: null,
-          }),
-          pb.collection("nilai_sumatif").getFullList({
-            filter: `kelas_id = "${kelasData.id}"`,
-            requestKey: null,
-          }),
-        ]);
-        if (cancelled) return;
-
-        const formatifValues = {};
-        nfData.forEach((n) => {
-          const mapelId = tpToMapel[n.tp_id];
-          if (!mapelId) return;
-          if (!formatifValues[mapelId]) formatifValues[mapelId] = {};
-          if (!formatifValues[mapelId][n.siswa_id])
-            formatifValues[mapelId][n.siswa_id] = [];
-          ["k1", "k2", "k3", "k4"].forEach((k) => {
-            const val = n[k];
-            if (typeof val === "number" && !isNaN(val) && val !== -1) {
-              formatifValues[mapelId][n.siswa_id].push(val);
-            }
-          });
-        });
-
-        const sumatifValues = {};
-        nsData.forEach((n) => {
-          const mapelId = lpToMapel[n.lm_id];
-          if (!mapelId) return;
-          if (!sumatifValues[mapelId]) sumatifValues[mapelId] = {};
-          if (!sumatifValues[mapelId][n.siswa_id])
-            sumatifValues[mapelId][n.siswa_id] = [];
-          if (
-            typeof n.nilai === "number" &&
-            !isNaN(n.nilai) &&
-            n.nilai !== -1
-          ) {
-            sumatifValues[mapelId][n.siswa_id].push(n.nilai);
-          }
-        });
-
-        const nilaiAkhir = {};
-        sortedMapel.forEach((m) => {
-          nilaiAkhir[m.id] = {};
-          siswaData.forEach((s) => {
-            const formatifAvg = average(formatifValues[m.id]?.[s.id] || []);
-            const sumatifAvg = average(sumatifValues[m.id]?.[s.id] || []);
-            const utsVal = utsAvgMap[s.id];
-            const uasVal = uasAvgMap[s.id];
-
-            const komponen = [formatifAvg, sumatifAvg, utsVal, uasVal].filter(
-              (v) => v !== null && v !== undefined && !isNaN(v) && v !== -1,
-            );
-
-            if (komponen.length === 0) {
-              nilaiAkhir[m.id][s.id] = null;
-              return;
-            }
-            nilaiAkhir[m.id][s.id] =
-              komponen.reduce((a, b) => a + b, 0) / komponen.length;
-          });
-        });
-
-        if (cancelled) return;
-        setNilaiAkhirMap(nilaiAkhir);
+        setSiswaList(res.siswaList);
+        setMapelList(res.mapelList);
+        setNilaiAkhirMap(res.nilaiAkhirMap);
+        setJumlahMap(res.jumlahMap);
+        setRataRataMap(res.rataRataMap);
+        setRankMap(res.rankMap);
+        setMapelStats(res.mapelStats);
       } catch (err) {
         if (!err?.isAbort) {
           console.error("Gagal memuat data leger:", err);
@@ -431,55 +203,6 @@ export default function RekapNilaiPage() {
       cancelled = true;
     };
   }, [selectedKelasId, kelasList, activeTab]);
-
-  // ================= JUMLAH, RATA-RATA, RANK =================
-  const { jumlahMap, rataRataMap, rankMap } = useMemo(() => {
-    const jumlah = {};
-    const rata = {};
-    siswaList.forEach((s) => {
-      let sum = 0;
-      let count = 0;
-      mapelList.forEach((m) => {
-        const v = nilaiAkhirMap[m.id]?.[s.id];
-        if (typeof v === "number" && !isNaN(v)) {
-          sum += v;
-          count++;
-        }
-      });
-      jumlah[s.id] = count > 0 ? sum : null;
-      rata[s.id] = count > 0 ? sum / count : null;
-    });
-
-    const sorted = [...siswaList]
-      .filter((s) => rata[s.id] !== null)
-      .sort((a, b) => rata[b.id] - rata[a.id]);
-    const rank = {};
-    sorted.forEach((s, idx) => {
-      rank[s.id] = idx + 1;
-    });
-    siswaList.forEach((s) => {
-      if (rank[s.id] === undefined) rank[s.id] = sorted.length + 1;
-    });
-
-    return { jumlahMap: jumlah, rataRataMap: rata, rankMap: rank };
-  }, [siswaList, mapelList, nilaiAkhirMap]);
-
-  const mapelStats = useMemo(() => {
-    const stats = {};
-    mapelList.forEach((m) => {
-      const vals = siswaList
-        .map((s) => nilaiAkhirMap[m.id]?.[s.id])
-        .filter((v) => typeof v === "number" && !isNaN(v));
-      stats[m.id] = {
-        rata: vals.length
-          ? vals.reduce((a, b) => a + b, 0) / vals.length
-          : null,
-        tertinggi: vals.length ? Math.max(...vals) : null,
-        terendah: vals.length ? Math.min(...vals) : null,
-      };
-    });
-    return stats;
-  }, [mapelList, siswaList, nilaiAkhirMap]);
 
   // ================= EXPORT LEGER (SINGLE KELAS) =================
   async function handleExportLeger() {
@@ -648,18 +371,12 @@ export default function RekapNilaiPage() {
 
       const [siswaAll, mapelAll, tpAll, lmAll, nfAll, nsAll] =
         await Promise.all([
-          pb
-            .collection("siswa")
-            .getFullList({ sort: "nama_siswa", requestKey: null }),
-          pb.collection("mata_pelajaran").getFullList({ requestKey: null }),
-          pb
-            .collection("tujuan_pembelajaran")
-            .getFullList({ requestKey: null }),
-          pb
-            .collection("lingkup_materi")
-            .getFullList({ sort: "created", requestKey: null }),
-          pb.collection("nilai_formatif").getFullList({ requestKey: null }),
-          pb.collection("nilai_sumatif").getFullList({ requestKey: null }),
+          db.getFullList("siswa", { sort: "nama_siswa", requestKey: null }),
+          db.getFullList("mata_pelajaran", { requestKey: null }),
+          db.getFullList("tujuan_pembelajaran", { requestKey: null }),
+          db.getFullList("lingkup_materi", { sort: "created", requestKey: null }),
+          db.getFullList("nilai_formatif", { requestKey: null }),
+          db.getFullList("nilai_sumatif", { requestKey: null }),
         ]);
 
       const mapelById = new Map(mapelAll.map((m) => [m.id, m]));

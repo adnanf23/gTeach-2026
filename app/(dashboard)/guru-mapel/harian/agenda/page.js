@@ -1,9 +1,19 @@
 "use client";
 
+import { db } from "@/lib/db";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { pb, isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
+import { isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
 import { createSystemLog } from "@/lib/logger";
+import {
+  getPlotingGuru,
+  getKelasOptions,
+  getAgendaBulan,
+  getAgendaDetail,
+  getAgendaById,
+  checkAgendaConflict,
+} from "@/actions/guru-mapel-harian-agenda.action";
+import { getTahunAjaranList } from "@/actions/tahun-ajaran.action";
 
 // =========================================================
 // Helper tanggal
@@ -80,10 +90,19 @@ const JAM_PELAJARAN = [
   { value: "3 dan 4", label: "Jam ke-3 & 4" },
   { value: "5 dan 6", label: "Jam ke-5 & 6" },
   { value: "7 dan 8", label: "Jam ke-7 & 8" },
+  { value: "9 dan 10", label: "Jam ke-9 & 10" },
+  { value: "11 dan 12", label: "Jam ke-11 & 12" },
 ];
 
 // Urutan jam untuk sorting
-const JAM_ORDER = ["1 dan 2", "3 dan 4", "5 dan 6", "7 dan 8"];
+const JAM_ORDER = [
+  "1 dan 2",
+  "3 dan 4",
+  "5 dan 6",
+  "7 dan 8",
+  "9 dan 10",
+  "11 dan 12",
+];
 
 // =========================================================
 // Toast Notifikasi
@@ -792,6 +811,10 @@ export default function AgendaMengajarGuruMapelPage() {
   const [plotingList, setPlotingList] = useState([]);
   const [loadingPloting, setLoadingPloting] = useState(true);
 
+  // Filter semester (tahun ajaran)
+  const [semesterList, setSemesterList] = useState([]);
+  const [selectedSemesterId, setSelectedSemesterId] = useState("");
+
   const [step, setStep] = useState("mapel");
   const [selectedMapel, setSelectedMapel] = useState(null);
   const [selectedKelas, setSelectedKelas] = useState(null);
@@ -828,12 +851,9 @@ export default function AgendaMengajarGuruMapelPage() {
     async function fetchPloting() {
       setLoadingPloting(true);
       try {
-        const records = await pb.collection("ploting_guru").getFullList({
-          filter: `guru_id="${user.id}"`,
-          expand: "mapel_id,kelas_id",
-          requestKey: null,
-        });
-        if (!cancelled) setPlotingList(records);
+        const res = await getPlotingGuru({ guruId: user.id });
+        if (res.error) throw new Error(res.error);
+        if (!cancelled) setPlotingList(res.plotingList);
       } catch (e) {
         if (!cancelled) {
           setMessage({
@@ -851,6 +871,45 @@ export default function AgendaMengajarGuruMapelPage() {
       cancelled = true;
     };
   }, [user?.id]);
+
+  // Fetch daftar semester (tahun ajaran) + pilih yang aktif sebagai default
+  useEffect(() => {
+    let cancelled = false;
+
+    async function fetchSemester() {
+      try {
+        const res = await getTahunAjaranList();
+        if (res.error) throw new Error(res.error);
+        if (cancelled) return;
+        setSemesterList(res.list || []);
+        setSelectedSemesterId(res.defaultId || "");
+      } catch (e) {
+        if (!cancelled) {
+          setMessage({ type: "error", text: "Gagal memuat data semester." });
+        }
+      }
+    }
+
+    fetchSemester();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Rentang tanggal semester terpilih (agenda tidak punya tahun_ajaran_id,
+  // jadi filter dilakukan lewat field `date`)
+  const selectedSemester = useMemo(
+    () => semesterList.find((t) => t.id === selectedSemesterId) || null,
+    [semesterList, selectedSemesterId],
+  );
+
+  const semesterBounds = useMemo(() => {
+    if (!selectedSemester?.Mulai || !selectedSemester?.Akhir) return null;
+    return {
+      semesterMulai: `${toISODate(new Date(selectedSemester.Mulai))} 00:00:00`,
+      semesterAkhir: `${toISODate(new Date(selectedSemester.Akhir))} 23:59:59`,
+    };
+  }, [selectedSemester]);
 
   // Mapel unik
   const mapelOptions = useMemo(() => {
@@ -889,33 +948,12 @@ export default function AgendaMengajarGuruMapelPage() {
     async function fetchKelasWithCount() {
       setLoadingKelasOptions(true);
       try {
-        const kelasSet = new Map();
-        for (const r of plotingList) {
-          if (r.mapel_id !== selectedMapel.id) continue;
-          const kelasArr = r.expand?.kelas_id || [];
-          for (const k of kelasArr) {
-            if (!kelasSet.has(k.id)) kelasSet.set(k.id, k);
-          }
-        }
-        const kelasList = Array.from(kelasSet.values()).sort((a, b) =>
-          a.nama_kelas.localeCompare(b.nama_kelas),
-        );
-
-        const withCount = await Promise.all(
-          kelasList.map(async (k) => {
-            try {
-              const result = await pb.collection("siswa").getList(1, 1, {
-                filter: `kelas_id="${k.id}"`,
-                requestKey: null,
-                fields: "id",
-              });
-              return { ...k, siswaCount: result.totalItems };
-            } catch {
-              return { ...k, siswaCount: 0 };
-            }
-          }),
-        );
-        if (!cancelled) setKelasOptionsWithCount(withCount);
+        const res = await getKelasOptions({
+          plotingList,
+          mapelId: selectedMapel.id,
+        });
+        if (res.error) throw new Error(res.error);
+        if (!cancelled) setKelasOptionsWithCount(res.kelasOptions);
       } catch (e) {
         console.error("Error fetching kelas with count:", e);
         if (!cancelled) {
@@ -938,27 +976,16 @@ export default function AgendaMengajarGuruMapelPage() {
 
     setLoadingCalendar(true);
     try {
-      const year = viewDate.getFullYear();
-      const month = viewDate.getMonth();
-      const first = new Date(year, month, 1);
-      const last = new Date(year, month + 1, 0);
-      const startStr = `${toISODate(first)} 00:00:00`;
-      const endStr = `${toISODate(last)} 23:59:59`;
-
-      const records = await pb.collection("agenda_mengajar").getFullList({
-        filter: `kelas_id="${selectedKelas.id}" && mapel_id="${selectedMapel.id}" && date >= "${startStr}" && date <= "${endStr}"`,
-        sort: "date,jam_mapel",
-        expand: "mapel_id,kelas_id",
-        requestKey: null,
+      const res = await getAgendaBulan({
+        kelasId: selectedKelas.id,
+        mapelId: selectedMapel.id,
+        year: viewDate.getFullYear(),
+        month: viewDate.getMonth(),
+        semesterMulai: semesterBounds?.semesterMulai,
+        semesterAkhir: semesterBounds?.semesterAkhir,
       });
-
-      const grouped = {};
-      for (const r of records) {
-        const key = toISODate(new Date(r.date));
-        if (!grouped[key]) grouped[key] = [];
-        grouped[key].push(r);
-      }
-      setMonthAgenda(grouped);
+      if (res.error) throw new Error(res.error);
+      setMonthAgenda(res.monthAgenda);
     } catch (e) {
       console.error("Error loading month agenda:", e);
       setMessage({
@@ -968,7 +995,7 @@ export default function AgendaMengajarGuruMapelPage() {
     } finally {
       setLoadingCalendar(false);
     }
-  }, [selectedKelas, selectedMapel, viewDate]);
+  }, [selectedKelas, selectedMapel, viewDate, semesterBounds]);
 
   useEffect(() => {
     if (step === "kalender") loadMonth();
@@ -986,39 +1013,21 @@ export default function AgendaMengajarGuruMapelPage() {
     const key = toISODate(date);
     const items = monthAgenda[key] || [];
 
-    const refreshedItems = await Promise.all(
-      items.map(async (item) => {
-        try {
-          const fullItem = await pb
-            .collection("agenda_mengajar")
-            .getOne(item.id, {
-              expand: "mapel_id,kelas_id",
-              requestKey: null,
-            });
-          return fullItem;
-        } catch {
-          return item;
-        }
-      }),
-    );
-
-    const sortedItems = refreshedItems.sort((a, b) => {
-      const indexA = JAM_ORDER.indexOf(a.jam_mapel);
-      const indexB = JAM_ORDER.indexOf(b.jam_mapel);
-      return (indexA === -1 ? 999 : indexA) - (indexB === -1 ? 999 : indexB);
-    });
-
-    setDetailItems(sortedItems);
+    const res = await getAgendaDetail({ items });
+    setDetailItems(res.items);
   }
 
   const handleCreate = async (data) => {
     try {
-      const existing = await pb.collection("agenda_mengajar").getFullList({
-        filter: `kelas_id="${selectedKelas.id}" && mapel_id="${selectedMapel.id}" && date="${data.date}" && jam_mapel="${data.jam_mapel}"`,
-        requestKey: null,
+      const conflict = await checkAgendaConflict({
+        kelasId: selectedKelas.id,
+        mapelId: selectedMapel.id,
+        date: data.date,
+        jamMapel: data.jam_mapel,
       });
+      if (conflict.error) throw new Error(conflict.error);
 
-      if (existing.length > 0) {
+      if (conflict.conflict === "mapel") {
         setMessage({
           type: "error",
           text: `Mata pelajaran ini sudah memiliki agenda pada ${data.jam_mapel} tanggal ${formatLong(data.date)}.`,
@@ -1026,12 +1035,7 @@ export default function AgendaMengajarGuruMapelPage() {
         return;
       }
 
-      const existingJam = await pb.collection("agenda_mengajar").getFullList({
-        filter: `kelas_id="${selectedKelas.id}" && date="${data.date}" && jam_mapel="${data.jam_mapel}"`,
-        requestKey: null,
-      });
-
-      if (existingJam.length > 0) {
+      if (conflict.conflict === "jam") {
         setMessage({
           type: "error",
           text: `Jam ${data.jam_mapel} sudah digunakan oleh mata pelajaran lain pada tanggal ${formatLong(data.date)}.`,
@@ -1039,8 +1043,7 @@ export default function AgendaMengajarGuruMapelPage() {
         return;
       }
 
-      const created = await pb.collection("agenda_mengajar").create(
-        {
+      const created = await db.create("agenda_mengajar", {
           deskripsi: data.deskripsi,
           topik: data.topik,
           jam_mapel: data.jam_mapel,
@@ -1050,8 +1053,7 @@ export default function AgendaMengajarGuruMapelPage() {
           kelas_id: selectedKelas.id,
           mapel_id: selectedMapel.id,
         },
-        { requestKey: null },
-      );
+        { requestKey: null },);
       await createSystemLog({
         type: "succes",
         msg: `User '${user.nama_lengkap} (${user.role})' berhasil membuat agenda.`,
@@ -1073,14 +1075,10 @@ export default function AgendaMengajarGuruMapelPage() {
       await loadMonth();
 
       if (selectedDate && isSameDate(selectedDate, new Date(data.date))) {
-        const fullItem = await pb
-          .collection("agenda_mengajar")
-          .getOne(created.id, {
-            expand: "mapel_id,kelas_id",
-            requestKey: null,
-          });
+        const detail = await getAgendaById({ id: created.id });
+        if (detail.error) throw new Error(detail.error);
         setDetailItems((prev) =>
-          [...prev, fullItem].sort((a, b) => {
+          [...prev, detail.item].sort((a, b) => {
             const indexA = JAM_ORDER.indexOf(a.jam_mapel);
             const indexB = JAM_ORDER.indexOf(b.jam_mapel);
             return (
@@ -1115,12 +1113,16 @@ export default function AgendaMengajarGuruMapelPage() {
   const handleUpdate = async (data) => {
     if (!editingItem) return;
     try {
-      const existing = await pb.collection("agenda_mengajar").getFullList({
-        filter: `kelas_id="${selectedKelas.id}" && mapel_id="${selectedMapel.id}" && date="${data.date}" && jam_mapel="${data.jam_mapel}" && id != "${editingItem.id}"`,
-        requestKey: null,
+      const conflict = await checkAgendaConflict({
+        kelasId: selectedKelas.id,
+        mapelId: selectedMapel.id,
+        date: data.date,
+        jamMapel: data.jam_mapel,
+        excludeId: editingItem.id,
       });
+      if (conflict.error) throw new Error(conflict.error);
 
-      if (existing.length > 0) {
+      if (conflict.conflict === "mapel") {
         setMessage({
           type: "error",
           text: `Mata pelajaran ini sudah memiliki agenda pada ${data.jam_mapel} tanggal ${formatLong(data.date)}.`,
@@ -1128,12 +1130,7 @@ export default function AgendaMengajarGuruMapelPage() {
         return;
       }
 
-      const existingJam = await pb.collection("agenda_mengajar").getFullList({
-        filter: `kelas_id="${selectedKelas.id}" && date="${data.date}" && jam_mapel="${data.jam_mapel}" && id != "${editingItem.id}"`,
-        requestKey: null,
-      });
-
-      if (existingJam.length > 0) {
+      if (conflict.conflict === "jam") {
         setMessage({
           type: "error",
           text: `Jam ${data.jam_mapel} sudah digunakan oleh mata pelajaran lain pada tanggal ${formatLong(data.date)}.`,
@@ -1141,8 +1138,7 @@ export default function AgendaMengajarGuruMapelPage() {
         return;
       }
 
-      const updated = await pb.collection("agenda_mengajar").update(
-        editingItem.id,
+      const updated = await db.update("agenda_mengajar", editingItem.id,
         {
           deskripsi: data.deskripsi,
           topik: data.topik,
@@ -1151,8 +1147,7 @@ export default function AgendaMengajarGuruMapelPage() {
           siswa_tidak_hadir: data.siswa_tidak_hadir,
           date: data.date,
         },
-        { requestKey: null },
-      );
+        { requestKey: null },);
       await createSystemLog({
         type: "succes",
         msg: `User '${user?.nama_lengkap || "User"} ( ${user?.role} )' berhasil update agenda.`,
@@ -1173,15 +1168,11 @@ export default function AgendaMengajarGuruMapelPage() {
       setMessage({ type: "success", text: "Agenda berhasil diperbarui!" });
       await loadMonth();
 
-      const fullItem = await pb
-        .collection("agenda_mengajar")
-        .getOne(updated.id, {
-          expand: "mapel_id,kelas_id",
-          requestKey: null,
-        });
+      const fullItem = await getAgendaById({ id: updated.id });
+      if (fullItem.error) throw new Error(fullItem.error);
       setDetailItems((prev) =>
         prev
-          .map((it) => (it.id === fullItem.id ? fullItem : it))
+          .map((it) => (it.id === fullItem.item.id ? fullItem.item : it))
           .sort((a, b) => {
             const indexA = JAM_ORDER.indexOf(a.jam_mapel);
             const indexB = JAM_ORDER.indexOf(b.jam_mapel);
@@ -1201,7 +1192,7 @@ export default function AgendaMengajarGuruMapelPage() {
     if (!confirm("Yakin ingin menghapus agenda ini?")) return;
 
     try {
-      await pb.collection("agenda_mengajar").delete(id, { requestKey: null });
+      await db.remove("agenda_mengajar", id, { requestKey: null });
       setMessage({ type: "success", text: "Agenda berhasil dihapus!" });
       await loadMonth();
       setDetailItems((prev) => prev.filter((it) => it.id !== id));
@@ -1362,6 +1353,22 @@ export default function AgendaMengajarGuruMapelPage() {
                 <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600">
                   {selectedMapel.nama_mapel}
                 </span>
+
+                {/* === Filter semester === */}
+                {semesterList.length > 0 && (
+                  <select
+                    aria-label="Semester"
+                    value={selectedSemesterId || ""}
+                    onChange={(e) => setSelectedSemesterId(e.target.value)}
+                    className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 outline-none transition focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  >
+                    {semesterList.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.tahun} · Semester {t.semester}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
               <button
                 onClick={() => openAddModal(selectedDate || today)}
