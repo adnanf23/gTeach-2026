@@ -15,6 +15,7 @@
 //  - Layout tanda tangan, ukuran foto TTD, dan CSS print yang sama
 //  - PDF: pakai `html-to-image` supaya hasil 100% sama dengan UI.
 
+import { db } from "@/lib/db";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { pb } from "@/lib/pocketbase";
@@ -257,19 +258,19 @@ async function hitungNilaiAkhirSiswa(siswa, kelas) {
 
   const [mapelKhusus, mapelTingkat, plotingData, ujianData] = await Promise.all(
     [
-      pb.collection("mata_pelajaran").getFullList({
+      db.getFullList("mata_pelajaran", {
         filter: `spesifik_kelas_id ~ "${kelasId}"`,
         requestKey: null,
       }),
-      pb.collection("mata_pelajaran").getFullList({
+      db.getFullList("mata_pelajaran", {
         filter: `target_tingkat ~ "${tingkat}"`,
         requestKey: null,
       }),
-      pb.collection("ploting_guru").getFullList({
+      db.getFullList("ploting_guru", {
         filter: `kelas_id ~ "${kelasId}"`,
         requestKey: null,
       }),
-      pb.collection("pengaturan_ujian").getFullList({
+      db.getFullList("pengaturan_ujian", {
         filter: `status_akses = "buka" && (target_kelas_id ~ "${kelasId}" || target_tingkat ~ "${tingkat}")`,
         requestKey: null,
       }),
@@ -313,7 +314,7 @@ async function hitungNilaiAkhirSiswa(siswa, kelas) {
   // ✅ nilai_ujian di-index per [mapel_id][pengaturan_ujian_id][siswa_id]
   let nilaiUjianData = [];
   if (ujianData.length > 0) {
-    nilaiUjianData = await pb.collection("nilai_ujian").getFullList({
+    nilaiUjianData = await db.getFullList("nilai_ujian", {
       filter: ujianData
         .map((u) => `pengaturan_ujian_id = "${u.id}"`)
         .join(" || "),
@@ -343,11 +344,11 @@ async function hitungNilaiAkhirSiswa(siswa, kelas) {
       .map((m) => `mapel_id ~ "${m.id}"`)
       .join(" || ");
     [tpAll, lpAll] = await Promise.all([
-      pb.collection("tujuan_pembelajaran").getFullList({
+      db.getFullList("tujuan_pembelajaran", {
         filter: mapelFilter,
         requestKey: null,
       }),
-      pb.collection("lingkup_materi").getFullList({
+      db.getFullList("lingkup_materi", {
         filter: mapelFilter,
         requestKey: null,
       }),
@@ -359,11 +360,11 @@ async function hitungNilaiAkhirSiswa(siswa, kelas) {
   lpAll.forEach((lp) => (lpToMapel[lp.id] = lp.mapel_id));
 
   const [nfData, nsData] = await Promise.all([
-    pb.collection("nilai_formatif").getFullList({
+    db.getFullList("nilai_formatif", {
       filter: `kelas_id = "${kelasId}" && siswa_id = "${sid}"`,
       requestKey: null,
     }),
-    pb.collection("nilai_sumatif").getFullList({
+    db.getFullList("nilai_sumatif", {
       filter: `kelas_id = "${kelasId}" && siswa_id = "${sid}"`,
       requestKey: null,
     }),
@@ -425,32 +426,30 @@ async function buildRapor(siswa, ujian, pengaturanRapor = null) {
   const [capaianRes, absenRes, ekskulRes, catatanRes, kehadiranRes] =
     await Promise.all([
       kelasId
-        ? pb.collection("capaian_kompetensi").getFullList({
+        ? db.getFullList("capaian_kompetensi", {
             filter: `kelas_id = "${kelasId}"`,
             requestKey: null,
           })
         : Promise.resolve([]),
       ta?.Mulai && ta?.Akhir
-        ? pb.collection("absensi").getFullList({
+        ? db.getFullList("absensi", {
             filter: `siswa_id = "${sid}" && tanggal >= "${ta.Mulai}" && tanggal <= "${ta.Akhir}"`,
             requestKey: null,
           })
         : Promise.resolve([]),
-      pb.collection("nilai_ekskul").getFullList({
+      db.getFullList("nilai_ekskul", {
         filter: `siswa_id = "${sid}"`,
         requestKey: null,
       }),
       kelasId
-        ? pb.collection("catatan_siswa").getFullList({
+        ? db.getFullList("catatan_siswa", {
             filter: `siswa_id = "${sid}" && kelas_id = "${kelasId}"`,
             sort: "-created",
             requestKey: null,
           })
         : Promise.resolve([]),
       kelasId
-        ? pb
-            .collection("kehadiran_manual")
-            .getFullList({
+        ? db.getFullList("kehadiran_manual", {
               filter: `siswa_id = "${sid}" && kelas_id = "${kelasId}"`,
               requestKey: null,
             })
@@ -1049,7 +1048,7 @@ export default function RaporPage() {
         const me = pb.authStore.record || pb.authStore.model;
         const ids = toArray(me?.siswa_id);
         if (!ids.length) return;
-        const res = await pb.collection("siswa").getFullList({
+        const res = await db.getFullList("siswa", {
           filter: ids.map((id) => `id = "${id}"`).join(" || "),
           expand: "kelas_id.walikelas_id",
           sort: "nama_siswa",
@@ -1069,7 +1068,7 @@ export default function RaporPage() {
   useEffect(() => {
     (async () => {
       try {
-        const res = await pb.collection("pengaturan_ujian").getFullList({
+        const res = await db.getFullList("pengaturan_ujian", {
           filter: `akses_rapor = true`,
           expand: "tahun_ajaran_id",
           requestKey: null,
@@ -1103,14 +1102,10 @@ export default function RaporPage() {
     (async () => {
       let pr = null;
       try {
-        pr = await pb
-          .collection("pengaturan_rapor")
-          .getFirstListItem(`ujian_id ~ "${ujian.id}"`, { requestKey: null });
+        pr = await db.getFirstListItem("pengaturan_rapor", `ujian_id ~ "${ujian.id}"`, { requestKey: null });
       } catch {
         try {
-          pr = await pb
-            .collection("pengaturan_rapor")
-            .getFirstListItem(`ujian = "${ujian.id}"`, { requestKey: null });
+          pr = await db.getFirstListItem("pengaturan_rapor", `ujian = "${ujian.id}"`, { requestKey: null });
         } catch {
           pr = null;
         }

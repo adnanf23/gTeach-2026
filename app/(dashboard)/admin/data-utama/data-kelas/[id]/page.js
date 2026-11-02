@@ -1,6 +1,6 @@
 "use client";
 
-import { pb } from "@/lib/pocketbase";
+import { db } from "@/lib/db";
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
@@ -216,8 +216,7 @@ export default function DetailKelasPage() {
   useEffect(() => {
     if (!id) return;
     setLoadKelas(true);
-    pb.collection("kelas")
-      .getOne(id, {
+    db.getOne("kelas", id, {
         expand: "walikelas_id,pendamping_id,tahun_ajaran_id",
         requestKey: null,
       })
@@ -235,7 +234,7 @@ export default function DetailKelasPage() {
     if (fetchedSiswa || !id) return;
     setLoadSiswa(true);
     try {
-      const data = await pb.collection("siswa").getFullList({
+      const data = await db.getFullList("siswa", {
         filter: `kelas_id = "${id}"`,
         sort: "nama_siswa",
         requestKey: null,
@@ -260,13 +259,13 @@ export default function DetailKelasPage() {
 
       // Sengaja TANPA .catch(() => []) dulu, biar error PocketBase
       // (kalau ada) muncul jelas di console, bukan ke-swallow jadi [].
-      const spesifik = await pb.collection("mata_pelajaran").getFullList({
+      const spesifik = await db.getFullList("mata_pelajaran", {
         filter: `spesifik_kelas_id ~ "${id}"`,
         requestKey: null,
       });
       console.log("[fetchMapel] spesifik hasil:", spesifik.length, spesifik);
 
-      const kandidatUmum = await pb.collection("mata_pelajaran").getFullList({
+      const kandidatUmum = await db.getFullList("mata_pelajaran", {
         filter: `target_tingkat ~ "${tingkat}"`,
         requestKey: null,
       });

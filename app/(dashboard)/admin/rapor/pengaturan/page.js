@@ -1,8 +1,9 @@
 "use client";
 
+import { db } from "@/lib/db";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { pb, isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
+import { isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
 
 const ALLOWED_ROLES = ["admin", "ict"];
 
@@ -112,7 +113,7 @@ export default function PengaturanRaporPage() {
       setLoadingTahunAjaran(true);
       setError("");
       try {
-        const taRecords = await pb.collection("tahun_ajaran").getFullList({
+        const taRecords = await db.getFullList("tahun_ajaran", {
           sort: "-tahun,-semester",
           requestKey: null,
         });
@@ -147,9 +148,7 @@ export default function PengaturanRaporPage() {
       setLoadingData(true);
       setError("");
       try {
-        const ujianRecords = await pb
-          .collection("pengaturan_ujian")
-          .getFullList({
+        const ujianRecords = await db.getFullList("pengaturan_ujian", {
             filter: `tahun_ajaran_id = "${selectedTahunAjaranId}"`,
             sort: "jenis_ujian,nama_ujian",
             requestKey: null,
@@ -166,9 +165,7 @@ export default function PengaturanRaporPage() {
           .map((u) => `ujian_id = "${u.id}"`)
           .join(" || ");
 
-        const raporRecords = await pb
-          .collection("pengaturan_rapor")
-          .getFullList({
+        const raporRecords = await db.getFullList("pengaturan_rapor", {
             filter: filterStr,
             requestKey: null,
           });
@@ -230,14 +227,12 @@ export default function PengaturanRaporPage() {
         (r) => getUjianIdOfRapor(r) === form.ujian_id,
       );
       if (existing) {
-        const updated = await pb
-          .collection("pengaturan_rapor")
-          .update(existing.id, payload);
+        const updated = await db.update("pengaturan_rapor", existing.id, payload);
         setRaporList((prev) =>
           prev.map((r) => (r.id === updated.id ? updated : r)),
         );
       } else {
-        const created = await pb.collection("pengaturan_rapor").create(payload);
+        const created = await db.create("pengaturan_rapor", payload);
         setRaporList((prev) => [...prev, created]);
       }
       closeForm();
@@ -254,7 +249,7 @@ export default function PengaturanRaporPage() {
     setDeletingId(raporId);
     setError("");
     try {
-      await pb.collection("pengaturan_rapor").delete(raporId);
+      await db.remove("pengaturan_rapor", raporId);
       setRaporList((prev) => prev.filter((r) => r.id !== raporId));
       if (editingUjianId) {
         const stillExists = raporList.find((r) => r.id === raporId);

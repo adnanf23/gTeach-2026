@@ -1,8 +1,13 @@
 "use client";
 
+import { db } from "@/lib/db";
+import {
+  getManajemenUjianInit,
+  getManajemenUjianList,
+} from "@/actions/ict-manajemen-ujian.action";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { pb, isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
+import { isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
 
 const ALLOWED_ROLES = ["admin", "ict"];
 
@@ -94,21 +99,16 @@ export default function ManajemenUjianPage() {
       setLoadingTahunAjaran(true);
       setError("");
       try {
-        const [taRecords, kelasRecords] = await Promise.all([
-          pb.collection("tahun_ajaran").getFullList({
-            sort: "-tahun,-semester",
-            requestKey: null,
-          }),
-          pb.collection("kelas").getFullList({
-            sort: "tingkat,nama_kelas",
-            requestKey: null,
-          }),
-        ]);
+        // Baca tahun ajaran + kelas dilakukan di server action.
+        const res = await getManajemenUjianInit();
         if (!isMounted) return;
-        setTahunAjaranList(taRecords);
-        setKelasList(kelasRecords);
-        const aktif = taRecords.find((t) => t.is_aktif);
-        setSelectedTahunAjaranId((aktif || taRecords[0])?.id || null);
+        if (res.error) {
+          setError(res.error);
+          return;
+        }
+        setTahunAjaranList(res.tahunAjaranList);
+        setKelasList(res.kelasList);
+        setSelectedTahunAjaranId(res.selectedTahunAjaranId);
       } catch (err) {
         console.error("Error fetching init data:", err);
         if (isMounted) setError("Gagal memuat data tahun ajaran / kelas.");
@@ -135,13 +135,14 @@ export default function ManajemenUjianPage() {
       setLoadingUjian(true);
       setError("");
       try {
-        const records = await pb.collection("pengaturan_ujian").getFullList({
-          filter: `tahun_ajaran_id = "${selectedTahunAjaranId}"`,
-          sort: "jenis_ujian,nama_ujian",
-          expand: "target_kelas_id",
-          requestKey: null,
-        });
-        if (isMounted) setUjianList(records);
+        // Baca daftar pengaturan_ujian dilakukan di server action.
+        const res = await getManajemenUjianList(selectedTahunAjaranId);
+        if (!isMounted) return;
+        if (res.error) {
+          setError(res.error);
+          return;
+        }
+        setUjianList(res.ujianList);
       } catch (err) {
         console.error("Error fetching pengaturan_ujian:", err);
         if (isMounted) setError("Gagal memuat data ujian.");
@@ -222,14 +223,12 @@ export default function ManajemenUjianPage() {
       };
 
       if (editingId) {
-        const updated = await pb
-          .collection("pengaturan_ujian")
-          .update(editingId, payload);
+        const updated = await db.update("pengaturan_ujian", editingId, payload);
         setUjianList((prev) =>
           prev.map((u) => (u.id === updated.id ? updated : u)),
         );
       } else {
-        const created = await pb.collection("pengaturan_ujian").create(payload);
+        const created = await db.create("pengaturan_ujian", payload);
         setUjianList((prev) => [...prev, created]);
       }
       setShowForm(false);
@@ -251,7 +250,7 @@ export default function ManajemenUjianPage() {
     )
       return;
     try {
-      await pb.collection("pengaturan_ujian").delete(id);
+      await db.remove("pengaturan_ujian", id);
       setUjianList((prev) => prev.filter((u) => u.id !== id));
     } catch (err) {
       console.error("Error deleting pengaturan_ujian:", err);
@@ -264,7 +263,7 @@ export default function ManajemenUjianPage() {
     setTogglingId(u.id);
     setError("");
     try {
-      const updated = await pb.collection("pengaturan_ujian").update(u.id, {
+      const updated = await db.update("pengaturan_ujian", u.id, {
         status_akses: nextStatus,
       });
       setUjianList((prev) =>
@@ -310,7 +309,7 @@ export default function ManajemenUjianPage() {
     try {
       const created = await Promise.all(
         toCreate.map((item) =>
-          pb.collection("pengaturan_ujian").create({
+          db.create("pengaturan_ujian", {
             nama_ujian: item.nama_ujian,
             tahun_ajaran_id: selectedTahunAjaranId,
             target_tingkat: TINGKAT_OPTIONS,

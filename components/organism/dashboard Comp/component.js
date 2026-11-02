@@ -1,5 +1,6 @@
 "use client";
 
+import { db } from "@/lib/db";
 import { useEffect, useState, useRef } from "react";
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
@@ -708,21 +709,19 @@ export function ImportModal({ onImport, onCancel, loading }) {
 
 /**
  * Menampilkan jumlah siswa di suatu kelas dengan progress bar
- * Props: kelasId, pb (PocketBase instance)
+ * Props: kelasId
  */
-export function SiswaCount({ kelasId, pb }) {
+export function SiswaCount({ kelasId }) {
   const [count, setCount] = useState(null);
 
   useEffect(() => {
-    if (!kelasId || !pb) return;
-    pb.collection("siswa")
-      .getList(1, 1, {
-        filter: `kelas_id = "${kelasId}"`,
-        requestKey: `siswa-count-${kelasId}`,
-      })
+    if (!kelasId) return;
+    db.getList("siswa", 1, 1, {
+      filter: `kelas_id = "${kelasId}"`,
+    })
       .then((res) => setCount(res.totalItems))
       .catch(() => setCount(null));
-  }, [kelasId, pb]);
+  }, [kelasId]);
 
   if (count === null) {
     return (

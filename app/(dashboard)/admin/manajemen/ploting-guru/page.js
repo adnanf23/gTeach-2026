@@ -1,9 +1,10 @@
 "use client";
 
+import { db } from "@/lib/db";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 // Sesuaikan path import berikut dengan lokasi file pocketbase client di project-mu
-import { pb, isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
+import { isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
 
 // Role user yang dianggap "guru" dan bisa diploting mengajar mapel/kelas.
 // Admin & ICT sengaja tidak dimasukkan karena mereka bukan pengajar.
@@ -221,18 +222,14 @@ export default function PlotingGuruPageAdmin() {
     setLoadingData(true);
     try {
       const [guru, mapel, kelas, ploting] = await Promise.all([
-        pb.collection("users").getFullList({
+        db.getFullList("users", {
           filter: GURU_ROLES.map((r) => `role="${r}"`).join(" || "),
           sort: "nama_lengkap",
           requestKey: null,
         }),
-        pb
-          .collection("mata_pelajaran")
-          .getFullList({ sort: "nama_mapel", requestKey: null }),
-        pb
-          .collection("kelas")
-          .getFullList({ sort: "nama_kelas", requestKey: null }),
-        pb.collection("ploting_guru").getFullList({ requestKey: null }),
+        db.getFullList("mata_pelajaran", { sort: "nama_mapel", requestKey: null }),
+        db.getFullList("kelas", { sort: "nama_kelas", requestKey: null }),
+        db.getFullList("ploting_guru", { requestKey: null }),
       ]);
       setGuruList(guru);
       setMapelList(mapel);
@@ -447,12 +444,8 @@ export default function PlotingGuruPageAdmin() {
         if (guruOrMapelBerubah) {
           const plotingFilter = `ploting_guru_id="${editingRecord.id}"`;
           const [lingkup, nilaiUjian] = await Promise.all([
-            pb
-              .collection("lingkup_materi")
-              .getFullList({ filter: plotingFilter, requestKey: null }),
-            pb
-              .collection("nilai_ujian")
-              .getFullList({ filter: plotingFilter, requestKey: null }),
+            db.getFullList("lingkup_materi", { filter: plotingFilter, requestKey: null }),
+            db.getFullList("nilai_ujian", { filter: plotingFilter, requestKey: null }),
           ]);
           if (lingkup.length > 0 || nilaiUjian.length > 0) {
             setFormError(
@@ -463,29 +456,25 @@ export default function PlotingGuruPageAdmin() {
           }
         }
 
-        await pb.collection("ploting_guru").update(
-          editingRecord.id,
+        await db.update("ploting_guru", editingRecord.id,
           {
             guru_id: form.guruId,
             mapel_id: form.mapelId,
             kelas_id: eligibleIds,
           },
-          { requestKey: null },
-        );
+          { requestKey: null },);
 
         setMessage({
           type: "success",
           text: `Ploting diperbarui — tertaut ke ${eligibleIds.length} kelas.`,
         });
       } else {
-        await pb.collection("ploting_guru").create(
-          {
+        await db.create("ploting_guru", {
             guru_id: form.guruId,
             mapel_id: form.mapelId,
             kelas_id: eligibleIds,
           },
-          { requestKey: null },
-        );
+          { requestKey: null },);
 
         setMessage({
           type: "success",
@@ -519,12 +508,8 @@ export default function PlotingGuruPageAdmin() {
       const plotingFilter = `ploting_guru_id="${record.id}"`;
 
       const [lingkup, nilaiUjian] = await Promise.all([
-        pb
-          .collection("lingkup_materi")
-          .getFullList({ filter: plotingFilter, requestKey: null }),
-        pb
-          .collection("nilai_ujian")
-          .getFullList({ filter: plotingFilter, requestKey: null }),
+        db.getFullList("lingkup_materi", { filter: plotingFilter, requestKey: null }),
+        db.getFullList("nilai_ujian", { filter: plotingFilter, requestKey: null }),
       ]);
 
       let nilaiHarianCount = 0;
@@ -532,7 +517,7 @@ export default function PlotingGuruPageAdmin() {
         const lingkupFilter = lingkup
           .map((l) => `lingkup_materi_id="${l.id}"`)
           .join(" || ");
-        const nilaiHarian = await pb.collection("nilai_harian").getFullList({
+        const nilaiHarian = await db.getFullList("nilai_harian", {
           filter: lingkupFilter,
           requestKey: null,
         });
@@ -566,33 +551,31 @@ export default function PlotingGuruPageAdmin() {
           const lingkupFilter = impact.lingkupIds
             .map((id) => `lingkup_materi_id="${id}"`)
             .join(" || ");
-          const nilaiHarian = await pb.collection("nilai_harian").getFullList({
+          const nilaiHarian = await db.getFullList("nilai_harian", {
             filter: lingkupFilter,
             requestKey: null,
           });
           await Promise.all(
             nilaiHarian.map((n) =>
-              pb.collection("nilai_harian").delete(n.id, { requestKey: null }),
+              db.remove("nilai_harian", n.id, { requestKey: null }),
             ),
           );
           await Promise.all(
             impact.lingkupIds.map((id) =>
-              pb.collection("lingkup_materi").delete(id, { requestKey: null }),
+              db.remove("lingkup_materi", id, { requestKey: null }),
             ),
           );
         }
         if (impact.nilaiUjianIds.length > 0) {
           await Promise.all(
             impact.nilaiUjianIds.map((id) =>
-              pb.collection("nilai_ujian").delete(id, { requestKey: null }),
+              db.remove("nilai_ujian", id, { requestKey: null }),
             ),
           );
         }
       }
 
-      await pb
-        .collection("ploting_guru")
-        .delete(record.id, { requestKey: null });
+      await db.remove("ploting_guru", record.id, { requestKey: null });
       setMessage({ type: "success", text: "Ploting berhasil dihapus." });
       await loadAll();
     } catch (e) {
@@ -616,9 +599,7 @@ export default function PlotingGuruPageAdmin() {
     const eligible = eligibleKelasForMapel(mapel, kelasList).map((k) => k.id);
     setSyncingId(record.id);
     try {
-      await pb
-        .collection("ploting_guru")
-        .update(record.id, { kelas_id: eligible }, { requestKey: null });
+      await db.update("ploting_guru", record.id, { kelas_id: eligible }, { requestKey: null });
       setMessage({
         type: "success",
         text: `Kelas disinkronkan ulang (${eligible.length} kelas).`,

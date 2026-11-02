@@ -44,9 +44,7 @@ const TONE = {
 /* ------------------------------------------------------------------ */
 
 const full = (collection, options = {}) =>
-  pb
-    .collection(collection)
-    .getFullList({ batch: 500, requestKey: null, ...options });
+  db.getFullList(collection, { batch: 500, ...options });
 
 const ids = (v) => (Array.isArray(v) ? v : v ? [v] : []);
 const hasText = (v) => typeof v === "string" && v.trim().length > 0;

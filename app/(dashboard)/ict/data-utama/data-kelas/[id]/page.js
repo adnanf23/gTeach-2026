@@ -1,6 +1,10 @@
 "use client";
 
-import { pb } from "@/lib/pocketbase";
+import {
+  getKelasDetail,
+  getSiswaKelas,
+  getMapelKelas,
+} from "@/actions/ict-data-kelas-detail.action";
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
@@ -194,12 +198,15 @@ export default function DetailKelasPage() {
   useEffect(() => {
     if (!id) return;
     setLoadKelas(true);
-    pb.collection("kelas")
-      .getOne(id, {
-        expand: "walikelas_id,pendamping_id,tahun_ajaran_id",
-        requestKey: null,
+    getKelasDetail(id)
+      .then((res) => {
+        if (res.error) {
+          console.error(res.error);
+          setKelas(null);
+          return;
+        }
+        setKelas(res.kelas);
       })
-      .then((data) => setKelas(data))
       .catch((err) => {
         console.error(err);
         setKelas(null);
@@ -213,13 +220,13 @@ export default function DetailKelasPage() {
     if (fetchedSiswa || !id) return;
     setLoadSiswa(true);
     try {
-      const data = await pb.collection("siswa").getFullList({
-        filter: `kelas_id = "${id}"`,
-        sort: "nama_siswa",
-        requestKey: null,
-      });
-      setSiswa(data);
-      setFetchedSiswa(true);
+      const res = await getSiswaKelas(id);
+      if (res.error) {
+        console.error(res.error);
+      } else {
+        setSiswa(res.siswa);
+        setFetchedSiswa(true);
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -233,29 +240,13 @@ export default function DetailKelasPage() {
     if (fetchedMapel || !kelas) return;
     setLoadMapel(true);
     try {
-      const tingkat = String(kelas.tingkat);
-      const spesifik = await pb.collection("mata_pelajaran").getFullList({
-        filter: `spesifik_kelas_id ~ "${id}"`,
-        requestKey: null,
-      });
-      const kandidatUmum = await pb.collection("mata_pelajaran").getFullList({
-        filter: `target_tingkat ~ "${tingkat}"`,
-        requestKey: null,
-      });
-      const umum = kandidatUmum.filter((m) => {
-        const spesifikIds = Array.isArray(m.spesifik_kelas_id)
-          ? m.spesifik_kelas_id
-          : m.spesifik_kelas_id
-            ? [m.spesifik_kelas_id]
-            : [];
-        return spesifikIds.length === 0;
-      });
-      const map = {};
-      [...spesifik, ...umum].forEach((m) => {
-        map[m.id] = m;
-      });
-      setMapel(Object.values(map));
-      setFetchedMapel(true);
+      const res = await getMapelKelas(id, kelas.tingkat);
+      if (res.error) {
+        console.error("[fetchMapel] ERROR:", res.error);
+      } else {
+        setMapel(res.mapel);
+        setFetchedMapel(true);
+      }
     } catch (err) {
       console.error("[fetchMapel] ERROR:", err?.data || err);
     } finally {

@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  getSystemLogs,
+  getSystemLogCounts,
+  getSystemLogUser,
+} from "@/actions/ict-system-logs.action";
 import { useState, useEffect, useCallback, useRef, Fragment } from "react";
 import { pb } from "@/lib/pocketbase";
 
@@ -493,24 +498,25 @@ export default function SystemLogsPage() {
         );
       }
 
-      const result = await pb
-        .collection("system_log")
-        .getList(currentPage, PER_PAGE, {
-          expand: "user_id",
-          requestKey: null,
-          sort: sortOrder,
-          filter: filterParts.join(" && ") || undefined,
-        });
+      const result = await getSystemLogs({
+        page: currentPage,
+        perPage: PER_PAGE,
+        sort: sortOrder,
+        filter: filterParts.join(" && ") || undefined,
+      });
 
       // Abaikan respons lama kalau sudah ada request yang lebih baru
       if (id !== reqId.current) return;
-      setLogs(result.items);
-      setTotalItems(result.totalItems);
-    } catch (error) {
-      if (!error.isAbort) {
-        console.error("Gagal mengambil data log:", error);
-        if (id === reqId.current) setLoadError(true);
+      if (result.error) {
+        console.error("Gagal mengambil data log:", result.error);
+        setLoadError(true);
+      } else {
+        setLogs(result.logs);
+        setTotalItems(result.totalItems);
       }
+    } catch (error) {
+      console.error("Gagal mengambil data log:", error);
+      if (id === reqId.current) setLoadError(true);
     } finally {
       if (id === reqId.current) setLoading(false);
     }
@@ -523,28 +529,15 @@ export default function SystemLogsPage() {
   // ── Fetch jumlah per tipe ────────────────────────────────────────────────
   const fetchCounts = useCallback(async () => {
     try {
-      const [all, ...perType] = await Promise.all([
-        pb.collection("system_log").getList(1, 1, {
-          fields: "id",
-          requestKey: null,
-        }),
-        ...COUNT_TYPES.map((t) =>
-          pb.collection("system_log").getList(1, 1, {
-            fields: "id",
-            filter: `type = "${t}"`,
-            requestKey: null,
-          }),
-        ),
-      ]);
-      setTotalAll(all.totalItems);
-      setTypeCounts(
-        Object.fromEntries(
-          COUNT_TYPES.map((t, i) => [t, perType[i].totalItems]),
-        ),
-      );
+      const result = await getSystemLogCounts();
+      if (result.error) {
+        console.error("Gagal mengambil statistik log:", result.error);
+      } else {
+        setTotalAll(result.totalAll);
+        setTypeCounts(result.typeCounts);
+      }
     } catch (error) {
-      if (!error.isAbort)
-        console.error("Gagal mengambil statistik log:", error);
+      console.error("Gagal mengambil statistik log:", error);
     } finally {
       setCountsLoading(false);
     }
@@ -600,10 +593,12 @@ export default function SystemLogsPage() {
       let record = e.record;
       if (e.record.user_id) {
         try {
-          const user = await pb
-            .collection("users")
-            .getOne(e.record.user_id, { requestKey: null });
-          record = { ...record, expand: { user_id: user } };
+          const res = await getSystemLogUser(e.record.user_id);
+          if (res.user) {
+            record = { ...record, expand: { user_id: res.user } };
+          } else {
+            console.error("Gagal mengambil relasi realtime user:", res.error);
+          }
         } catch (err) {
           console.error("Gagal mengambil relasi realtime user:", err);
         }

@@ -1,8 +1,9 @@
 "use client";
 
+import { getDaftarKelasGuruMapel } from "@/actions/guru-mapel-daftar-kelas.action";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { pb, isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
+import { isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
 
 // Sesuaikan kalau nama role guru mapel di sistemmu berbeda.
 const ALLOWED_ROLES = ["guru mapel"];
@@ -213,68 +214,15 @@ export default function DataKelasListPage() {
       setLoading(true);
       setError("");
       try {
-        const plotingRecords = await pb.collection("ploting_guru").getFullList({
-          filter: `guru_id = "${user.id}"`,
-          expand: "kelas_id,mapel_id",
-          requestKey: null,
-        });
+        // Fetch + flatten + count + sort dilakukan di server action.
+        const res = await getDaftarKelasGuruMapel(user.id);
+        if (!isMounted) return;
 
-        const kelasMap = {};
-        for (const p of plotingRecords) {
-          const kelasArr = Array.isArray(p.expand?.kelas_id)
-            ? p.expand.kelas_id
-            : p.expand?.kelas_id
-              ? [p.expand.kelas_id]
-              : [];
-          const mapel = p.expand?.mapel_id;
-
-          for (const k of kelasArr) {
-            if (!kelasMap[k.id]) {
-              kelasMap[k.id] = { kelas: k, mapelList: [] };
-            }
-            if (
-              mapel &&
-              !kelasMap[k.id].mapelList.some((m) => m.id === mapel.id)
-            ) {
-              kelasMap[k.id].mapelList.push(mapel);
-            }
-          }
+        if (res.error) {
+          setError(res.error);
+        } else {
+          setKelasCards(res.kelasCards);
         }
-
-        const kelasIds = Object.keys(kelasMap);
-
-        const counts = await Promise.all(
-          kelasIds.map((kid) =>
-            pb
-              .collection("siswa")
-              .getList(1, 1, {
-                filter: `kelas_id = "${kid}"`,
-                requestKey: null,
-                fields: "id",
-              })
-              .then((r) => r.totalItems)
-              .catch(() => 0),
-          ),
-        );
-
-        const cards = kelasIds.map((kid, idx) => ({
-          kelas: kelasMap[kid].kelas,
-          mapelList: kelasMap[kid].mapelList.sort((a, b) =>
-            (a.nama_mapel || "").localeCompare(b.nama_mapel || ""),
-          ),
-          siswaCount: counts[idx],
-        }));
-
-        cards.sort((a, b) => {
-          const t =
-            (Number(a.kelas.tingkat) || 0) - (Number(b.kelas.tingkat) || 0);
-          if (t !== 0) return t;
-          return (a.kelas.nama_kelas || "").localeCompare(
-            b.kelas.nama_kelas || "",
-          );
-        });
-
-        if (isMounted) setKelasCards(cards);
       } catch (err) {
         console.error("Error fetching data kelas guru mapel:", err);
         if (isMounted) setError("Gagal memuat daftar kelas Anda.");

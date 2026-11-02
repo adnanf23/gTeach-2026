@@ -1,8 +1,10 @@
 "use client";
 
+import { db } from "@/lib/db";
+import { getKelasSayaData } from "@/actions/walikelas-data-kelas.action";
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { pb, isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
+import { isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
 
 // Role yang boleh mengakses halaman ini
 const ALLOWED_ROLES = ["guru walikelas", "guru pendamping"];
@@ -16,15 +18,6 @@ const CLR = {
   YELLOW_LIGHT: "FFFFF2CC",
   GRAY_LIGHT: "FFEEEEEE",
 };
-
-function firstOf(val) {
-  return Array.isArray(val) ? val[0] : val;
-}
-
-function toArray(val) {
-  if (Array.isArray(val)) return val;
-  return val ? [val] : [];
-}
 
 // Nama sheet Excel: maks 31 karakter, tanpa karakter terlarang, harus unik
 function safeSheetName(name, usedNames) {
@@ -100,157 +93,20 @@ export default function KelasSayaPage() {
       setLoading(true);
       setError("");
 
-      try {
-        const kelasFilter = `walikelas_id = "${user.id}" || pendamping_id = "${user.id}"`;
-        const kelasRecords = await pb.collection("kelas").getFullList({
-          filter: kelasFilter,
-          sort: "tingkat,nama_kelas",
-          expand: "tahun_ajaran_id,walikelas_id,pendamping_id",
-          requestKey: null,
-        });
+      // Fetch + grouping dilakukan di server action.
+      const res = await getKelasSayaData(user.id);
+      if (!isMounted) return;
 
-        if (kelasRecords.length === 0) {
-          if (isMounted) {
-            setKelasList([]);
-            setSiswaByKelas({});
-            setMapelByKelas({});
-            setWaliMuridBySiswa({});
-            setLoading(false);
-          }
-          return;
-        }
-
-        const kelasIds = kelasRecords.map((k) => k.id);
-        const distinctTingkat = Array.from(
-          new Set(kelasRecords.map((k) => String(k.tingkat))),
-        );
-
-        const siswaFilter = kelasIds
-          .map((kid) => `kelas_id = "${kid}"`)
-          .join(" || ");
-
-        const [siswaRecords, spesifikMapel, kandidatUmumMapel] =
-          await Promise.all([
-            pb.collection("siswa").getFullList({
-              filter: siswaFilter,
-              sort: "nama_siswa",
-              requestKey: null,
-            }),
-            pb
-              .collection("mata_pelajaran")
-              .getFullList({
-                filter: kelasIds
-                  .map((kid) => `spesifik_kelas_id ~ "${kid}"`)
-                  .join(" || "),
-                requestKey: null,
-              })
-              .catch(() => []),
-            pb
-              .collection("mata_pelajaran")
-              .getFullList({
-                filter: distinctTingkat
-                  .map((t) => `target_tingkat ~ "${t}"`)
-                  .join(" || "),
-                requestKey: null,
-              })
-              .catch(() => []),
-          ]);
-
-        /* ---------- Ambil akun wali murid untuk siswa-siswa ini ---------- */
-        const siswaIds = siswaRecords.map((s) => s.id);
-        let waliMuridRecords = [];
-        if (siswaIds.length > 0) {
-          const CHUNK = 50;
-          const chunks = [];
-          for (let i = 0; i < siswaIds.length; i += CHUNK) {
-            chunks.push(siswaIds.slice(i, i + CHUNK));
-          }
-          const results = await Promise.all(
-            chunks.map((chunk) =>
-              pb
-                .collection("wali_murid")
-                .getFullList({
-                  filter: chunk.map((id) => `siswa_id ~ "${id}"`).join(" || "),
-                  fields: "id,username,siswa_id,verified",
-                  requestKey: null,
-                })
-                .catch(() => []),
-            ),
-          );
-          waliMuridRecords = results.flat();
-        }
-
-        // Map siswaId -> [wali_murid, ...]
-        const waliBySiswa = {};
-        for (const w of waliMuridRecords) {
-          for (const sid of toArray(w.siswa_id)) {
-            if (!waliBySiswa[sid]) waliBySiswa[sid] = [];
-            waliBySiswa[sid].push(w);
-          }
-        }
-
-        /* ---------- Grouping siswa per kelas ---------- */
-        const groupedSiswa = {};
-        for (const s of siswaRecords) {
-          const kid = firstOf(s.kelas_id);
-          if (!kid) continue;
-          if (!groupedSiswa[kid]) groupedSiswa[kid] = [];
-          groupedSiswa[kid].push(s);
-        }
-
-        const umumMapel = kandidatUmumMapel.filter((m) => {
-          const ids = Array.isArray(m.spesifik_kelas_id)
-            ? m.spesifik_kelas_id
-            : m.spesifik_kelas_id
-              ? [m.spesifik_kelas_id]
-              : [];
-          return ids.length === 0;
-        });
-
-        const groupedMapel = {};
-        for (const kelas of kelasRecords) {
-          const tingkat = String(kelas.tingkat);
-          const applied = [];
-          const seen = new Set();
-
-          for (const m of spesifikMapel) {
-            const ids = Array.isArray(m.spesifik_kelas_id)
-              ? m.spesifik_kelas_id
-              : m.spesifik_kelas_id
-                ? [m.spesifik_kelas_id]
-                : [];
-            if (ids.includes(kelas.id) && !seen.has(m.id)) {
-              applied.push({ ...m, __khusus: true });
-              seen.add(m.id);
-            }
-          }
-
-          for (const m of umumMapel) {
-            if (seen.has(m.id)) continue;
-            if (!(m.target_tingkat || []).includes(tingkat)) continue;
-            applied.push({ ...m, __khusus: false });
-            seen.add(m.id);
-          }
-
-          groupedMapel[kelas.id] = applied.sort((a, b) =>
-            (a.nama_mapel || "").localeCompare(b.nama_mapel || ""),
-          );
-        }
-
-        if (isMounted) {
-          setKelasList(kelasRecords);
-          setSiswaByKelas(groupedSiswa);
-          setMapelByKelas(groupedMapel);
-          setWaliMuridBySiswa(waliBySiswa);
-        }
-      } catch (err) {
-        console.error("Error fetching data:", err);
-        if (isMounted) {
-          setError("Gagal memuat data kelas atau mata pelajaran Anda.");
-        }
-      } finally {
-        if (isMounted) setLoading(false);
+      if (res.error) {
+        setError(res.error);
+      } else {
+        setKelasList(res.kelasList);
+        setSiswaByKelas(res.siswaByKelas);
+        setMapelByKelas(res.mapelByKelas);
+        setWaliMuridBySiswa(res.waliMuridBySiswa);
       }
+
+      setLoading(false);
     }
 
     fetchData();
@@ -278,7 +134,7 @@ export default function KelasSayaPage() {
       });
 
       try {
-        await pb.collection("wali_murid").update(waliId, {
+        await db.update("wali_murid", waliId, {
           verified: nextVal,
         });
       } catch (err) {

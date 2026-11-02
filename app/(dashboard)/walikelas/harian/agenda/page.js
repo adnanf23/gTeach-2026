@@ -1,9 +1,18 @@
 "use client";
 
+import { db } from "@/lib/db";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { pb, isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
+import { isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
 import { createSystemLog } from "@/lib/logger";
+import {
+  resolveWalikelasKelas,
+  getAgendaBulan,
+  getAgendaDetail,
+  getAgendaFormData,
+  getAgendaExportRows,
+} from "@/actions/walikelas-harian-agenda.action";
+import { getTahunAjaranList } from "@/actions/tahun-ajaran.action";
 
 // =========================================================
 // Helper tanggal
@@ -46,6 +55,19 @@ function formatLong(d) {
   return `${hari[date.getDay()]}, ${date.getDate()} ${bulan[date.getMonth()]} ${date.getFullYear()}`;
 }
 
+// Batas tanggal rentang semester (format filter PocketBase).
+function semesterBounds(tahunAjaran) {
+  if (!tahunAjaran?.Mulai || !tahunAjaran?.Akhir) return null;
+  const toISO = (value) => {
+    const x = new Date(value);
+    return `${x.getFullYear()}-${pad(x.getMonth() + 1)}-${pad(x.getDate())}`;
+  };
+  return {
+    mulai: `${toISO(tahunAjaran.Mulai)} 00:00:00`,
+    akhir: `${toISO(tahunAjaran.Akhir)} 23:59:59`,
+  };
+}
+
 const HARI_PENDEK = ["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Min"];
 const BULAN = [
   "Januari",
@@ -78,12 +100,21 @@ const JAM_PELAJARAN = [
   { value: "3 dan 4", label: "Jam ke-3 & 4" },
   { value: "5 dan 6", label: "Jam ke-5 & 6" },
   { value: "7 dan 8", label: "Jam ke-7 & 8" },
+  { value: "9 dan 10", label: "Jam ke-9 & 10" },
+  { value: "11 dan 12", label: "Jam ke-11 & 12" },
 ];
 
 // =========================================================
 // Helper Export
 // =========================================================
-const JAM_SLOTS = ["1 dan 2", "3 dan 4", "5 dan 6", "7 dan 8"];
+const JAM_SLOTS = [
+  "1 dan 2",
+  "3 dan 4",
+  "5 dan 6",
+  "7 dan 8",
+  "9 dan 10",
+  "11 dan 12",
+];
 const EXPORT_FONT = { name: "Calibri" };
 const BORDER_THIN = {
   top: { style: "thin", color: { rgb: "B0B0B0" } },
@@ -123,15 +154,10 @@ async function exportAgendaWorkbook({
   const XLSX = await import("xlsx-js-style");
 
   const isSpecificClass = kelasId !== "semua";
-  const kelasFilter = isSpecificClass ? ` && kelas_id = "${kelasId}"` : "";
-  const filter = `date >= "${startDate} 00:00:00" && date <= "${endDate} 23:59:59"${kelasFilter}`;
 
-  const records = await pb.collection("agenda_mengajar").getFullList({
-    filter,
-    expand: "kelas_id,mapel_id",
-    sort: "date,jam_mapel",
-    requestKey: null,
-  });
+  const res = await getAgendaExportRows({ kelasId, startDate, endDate });
+  if (res.error) throw new Error(res.error);
+  const records = res.records;
 
   const targetKelas = isSpecificClass
     ? kelasList.filter((k) => k.id === kelasId)
@@ -440,54 +466,14 @@ function AgendaModal({ isOpen, onClose, onSubmit, initialData, defaultDate }) {
     let cancelled = false;
 
     async function fetchData() {
-      try {
-        let kelasData = null;
-        let allKelas = [];
-
-        if (user.role === "guru walikelas" || user.role === "guru pendamping") {
-          try {
-            kelasData = await pb
-              .collection("kelas")
-              .getFirstListItem(
-                `walikelas_id = "${user.id}" || pendamping_id = "${user.id}"`,
-                { requestKey: null },
-              );
-            if (!cancelled) setKelas(kelasData);
-          } catch (e) {
-            console.log("Tidak ada kelas yang ditugaskan");
-          }
-        } else if (user.role === "admin" || user.role === "ict") {
-          allKelas = await pb.collection("kelas").getFullList({
-            sort: "nama_kelas",
-            requestKey: null,
-          });
-          if (!cancelled) setListKelas(allKelas);
-        }
-
-        let mapelData = [];
-        if (kelasData) {
-          const [mapelKhusus, mapelTingkat] = await Promise.all([
-            pb.collection("mata_pelajaran").getFullList({
-              filter: `spesifik_kelas_id ~ "${kelasData.id}"`,
-              requestKey: null,
-            }),
-            pb.collection("mata_pelajaran").getFullList({
-              filter: `target_tingkat ~ "${String(kelasData.tingkat)}"`,
-              requestKey: null,
-            }),
-          ]);
-
-          const combined = [...mapelKhusus, ...mapelTingkat];
-          mapelData = Array.from(
-            new Map(combined.map((item) => [item.id, item])).values(),
-          );
-          mapelData.sort((a, b) => a.nama_mapel.localeCompare(b.nama_mapel));
-        }
-
-        if (!cancelled) setListMapel(mapelData);
-      } catch (error) {
-        console.error("Gagal mengambil data:", error);
-      }
+      const res = await getAgendaFormData({
+        userId: user.id,
+        role: user.role,
+      });
+      if (cancelled) return;
+      setKelas(res.kelas);
+      setListKelas(res.listKelas);
+      setListMapel(res.listMapel);
     }
 
     fetchData();
@@ -991,6 +977,9 @@ export default function AgendaMengajarPage() {
 
   const [isExportOpen, setIsExportOpen] = useState(false);
 
+  const [semesterList, setSemesterList] = useState([]);
+  const [selectedSemesterId, setSelectedSemesterId] = useState("");
+
   // =========================================================
   // Auth & Kelas Resolution
   // =========================================================
@@ -1003,6 +992,26 @@ export default function AgendaMengajarPage() {
     setCheckingAuth(false);
   }, [router]);
 
+  // =========================================================
+  // Semester (tahun ajaran) Filter
+  // =========================================================
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSemester() {
+      const res = await getTahunAjaranList();
+      if (cancelled) return;
+      const list = res?.list || [];
+      setSemesterList(list);
+      setSelectedSemesterId(res?.defaultId || list[0]?.id || "");
+    }
+
+    loadSemester();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
@@ -1010,42 +1019,26 @@ export default function AgendaMengajarPage() {
     async function resolve() {
       setResolvingKelas(true);
       setNoKelasAssigned(false);
-      const role = user.role;
 
-      if (role === "guru walikelas" || role === "guru pendamping") {
-        try {
-          const rec = await pb
-            .collection("kelas")
-            .getFirstListItem(
-              `walikelas_id="${user.id}" || pendamping_id="${user.id}"`,
-              { requestKey: null },
-            );
-          if (!cancelled) {
-            setKelas(rec);
-            setNeedsKelasPicker(false);
-          }
-        } catch (e) {
-          if (!cancelled) setNoKelasAssigned(true);
-        }
-      } else {
-        try {
-          const list = await pb.collection("kelas").getFullList({
-            sort: "nama_kelas",
-            requestKey: null,
-          });
-          if (!cancelled) {
-            const sorted = list.sort((a, b) =>
-              a.nama_kelas.localeCompare(b.nama_kelas),
-            );
-            setKelasOptions(sorted);
-            setNeedsKelasPicker(true);
-          }
-        } catch (e) {
-          if (!cancelled)
-            setMessage({ type: "error", text: "Gagal memuat daftar kelas." });
-        }
+      const res = await resolveWalikelasKelas({
+        userId: user.id,
+        role: user.role,
+      });
+      if (cancelled) return;
+
+      if (res.status === "assigned") {
+        setKelas(res.kelas);
+        setNeedsKelasPicker(false);
+      } else if (res.status === "picker") {
+        setKelasOptions(res.kelasOptions);
+        setNeedsKelasPicker(true);
+      } else if (res.status === "none") {
+        setNoKelasAssigned(true);
+      } else if (res.status === "error") {
+        setMessage({ type: "error", text: res.message });
       }
-      if (!cancelled) setResolvingKelas(false);
+
+      setResolvingKelas(false);
     }
 
     resolve();
@@ -1065,25 +1058,20 @@ export default function AgendaMengajarPage() {
     try {
       const year = viewDate.getFullYear();
       const month = viewDate.getMonth();
-      const first = new Date(year, month, 1);
-      const last = new Date(year, month + 1, 0);
-      const startStr = `${toISODate(first)} 00:00:00`;
-      const endStr = `${toISODate(last)} 23:59:59`;
 
-      const records = await pb.collection("agenda_mengajar").getFullList({
-        filter: `kelas_id="${activeKelas.id}" && date >= "${startStr}" && date <= "${endStr}"`,
-        sort: "date,jam_mapel",
-        expand: "mapel_id,kelas_id",
-        requestKey: null,
+      const selectedSemester =
+        semesterList.find((t) => t.id === selectedSemesterId) || null;
+      const bounds = semesterBounds(selectedSemester);
+
+      const res = await getAgendaBulan({
+        kelasId: activeKelas.id,
+        year,
+        month,
+        mulai: bounds?.mulai || null,
+        akhir: bounds?.akhir || null,
       });
-
-      const grouped = {};
-      for (const r of records) {
-        const key = toISODate(new Date(r.date));
-        if (!grouped[key]) grouped[key] = [];
-        grouped[key].push(r);
-      }
-      setMonthAgenda(grouped);
+      if (res.error) throw new Error(res.error);
+      setMonthAgenda(res.monthAgenda);
     } catch (e) {
       setMessage({
         type: "error",
@@ -1092,7 +1080,7 @@ export default function AgendaMengajarPage() {
     } finally {
       setLoadingCalendar(false);
     }
-  }, [kelas, viewDate, needsKelasPicker]);
+  }, [kelas, viewDate, needsKelasPicker, semesterList, selectedSemesterId]);
 
   useEffect(() => {
     if (kelas) {
@@ -1126,32 +1114,8 @@ export default function AgendaMengajarPage() {
         const dateStr = toISODate(date);
         const items = monthAgenda[dateStr] || [];
 
-        const refreshedItems = await Promise.all(
-          items.map(async (item) => {
-            try {
-              const fullItem = await pb
-                .collection("agenda_mengajar")
-                .getOne(item.id, {
-                  expand: "mapel_id,kelas_id",
-                  requestKey: null,
-                });
-              return fullItem;
-            } catch {
-              return item;
-            }
-          }),
-        );
-
-        const jamOrder = ["1 dan 2", "3 dan 4", "5 dan 6", "7 dan 8"];
-        const sortedItems = refreshedItems.sort((a, b) => {
-          const indexA = jamOrder.indexOf(a.jam_mapel);
-          const indexB = jamOrder.indexOf(b.jam_mapel);
-          return (
-            (indexA === -1 ? 999 : indexA) - (indexB === -1 ? 999 : indexB)
-          );
-        });
-
-        setDetailItems(sortedItems);
+        const res = await getAgendaDetail({ items });
+        setDetailItems(res.items);
       } finally {
         setLoadingDetail(false);
       }
@@ -1168,7 +1132,7 @@ export default function AgendaMengajarPage() {
         ? data.kelas_id || kelas?.id
         : kelas?.id;
 
-      const existing = await pb.collection("agenda_mengajar").getFullList({
+      const existing = await db.getFullList("agenda_mengajar", {
         filter: `kelas_id="${activeKelas}" && mapel_id="${data.mapel_id}" && date="${data.date}" && jam_mapel="${data.jam_mapel}"`,
         requestKey: null,
       });
@@ -1181,7 +1145,7 @@ export default function AgendaMengajarPage() {
         return;
       }
 
-      const existingJam = await pb.collection("agenda_mengajar").getFullList({
+      const existingJam = await db.getFullList("agenda_mengajar", {
         filter: `kelas_id="${activeKelas}" && date="${data.date}" && jam_mapel="${data.jam_mapel}"`,
         requestKey: null,
       });
@@ -1194,8 +1158,7 @@ export default function AgendaMengajarPage() {
         return;
       }
 
-      await pb.collection("agenda_mengajar").create(
-        {
+      await db.create("agenda_mengajar", {
           deskripsi: data.deskripsi,
           mapel_id: data.mapel_id,
           kelas_id: activeKelas,
@@ -1205,8 +1168,7 @@ export default function AgendaMengajarPage() {
           metode: data.metode,
           siswa_tidak_hadir: data.siswa_tidak_hadir,
         },
-        { requestKey: null },
-      );
+        { requestKey: null },);
 
       await createSystemLog({
         type: "succes",
@@ -1261,7 +1223,7 @@ export default function AgendaMengajarPage() {
         ? data.kelas_id || kelas?.id
         : kelas?.id;
 
-      const existing = await pb.collection("agenda_mengajar").getFullList({
+      const existing = await db.getFullList("agenda_mengajar", {
         filter: `kelas_id="${activeKelas}" && mapel_id="${data.mapel_id}" && date="${data.date}" && jam_mapel="${data.jam_mapel}" && id != "${editingItem.id}"`,
         requestKey: null,
       });
@@ -1274,7 +1236,7 @@ export default function AgendaMengajarPage() {
         return;
       }
 
-      const existingJam = await pb.collection("agenda_mengajar").getFullList({
+      const existingJam = await db.getFullList("agenda_mengajar", {
         filter: `kelas_id="${activeKelas}" && date="${data.date}" && jam_mapel="${data.jam_mapel}" && id != "${editingItem.id}"`,
         requestKey: null,
       });
@@ -1287,8 +1249,7 @@ export default function AgendaMengajarPage() {
         return;
       }
 
-      await pb.collection("agenda_mengajar").update(
-        editingItem.id,
+      await db.update("agenda_mengajar", editingItem.id,
         {
           deskripsi: data.deskripsi,
           mapel_id: data.mapel_id,
@@ -1299,8 +1260,7 @@ export default function AgendaMengajarPage() {
           metode: data.metode,
           siswa_tidak_hadir: data.siswa_tidak_hadir,
         },
-        { requestKey: null },
-      );
+        { requestKey: null },);
 
       await createSystemLog({
         type: "succes",
@@ -1352,7 +1312,7 @@ export default function AgendaMengajarPage() {
     if (!confirm("Yakin ingin menghapus agenda ini?")) return;
 
     try {
-      await pb.collection("agenda_mengajar").delete(id, { requestKey: null });
+      await db.remove("agenda_mengajar", id, { requestKey: null });
       setMessage({ type: "success", text: "Agenda berhasil dihapus!" });
       await loadMonth();
       if (selectedDate) {
@@ -1467,6 +1427,36 @@ export default function AgendaMengajarPage() {
                     {k.nama_kelas} (Tingkat {k.tingkat})
                   </option>
                 ))}
+            </select>
+          </div>
+        )}
+
+        {activeKelas && (
+          <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <label
+              htmlFor="semester_filter"
+              className="mb-1.5 block text-sm font-medium text-slate-700"
+            >
+              Semester
+            </label>
+            <select
+              id="semester_filter"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              value={selectedSemesterId}
+              onChange={(e) => {
+                setSelectedSemesterId(e.target.value);
+                setSelectedDate(null);
+                setDetailItems([]);
+              }}
+            >
+              <option value="" disabled>
+                -- Pilih semester --
+              </option>
+              {semesterList.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {`${t.tahun} · Semester ${t.semester}`}
+                </option>
+              ))}
             </select>
           </div>
         )}

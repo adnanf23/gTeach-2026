@@ -1,8 +1,9 @@
 "use client";
 
+import { db } from "@/lib/db";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { pb, isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
+import { isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
 
 // Role yang boleh mengakses halaman ini
 const ALLOWED_ROLES = ["guru mapel"];
@@ -105,7 +106,7 @@ export default function PenilaianMapelPage() {
       setError("");
       try {
         // Ambil semua ploting_guru untuk guru ini
-        const plotingRecords = await pb.collection("ploting_guru").getFullList({
+        const plotingRecords = await db.getFullList("ploting_guru", {
           filter: `guru_id = "${user.id}"`,
           expand: "kelas_id",
           requestKey: null,
@@ -131,7 +132,7 @@ export default function PenilaianMapelPage() {
         // Ambil data kelas berdasarkan ID yang terkumpul
         const kelasIds = Array.from(kelasIdSet);
         const kelasPromises = kelasIds.map((id) =>
-          pb.collection("kelas").getOne(id, {
+          db.getOne("kelas", id, {
             expand: "tahun_ajaran_id",
             requestKey: null,
           }),
@@ -177,7 +178,7 @@ export default function PenilaianMapelPage() {
       setSelectedPlotingId(null);
       try {
         // Ambil ploting_guru untuk guru ini dan kelas ini
-        const records = await pb.collection("ploting_guru").getFullList({
+        const records = await db.getFullList("ploting_guru", {
           filter: `guru_id = "${user.id}"`,
           expand: "mapel_id,guru_id",
           requestKey: null,
@@ -235,12 +236,12 @@ export default function PenilaianMapelPage() {
       setError("");
       try {
         const [siswaRecords, lingkupRecords] = await Promise.all([
-          pb.collection("siswa").getFullList({
+          db.getFullList("siswa", {
             filter: `kelas_id = "${selectedKelas.id}"`,
             sort: "nama_siswa",
             requestKey: null,
           }),
-          pb.collection("lingkup_materi").getFullList({
+          db.getFullList("lingkup_materi", {
             filter: `ploting_guru_id = "${selectedPloting.id}"`,
             requestKey: null,
           }),
@@ -251,9 +252,7 @@ export default function PenilaianMapelPage() {
           const tpFilter = lingkupRecords
             .map((l) => `lingkup_materi_id = "${l.id}"`)
             .join(" || ");
-          const tpRecords = await pb
-            .collection("tujuan_pembelajaran")
-            .getFullList({
+          const tpRecords = await db.getFullList("tujuan_pembelajaran", {
               filter: tpFilter,
               sort: "urutan",
               requestKey: null,
@@ -275,7 +274,7 @@ export default function PenilaianMapelPage() {
           const lingkupFilter = lingkupRecords
             .map((l) => `lingkup_materi_id = "${l.id}"`)
             .join(" || ");
-          const nilaiRecords = await pb.collection("nilai_harian").getFullList({
+          const nilaiRecords = await db.getFullList("nilai_harian", {
             filter: `(${siswaFilter}) && (${lingkupFilter})`,
             requestKey: null,
           });
@@ -318,7 +317,7 @@ export default function PenilaianMapelPage() {
       setLoadingUjian(true);
       const tingkat = selectedKelas.tingkat || 1;
 
-      const ujianRecords = await pb.collection("pengaturan_ujian").getFullList({
+      const ujianRecords = await db.getFullList("pengaturan_ujian", {
         filter: `status_akses = "buka" && target_tingkat ~ "${tingkat}"`,
         requestKey: null,
       });
@@ -343,9 +342,7 @@ export default function PenilaianMapelPage() {
           .map((u) => `pengaturan_ujian_id = "${u.id}"`)
           .join(" || ");
 
-        const nilaiUjianRecords = await pb
-          .collection("nilai_ujian")
-          .getFullList({
+        const nilaiUjianRecords = await db.getFullList("nilai_ujian", {
             filter: `(${siswaFilter}) && (${ujianFilter})`,
             requestKey: null,
           });
@@ -391,9 +388,7 @@ export default function PenilaianMapelPage() {
     setError("");
     try {
       if (editingLingkupId) {
-        const updated = await pb
-          .collection("lingkup_materi")
-          .update(editingLingkupId, {
+        const updated = await db.update("lingkup_materi", editingLingkupId, {
             nama_lingkup: lingkupForm.nama_lingkup.trim(),
             capaian_kompetensi: lingkupForm.capaian_kompetensi.trim(),
           });
@@ -401,7 +396,7 @@ export default function PenilaianMapelPage() {
           prev.map((l) => (l.id === updated.id ? updated : l)),
         );
       } else {
-        const created = await pb.collection("lingkup_materi").create({
+        const created = await db.create("lingkup_materi", {
           ploting_guru_id: selectedPloting.id,
           nama_lingkup: lingkupForm.nama_lingkup.trim(),
           capaian_kompetensi: lingkupForm.capaian_kompetensi.trim(),
@@ -433,7 +428,7 @@ export default function PenilaianMapelPage() {
     )
       return;
     try {
-      await pb.collection("lingkup_materi").delete(id);
+      await db.remove("lingkup_materi", id);
       setLingkupList((prev) => prev.filter((l) => l.id !== id));
       setTpByLingkup((prev) => {
         const next = { ...prev };
@@ -462,7 +457,7 @@ export default function PenilaianMapelPage() {
     setError("");
     try {
       const urutan = (tpByLingkup[lingkupId]?.length || 0) + 1;
-      const created = await pb.collection("tujuan_pembelajaran").create({
+      const created = await db.create("tujuan_pembelajaran", {
         lingkup_materi_id: lingkupId,
         deskripsi: tpDraft.trim(),
         urutan,
@@ -486,9 +481,7 @@ export default function PenilaianMapelPage() {
     setSavingTp(true);
     setError("");
     try {
-      const updated = await pb
-        .collection("tujuan_pembelajaran")
-        .update(editingTp.id, {
+      const updated = await db.update("tujuan_pembelajaran", editingTp.id, {
           deskripsi: editingTp.deskripsi.trim(),
         });
       setTpByLingkup((prev) => ({
@@ -509,7 +502,7 @@ export default function PenilaianMapelPage() {
   async function deleteTp(lingkupId, tpId) {
     if (!confirm("Hapus tujuan pembelajaran ini?")) return;
     try {
-      await pb.collection("tujuan_pembelajaran").delete(tpId);
+      await db.remove("tujuan_pembelajaran", tpId);
       setTpByLingkup((prev) => ({
         ...prev,
         [lingkupId]: (prev[lingkupId] || []).filter((t) => t.id !== tpId),
@@ -548,9 +541,9 @@ export default function PenilaianMapelPage() {
     setError("");
     try {
       if (cell?.id) {
-        await pb.collection("nilai_harian").update(cell.id, { nilai: clamped });
+        await db.update("nilai_harian", cell.id, { nilai: clamped });
       } else {
-        const created = await pb.collection("nilai_harian").create({
+        const created = await db.create("nilai_harian", {
           siswa_id: siswaId,
           lingkup_materi_id: lingkupId,
           nilai: clamped,
@@ -610,12 +603,12 @@ export default function PenilaianMapelPage() {
     setError("");
     try {
       if (cell?.id) {
-        await pb.collection("nilai_ujian").update(cell.id, {
+        await db.update("nilai_ujian", cell.id, {
           nilai: clamped,
           ploting_guru_id: selectedPloting.id,
         });
       } else {
-        const created = await pb.collection("nilai_ujian").create({
+        const created = await db.create("nilai_ujian", {
           siswa_id: siswaId,
           pengaturan_ujian_id: ujianId,
           ploting_guru_id: selectedPloting.id,

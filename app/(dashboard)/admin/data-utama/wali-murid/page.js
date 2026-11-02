@@ -1,5 +1,6 @@
 "use client";
 
+import { db } from "@/lib/db";
 import { useEffect, useState, useCallback } from "react";
 import {
   cn,
@@ -74,7 +75,7 @@ export default function AkunWaliMuridPage() {
 
       // ⚠️ JANGAN pakai sort "-created" / "-updated"
       // collection wali_murid tidak punya field autodate.
-      const data = await pb.collection("wali_murid").getFullList({
+      const data = await db.getFullList("wali_murid", {
         expand: "siswa_id,siswa_id.kelas_id",
         requestKey: null,
       });
@@ -96,7 +97,7 @@ export default function AkunWaliMuridPage() {
 
   const fetchSiswa = useCallback(async () => {
     try {
-      const data = await pb.collection("siswa").getFullList({
+      const data = await db.getFullList("siswa", {
         expand: "kelas_id",
         requestKey: null,
         sort: "nama_siswa",
@@ -189,7 +190,7 @@ export default function AkunWaliMuridPage() {
   async function handleToggleVerified(item) {
     const newVal = !item.verified;
     try {
-      await pb.collection("wali_murid").update(item.id, { verified: newVal });
+      await db.update("wali_murid", item.id, { verified: newVal });
       setDataWali((prev) =>
         prev.map((d) => (d.id === item.id ? { ...d, verified: newVal } : d)),
       );
@@ -241,7 +242,7 @@ export default function AkunWaliMuridPage() {
         passwordConfirm: form.password,
       };
 
-      await pb.collection("wali_murid").create(payload);
+      await db.create("wali_murid", payload);
       const user = currentUser();
       await createSystemLog({
         type: "succes",
@@ -279,7 +280,7 @@ export default function AkunWaliMuridPage() {
   async function handleDelete(e) {
     e.preventDefault();
     try {
-      await pb.collection("wali_murid").delete(deleteTarget);
+      await db.remove("wali_murid", deleteTarget);
       showToast("Berhasil menghapus akun wali murid");
       handleCloseModal();
       fetchWali();

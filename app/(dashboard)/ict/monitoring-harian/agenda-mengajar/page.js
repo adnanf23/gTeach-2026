@@ -1,7 +1,13 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { pb, getCurrentUser } from "@/lib/pocketbase";
+import { getCurrentUser } from "@/lib/pocketbase";
+import {
+  getAgendaBaseData,
+  getAgendaTerbaru,
+  getAgendaHarian,
+  getAgendaExportRows,
+} from "@/actions/ict-monitoring-agenda.action";
 
 // ------------------------------------------------------------------
 // Helper tanggal
@@ -159,15 +165,10 @@ async function exportAgendaWorkbook({
   const XLSX = await import("xlsx-js-style");
 
   const isSpecificClass = kelasId !== "semua";
-  const kelasFilter = isSpecificClass ? ` && kelas_id = "${kelasId}"` : "";
-  const filter = `date >= "${startDate} 00:00:00" && date <= "${endDate} 23:59:59"${kelasFilter}`;
 
-  const records = await pb.collection("agenda_mengajar").getFullList({
-    filter,
-    expand: "kelas_id,mapel_id",
-    sort: "date,jam_mapel",
-    requestKey: null,
-  });
+  const res = await getAgendaExportRows({ kelasId, startDate, endDate });
+  if (res.error) throw new Error(res.error);
+  const records = res.records;
 
   const targetKelas = isSpecificClass
     ? kelasList.filter((k) => k.id === kelasId)
@@ -704,7 +705,7 @@ function StatusListCard({
                     {k.nama_kelas}
                   </p>
                   <p className="text-xs text-slate-400">
-                    {siswaPerKelas.get(k.id)?.length || 0} siswa
+                    {siswaPerKelas[k.id]?.length || 0} siswa
                   </p>
                 </div>
               </div>
@@ -1030,13 +1031,21 @@ function AgendaContent({
   siswaPerKelas,
   hariLiburList,
 }) {
-  const [agendaRange, setAgendaRange] = useState([]);
-  const [agendaTanggal, setAgendaTanggal] = useState([]);
-  const [loadingRange, setLoadingRange] = useState(true);
+  const [agendaPerKelas, setAgendaPerKelas] = useState({});
+  const [kelasSudahIds, setKelasSudahIds] = useState(() => new Set());
+  const [kelasSudah, setKelasSudah] = useState([]);
+  const [kelasBelum, setKelasBelum] = useState([]);
+  const [guruSudahMengisi, setGuruSudahMengisi] = useState([]);
+  const [guruBelumMengisi, setGuruBelumMengisi] = useState([]);
+  const [mapelSudah, setMapelSudah] = useState([]);
+  const [mapelBelum, setMapelBelum] = useState([]);
+  const [guruPerMapel, setGuruPerMapel] = useState({});
+  const [mapelMap, setMapelMap] = useState({});
+  const [totalEntriHariIni, setTotalEntriHariIni] = useState(0);
+  const [persenSudah, setPersenSudah] = useState(0);
+  const [teraktif, setTeraktif] = useState([]);
+  const [terpasif, setTerpasif] = useState([]);
   const [loadingTanggal, setLoadingTanggal] = useState(false);
-  const [plotingGuruList, setPlotingGuruList] = useState([]);
-  const [usersList, setUsersList] = useState([]);
-  const [mapelList, setMapelList] = useState([]);
 
   const [expandedKelas, setExpandedKelas] = useState(() => new Set());
   const [filterKelas, setFilterKelas] = useState("semua");
@@ -1055,240 +1064,61 @@ function AgendaContent({
     : false;
   const selectedIsWorkday = !selectedIsWeekend && !selectedIsHoliday;
 
-  const loadPlotingGuru = useCallback(async () => {
-    try {
-      const records = await pb.collection("ploting_guru").getFullList({
-        expand: "guru_id,mapel_id,kelas_id",
-        requestKey: null,
-      });
-      setPlotingGuruList(records);
-
-      const [users, mapels] = await Promise.all([
-        pb.collection("users").getFullList({
-          filter:
-            'role ?= "guru mapel" || role ?= "guru walikelas" || role ?= "guru pendamping"',
-          requestKey: null,
-        }),
-        pb.collection("mata_pelajaran").getFullList({
-          requestKey: null,
-        }),
-      ]);
-      setUsersList(users);
-      setMapelList(mapels);
-    } catch (err) {
-      console.error("Gagal load ploting_guru:", err);
-      setPlotingGuruList([]);
-      setUsersList([]);
-      setMapelList([]);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadPlotingGuru();
-  }, [loadPlotingGuru]);
-
   const loadRange = useCallback(async () => {
-    setLoadingRange(true);
-    try {
-      const records = await pb.collection("agenda_mengajar").getFullList({
-        filter: `date >= "${daysAgoStr(30)} 00:00:00" && date <= "${todayStr()} 23:59:59"`,
-        sort: "-date",
-        requestKey: null,
-      });
-      setAgendaRange(records);
-    } catch (err) {
-      console.error(err);
-      setAgendaRange([]);
-    } finally {
-      setLoadingRange(false);
-    }
-  }, []);
+    const result = await getAgendaTerbaru({ kelasList });
+    setTeraktif(result.teraktif || []);
+    setTerpasif(result.terpasif || []);
+  }, [kelasList]);
 
   useEffect(() => {
     loadRange();
   }, [loadRange]);
 
-  const loadTanggal = useCallback(async (dateStr) => {
-    setLoadingTanggal(true);
-    try {
-      const records = await pb.collection("agenda_mengajar").getFullList({
-        filter: `date >= "${dateStr} 00:00:00" && date <= "${dateStr} 23:59:59"`,
-        expand: "kelas_id,mapel_id",
-        requestKey: null,
-      });
-      setAgendaTanggal(records);
-    } catch (err) {
-      console.error(err);
-      setAgendaTanggal([]);
-    } finally {
-      setLoadingTanggal(false);
-    }
-  }, []);
+  const loadTanggal = useCallback(
+    async (dateStr) => {
+      setLoadingTanggal(true);
+      try {
+        const result = await getAgendaHarian({
+          dateStr,
+          kelasList,
+          isWorkday: selectedIsWorkday,
+        });
+        setAgendaPerKelas(result.agendaPerKelas || {});
+        setKelasSudahIds(new Set(result.kelasSudahIds || []));
+        setKelasSudah(result.kelasSudah || []);
+        setKelasBelum(result.kelasBelum || []);
+        setGuruSudahMengisi(result.guruSudahMengisi || []);
+        setGuruBelumMengisi(result.guruBelumMengisi || []);
+        setMapelSudah(result.mapelSudah || []);
+        setMapelBelum(result.mapelBelum || []);
+        setGuruPerMapel(result.guruPerMapel || {});
+        setMapelMap(result.mapelMap || {});
+        setTotalEntriHariIni(result.totalEntri || 0);
+        setPersenSudah(result.persenSudah || 0);
+      } catch (err) {
+        console.error(err);
+        setAgendaPerKelas({});
+        setKelasSudahIds(new Set());
+        setKelasSudah([]);
+        setKelasBelum([]);
+        setGuruSudahMengisi([]);
+        setGuruBelumMengisi([]);
+        setMapelSudah([]);
+        setMapelBelum([]);
+        setGuruPerMapel({});
+        setMapelMap({});
+        setTotalEntriHariIni(0);
+        setPersenSudah(0);
+      } finally {
+        setLoadingTanggal(false);
+      }
+    },
+    [kelasList, selectedIsWorkday],
+  );
 
   useEffect(() => {
     loadTanggal(selectedDate);
   }, [selectedDate, loadTanggal]);
-
-  const userMap = useMemo(() => {
-    const map = new Map();
-    for (const u of usersList) map.set(u.id, u);
-    return map;
-  }, [usersList]);
-
-  const mapelMap = useMemo(() => {
-    const map = new Map();
-    for (const m of mapelList) map.set(m.id, m);
-    return map;
-  }, [mapelList]);
-
-  const guruPerMapel = useMemo(() => {
-    const map = new Map();
-    for (const pg of plotingGuruList) {
-      const mapelId = firstOf(pg.mapel_id);
-      const guruId = firstOf(pg.guru_id);
-      if (mapelId && guruId) {
-        const guru = userMap.get(guruId);
-        if (guru) {
-          if (!map.has(mapelId)) map.set(mapelId, []);
-          map.get(mapelId).push(guru.nama_lengkap || "Guru");
-        }
-      }
-    }
-    return map;
-  }, [plotingGuruList, userMap]);
-
-  const semuaGuru = useMemo(() => {
-    const names = new Set();
-    for (const pg of plotingGuruList) {
-      const guruId = firstOf(pg.guru_id);
-      if (guruId) {
-        const guru = userMap.get(guruId);
-        if (guru) names.add(guru.nama_lengkap || "Guru");
-      }
-    }
-    return Array.from(names);
-  }, [plotingGuruList, userMap]);
-
-  const agendaPerKelas = useMemo(() => {
-    const map = new Map();
-    for (const a of agendaTanggal) {
-      const kid = firstOf(a.kelas_id);
-      if (!kid) continue;
-      if (!map.has(kid)) map.set(kid, []);
-      map.get(kid).push(a);
-    }
-    for (const arr of map.values()) {
-      arr.sort(
-        (a, b) =>
-          JAM_SLOTS.indexOf(a.jam_mapel) - JAM_SLOTS.indexOf(b.jam_mapel),
-      );
-    }
-    return map;
-  }, [agendaTanggal]);
-
-  const guruSudahMengisi = useMemo(() => {
-    const names = new Set();
-    for (const a of agendaTanggal) {
-      const mapelId = firstOf(a.mapel_id);
-      if (mapelId && guruPerMapel.has(mapelId)) {
-        for (const guru of guruPerMapel.get(mapelId)) names.add(guru);
-      }
-    }
-    return Array.from(names);
-  }, [agendaTanggal, guruPerMapel]);
-
-  const guruBelumMengisi = useMemo(() => {
-    const sudah = new Set(guruSudahMengisi);
-    return semuaGuru.filter((g) => !sudah.has(g));
-  }, [semuaGuru, guruSudahMengisi]);
-
-  const kelasSudahIds = useMemo(
-    () => new Set(agendaPerKelas.keys()),
-    [agendaPerKelas],
-  );
-  const kelasSudah = useMemo(
-    () =>
-      selectedIsWorkday ? kelasList.filter((k) => kelasSudahIds.has(k.id)) : [],
-    [kelasList, kelasSudahIds, selectedIsWorkday],
-  );
-  const kelasBelum = useMemo(
-    () =>
-      selectedIsWorkday
-        ? kelasList.filter((k) => !kelasSudahIds.has(k.id))
-        : [],
-    [kelasList, kelasSudahIds, selectedIsWorkday],
-  );
-
-  const mapelSudah = useMemo(() => {
-    const names = new Set();
-    for (const a of agendaTanggal) {
-      const mapelId = firstOf(a.mapel_id);
-      if (mapelId) {
-        const mapel = mapelMap.get(mapelId);
-        if (mapel) names.add(mapel.nama_mapel);
-      }
-    }
-    return Array.from(names);
-  }, [agendaTanggal, mapelMap]);
-
-  const mapelBelum = useMemo(() => {
-    const semuaMapel = new Set();
-    for (const pg of plotingGuruList) {
-      const mapelId = firstOf(pg.mapel_id);
-      if (mapelId) {
-        const mapel = mapelMap.get(mapelId);
-        if (mapel) semuaMapel.add(mapel.nama_mapel);
-      }
-    }
-    const sudah = new Set(mapelSudah);
-    return Array.from(semuaMapel).filter((m) => !sudah.has(m));
-  }, [plotingGuruList, mapelMap, mapelSudah]);
-
-  const rankingAktivitas = useMemo(() => {
-    const map = new Map();
-    for (const a of agendaRange) {
-      const kid = firstOf(a.kelas_id);
-      if (!kid) continue;
-      map.set(kid, (map.get(kid) || 0) + 1);
-    }
-    const result = [];
-    for (const k of kelasList) {
-      const count = map.get(k.id) || 0;
-      if (count === 0) continue;
-      result.push({ kelas: k, count });
-    }
-    result.sort((a, b) => b.count - a.count);
-    const max = result.length ? result[0].count : 1;
-    return result.map((r) => ({
-      kelas: r.kelas,
-      rate: (r.count / max) * 100,
-      display: `${r.count}x`,
-    }));
-  }, [agendaRange, kelasList]);
-
-  const teraktif = rankingAktivitas.slice(0, 5);
-  const terpasif = useMemo(() => {
-    const map = new Map();
-    for (const a of agendaRange) {
-      const kid = firstOf(a.kelas_id);
-      if (!kid) continue;
-      map.set(kid, (map.get(kid) || 0) + 1);
-    }
-    const arr = kelasList.map((k) => ({ kelas: k, count: map.get(k.id) || 0 }));
-    arr.sort((a, b) => a.count - b.count);
-    const max = Math.max(1, ...arr.map((r) => r.count));
-    return arr.slice(0, 5).map((r) => ({
-      kelas: r.kelas,
-      rate: max ? (r.count / max) * 100 : 0,
-      display: `${r.count}x`,
-    }));
-  }, [agendaRange, kelasList]);
-
-  const totalEntriHariIni = agendaTanggal.length;
-  const persenSudah =
-    kelasList.length && selectedIsWorkday
-      ? Math.round((kelasSudah.length / kelasList.length) * 100)
-      : 0;
 
   const filteredKelas = useMemo(() => {
     let list =
@@ -1303,7 +1133,7 @@ function AgendaContent({
       const q = searchKelas.trim().toLowerCase();
       list = list.filter((k) => {
         if (k.nama_kelas.toLowerCase().includes(q)) return true;
-        return (agendaPerKelas.get(k.id) || []).some(
+        return (agendaPerKelas[k.id] || []).some(
           (a) =>
             a.topik?.toLowerCase().includes(q) ||
             a.expand?.mapel_id?.nama_mapel?.toLowerCase().includes(q),
@@ -1380,7 +1210,7 @@ function AgendaContent({
         <StatCard
           label="Total Kelas"
           value={kelasList.length}
-          sub={`${kelasList.reduce((s, k) => s + (siswaPerKelas.get(k.id)?.length || 0), 0)} siswa`}
+          sub={`${kelasList.reduce((s, k) => s + (siswaPerKelas[k.id]?.length || 0), 0)} siswa`}
           icon="grid"
           tone="slate"
         />
@@ -1544,7 +1374,7 @@ function AgendaContent({
               <KelasAgendaCard
                 key={k.id}
                 kelas={k}
-                entries={agendaPerKelas.get(k.id) || []}
+                entries={agendaPerKelas[k.id] || []}
                 sudahIsi={kelasSudahIds.has(k.id)}
                 expanded={expandedKelas.has(k.id)}
                 onToggle={() => toggleExpand(k.id)}
@@ -1582,8 +1412,8 @@ function KelasAgendaCard({
     const names = new Set();
     for (const e of entries) {
       const mapelId = firstOf(e.mapel_id);
-      if (mapelId && guruPerMapel.has(mapelId)) {
-        for (const guru of guruPerMapel.get(mapelId)) names.add(guru);
+      if (mapelId && guruPerMapel[mapelId]) {
+        for (const guru of guruPerMapel[mapelId]) names.add(guru);
       }
     }
     return Array.from(names);
@@ -1683,7 +1513,7 @@ function KelasAgendaCard({
                     <>
                       <p className="truncate text-sm font-semibold text-slate-800">
                         {entry.expand?.mapel_id?.nama_mapel ||
-                          mapelMap.get(firstOf(entry.mapel_id))?.nama_mapel ||
+                          mapelMap[firstOf(entry.mapel_id)]?.nama_mapel ||
                           "Mapel tidak diketahui"}
                       </p>
                       {entry.topik && (
@@ -1722,7 +1552,7 @@ function KelasAgendaCard({
 // ------------------------------------------------------------------
 export default function AgendaMengajarPage() {
   const [kelasList, setKelasList] = useState([]);
-  const [siswaList, setSiswaList] = useState([]);
+  const [siswaPerKelas, setSiswaPerKelas] = useState({});
   const [hariLiburList, setHariLiburList] = useState([]);
   const [loadingBase, setLoadingBase] = useState(true);
   const [errorBase, setErrorBase] = useState("");
@@ -1739,24 +1569,13 @@ export default function AgendaMengajarPage() {
     setLoadingBase(true);
     setErrorBase("");
     try {
-      const [kelas, siswa, hariLibur] = await Promise.all([
-        pb.collection("kelas").getFullList({
-          sort: "tingkat,nama_kelas",
-          expand: "walikelas_id,pendamping_id",
-          requestKey: null,
-        }),
-        pb.collection("siswa").getFullList({
-          sort: "nama_siswa",
-          requestKey: null,
-        }),
-        pb
-          .collection("hari_libur")
-          .getFullList({ requestKey: null })
-          .catch(() => []),
-      ]);
-      setKelasList(kelas);
-      setSiswaList(siswa);
-      setHariLiburList(hariLibur);
+      const result = await getAgendaBaseData();
+      if (result.error) {
+        throw new Error(result.error);
+      }
+      setKelasList(result.kelasList);
+      setSiswaPerKelas(result.siswaPerKelas);
+      setHariLiburList(result.hariLiburList);
     } catch (err) {
       console.error(err);
       setErrorBase(
@@ -1770,17 +1589,6 @@ export default function AgendaMengajarPage() {
   useEffect(() => {
     loadBaseData();
   }, [loadBaseData]);
-
-  const siswaPerKelas = useMemo(() => {
-    const map = new Map();
-    for (const s of siswaList) {
-      const kid = firstOf(s.kelas_id);
-      if (!kid) continue;
-      if (!map.has(kid)) map.set(kid, []);
-      map.get(kid).push(s);
-    }
-    return map;
-  }, [siswaList]);
 
   return (
     <div className="min-h-screen text-slate-900">

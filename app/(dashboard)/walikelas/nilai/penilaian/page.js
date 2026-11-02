@@ -1,8 +1,11 @@
 "use client";
 
-import { getCurrentUser, pb } from "@/lib/pocketbase";
+import { db } from "@/lib/db";
+import { getCurrentUser } from "@/lib/pocketbase";
+import { getWalikelasPenilaianData } from "@/actions/walikelas-nilai-penilaian.action";
+import { getTahunAjaranList } from "@/actions/tahun-ajaran.action";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
 
@@ -125,6 +128,12 @@ export default function PilihMapelPenilaian() {
   const [loading, setLoading] = useState(true);
   const [mapel, setMapel] = useState([]);
   const [ujianAktif, setUjianAktif] = useState([]);
+  const [ujianSorted, setUjianSorted] = useState([]);
+
+  // state filter semester (tahun ajaran)
+  const [semesterList, setSemesterList] = useState([]);
+  const [selectedSemesterId, setSelectedSemesterId] = useState("");
+  const [semesterLoaded, setSemesterLoaded] = useState(false);
 
   // state export
   const [exporting, setExporting] = useState(false);
@@ -139,8 +148,36 @@ export default function PilihMapelPenilaian() {
   const user = getCurrentUser();
   const router = useRouter();
 
+  // Muat daftar semester (tahun ajaran) saat mount, lalu pakai yang aktif.
+  useEffect(() => {
+    let cancelled = false;
+    async function loadSemester() {
+      try {
+        const res = await getTahunAjaranList();
+        if (cancelled) return;
+        if (res.error) {
+          console.error("Error fetching tahun ajaran:", res.error);
+          setSemesterList([]);
+          setSelectedSemesterId("");
+          return;
+        }
+        setSemesterList(res.list || []);
+        setSelectedSemesterId(res.defaultId || "");
+      } catch (error) {
+        if (!cancelled) console.error("Error fetching tahun ajaran:", error);
+      } finally {
+        if (!cancelled) setSemesterLoaded(true);
+      }
+    }
+    loadSemester();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     async function loadData() {
+      if (!semesterLoaded) return;
       if (!user) {
         setLoading(false);
         return;
@@ -149,91 +186,21 @@ export default function PilihMapelPenilaian() {
       try {
         setLoading(true);
 
-        // 1. Ambil data kelas
-        const kelas = await pb
-          .collection("kelas")
-          .getFirstListItem(
-            `walikelas_id = "${user.id}" || pendamping_id = "${user.id}"`,
-            { requestKey: null },
-          );
+        // Fetch + filter + map + sort dilakukan di server action.
+        const res = await getWalikelasPenilaianData({
+          userId: user.id,
+          tahunAjaranId: selectedSemesterId,
+        });
 
-        setCurrentKelas(kelas);
-
-        if (kelas) {
-          // 2. Fetch Mapel Khusus & Tingkat
-          const fetchKhusus = pb.collection("mata_pelajaran").getFullList({
-            filter: `spesifik_kelas_id ~ "${kelas.id}"`,
-            requestKey: null,
-          });
-
-          const fetchTingkat = pb.collection("mata_pelajaran").getFullList({
-            filter: `target_tingkat ~ "${String(kelas.tingkat)}"`,
-            requestKey: null,
-          });
-
-          // 3. Fetch Ploting Guru dengan expand guru_id
-          const fetchPloting = pb.collection("ploting_guru").getFullList({
-            filter: `kelas_id ~ "${kelas.id}"`,
-            expand: "guru_id",
-            requestKey: null,
-          });
-
-          // 4. Fetch ujian aktif untuk kelas
-          const fetchUjian = pb.collection("pengaturan_ujian").getFullList({
-            filter: `status_akses = "buka" && (target_kelas_id ~ "${kelas.id}" || target_tingkat ~ "${String(kelas.tingkat)}")`,
-            requestKey: null,
-          });
-
-          const [mapelKhusus, mapelTingkat, plotingData, ujianData] =
-            await Promise.all([
-              fetchKhusus,
-              fetchTingkat,
-              fetchPloting,
-              fetchUjian,
-            ]);
-
-          setUjianAktif(ujianData);
-
-          // 5. Gabungkan & filter mapel
-          const combinedMapel = [...mapelKhusus, ...mapelTingkat];
-          const uniqueMapelRaw = Array.from(
-            new Map(combinedMapel.map((item) => [item.id, item])).values(),
-          );
-
-          const uniqueMapel = uniqueMapelRaw.filter((m) => {
-            const spesifik = m.spesifik_kelas_id;
-            const punyaRestriksi =
-              Array.isArray(spesifik) && spesifik.length > 0;
-            if (!punyaRestriksi) return true;
-            return spesifik.includes(kelas.id);
-          });
-
-          // 6. Buat Mapping Guru
-          const guruMap = new Map();
-          plotingData.forEach((plot) => {
-            if (plot.mapel_id && plot.expand?.guru_id) {
-              const guruObj = Array.isArray(plot.expand.guru_id)
-                ? plot.expand.guru_id[0]
-                : plot.expand.guru_id;
-              const namaGuru =
-                guruObj?.nama_lengkap || guruObj?.name || guruObj?.username;
-              if (namaGuru) {
-                if (Array.isArray(plot.mapel_id)) {
-                  plot.mapel_id.forEach((mId) => guruMap.set(mId, namaGuru));
-                } else {
-                  guruMap.set(plot.mapel_id, namaGuru);
-                }
-              }
-            }
-          });
-
-          const mapelWithGuru = uniqueMapel.map((m) => ({
-            ...m,
-            guru_pengampu: guruMap.get(m.id) || "Walikelas",
-          }));
-
-          setMapel(mapelWithGuru);
+        if (res.error) {
+          console.error("Error fetching data:", res.error);
+          return;
         }
+
+        setCurrentKelas(res.currentKelas);
+        setMapel(res.mapel);
+        setUjianAktif(res.ujianAktif);
+        setUjianSorted(res.ujianSorted);
       } catch (error) {
         if (!error?.isAbort) {
           console.error("Error fetching data:", error);
@@ -245,25 +212,7 @@ export default function PilihMapelPenilaian() {
 
     loadData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Sort ujian: UTS dulu, UAS, lalu lain-lain; jika jenis sama urut nama
-  const ujianSorted = useMemo(() => {
-    const rank = (u) => {
-      if (u.jenis_ujian === "ahb") return 0;
-      if (u.jenis_ujian === "asas") return 1;
-      if (u.jenis_ujian === "asat") return 2;
-      return 3;
-    };
-    return [...ujianAktif].sort((a, b) => {
-      const r = rank(a) - rank(b);
-      if (r !== 0) return r;
-      return String(a.nama_ujian || "").localeCompare(
-        String(b.nama_ujian || ""),
-        "id",
-      );
-    });
-  }, [ujianAktif]);
+  }, [semesterLoaded, selectedSemesterId]);
 
   // ================================================================
   // EXPORT EXCEL PER MAPEL (1 sheet = 1 mapel, termasuk UJIAN + koding)
@@ -280,28 +229,28 @@ export default function PilihMapelPenilaian() {
         .join(" || ");
 
       const [tpAll, lmAll, nfAll, nsAll, nuAll, siswaAll] = await Promise.all([
-        pb.collection("tujuan_pembelajaran").getFullList({
+        db.getFullList("tujuan_pembelajaran", {
           filter: `(${mapelFilter}) && kelas_id ~ "${currentKelas.id}"`,
           requestKey: null,
         }),
-        pb.collection("lingkup_materi").getFullList({
+        db.getFullList("lingkup_materi", {
           filter: `(${mapelFilter}) && kelas_id ~ "${currentKelas.id}"`,
           sort: "created",
           requestKey: null,
         }),
-        pb.collection("nilai_formatif").getFullList({
+        db.getFullList("nilai_formatif", {
           filter: `kelas_id = "${currentKelas.id}"`,
           requestKey: null,
         }),
-        pb.collection("nilai_sumatif").getFullList({
+        db.getFullList("nilai_sumatif", {
           filter: `kelas_id = "${currentKelas.id}"`,
           requestKey: null,
         }),
-        pb.collection("nilai_ujian").getFullList({
+        db.getFullList("nilai_ujian", {
           filter: `(${mapelFilter})`,
           requestKey: null,
         }),
-        pb.collection("siswa").getFullList({
+        db.getFullList("siswa", {
           filter: `kelas_id = "${currentKelas.id}"`,
           sort: "nama_siswa",
           requestKey: null,
@@ -615,7 +564,7 @@ export default function PilihMapelPenilaian() {
 
       setImportProgress("Menyiapkan data siswa...");
 
-      const siswaAll = await pb.collection("siswa").getFullList({
+      const siswaAll = await db.getFullList("siswa", {
         filter: `kelas_id = "${currentKelas.id}"`,
         requestKey: null,
       });
@@ -755,24 +704,24 @@ export default function PilihMapelPenilaian() {
 
     // 1. Fetch referensi khusus mapel ini
     const [tpList, lmList, nfAll, nsAll, nuAll] = await Promise.all([
-      pb.collection("tujuan_pembelajaran").getFullList({
+      db.getFullList("tujuan_pembelajaran", {
         filter: `mapel_id ~ "${targetMapel.id}" && kelas_id ~ "${currentKelas.id}"`,
         requestKey: null,
       }),
-      pb.collection("lingkup_materi").getFullList({
+      db.getFullList("lingkup_materi", {
         filter: `mapel_id ~ "${targetMapel.id}" && kelas_id ~ "${currentKelas.id}"`,
         sort: "created",
         requestKey: null,
       }),
-      pb.collection("nilai_formatif").getFullList({
+      db.getFullList("nilai_formatif", {
         filter: `kelas_id = "${currentKelas.id}"`,
         requestKey: null,
       }),
-      pb.collection("nilai_sumatif").getFullList({
+      db.getFullList("nilai_sumatif", {
         filter: `kelas_id = "${currentKelas.id}"`,
         requestKey: null,
       }),
-      pb.collection("nilai_ujian").getFullList({
+      db.getFullList("nilai_ujian", {
         filter: `mapel_id ~ "${targetMapel.id}"`,
         requestKey: null,
       }),
@@ -888,14 +837,12 @@ export default function PilihMapelPenilaian() {
     for (const no of tpNeeded) {
       if (tpByNo.has(no.toUpperCase())) continue;
       try {
-        const created = await pb.collection("tujuan_pembelajaran").create(
-          {
+        const created = await db.create("tujuan_pembelajaran", {
             no_tp: no,
             mapel_id: targetMapel.id,
             kelas_id: currentKelas.id,
           },
-          { requestKey: null },
-        );
+          { requestKey: null },);
         tpByNo.set(no.toUpperCase(), created);
         result.formatif.created++;
       } catch (err) {
@@ -912,15 +859,13 @@ export default function PilihMapelPenilaian() {
       let lm = lmByName.get(key);
       if (!lm) {
         try {
-          lm = await pb.collection("lingkup_materi").create(
-            {
+          lm = await db.create("lingkup_materi", {
               nama: String(sc.lmName).trim(),
               mapel_id: targetMapel.id,
               kelas_id: currentKelas.id,
               guru_id: user?.id,
             },
-            { requestKey: null },
-          );
+            { requestKey: null },);
           lmByName.set(key, lm);
           result.sumatif.created++;
         } catch (err) {
@@ -1024,19 +969,15 @@ export default function PilihMapelPenilaian() {
           try {
             let saved;
             if (existing?.recordId) {
-              saved = await pb
-                .collection("nilai_formatif")
-                .update(existing.recordId, payload, { requestKey: null });
+              saved = await db.update("nilai_formatif", existing.recordId, payload, { requestKey: null });
             } else {
-              saved = await pb.collection("nilai_formatif").create(
-                {
+              saved = await db.create("nilai_formatif", {
                   tp_id: tp.id,
                   siswa_id: siswa.id,
                   kelas_id: currentKelas.id,
                   ...payload,
                 },
-                { requestKey: null },
-              );
+                { requestKey: null },);
             }
             if (!nfMap[siswa.id]) nfMap[siswa.id] = {};
             nfMap[siswa.id][tp.id] = { recordId: saved.id, ...payload };
@@ -1067,23 +1008,17 @@ export default function PilihMapelPenilaian() {
             try {
               let saved;
               if (existing?.recordId) {
-                saved = await pb
-                  .collection("nilai_sumatif")
-                  .update(
-                    existing.recordId,
+                saved = await db.update("nilai_sumatif", existing.recordId,
                     { nilai: raw },
-                    { requestKey: null },
-                  );
+                    { requestKey: null },);
               } else {
-                saved = await pb.collection("nilai_sumatif").create(
-                  {
+                saved = await db.create("nilai_sumatif", {
                     lm_id: lm.id,
                     siswa_id: siswa.id,
                     kelas_id: currentKelas.id,
                     nilai: raw,
                   },
-                  { requestKey: null },
-                );
+                  { requestKey: null },);
               }
               if (!nsMap[siswa.id]) nsMap[siswa.id] = {};
               nsMap[siswa.id][lm.id] = { recordId: saved.id, nilai: raw };
@@ -1099,13 +1034,9 @@ export default function PilihMapelPenilaian() {
           if (curFilled && existing?.recordId) {
             tasks.push(async () => {
               try {
-                await pb
-                  .collection("nilai_sumatif")
-                  .update(
-                    existing.recordId,
+                await db.update("nilai_sumatif", existing.recordId,
                     { nilai: -1 },
-                    { requestKey: null },
-                  );
+                    { requestKey: null },);
                 nsMap[siswa.id][lm.id] = {
                   recordId: existing.recordId,
                   nilai: -1,
@@ -1139,23 +1070,17 @@ export default function PilihMapelPenilaian() {
             try {
               let saved;
               if (existing?.recordId) {
-                saved = await pb
-                  .collection("nilai_ujian")
-                  .update(
-                    existing.recordId,
+                saved = await db.update("nilai_ujian", existing.recordId,
                     { nilai: raw },
-                    { requestKey: null },
-                  );
+                    { requestKey: null },);
               } else {
-                saved = await pb.collection("nilai_ujian").create(
-                  {
+                saved = await db.create("nilai_ujian", {
                     siswa_id: siswa.id,
                     pengaturan_ujian_id: ujian.id,
                     mapel_id: targetMapel.id,
                     nilai: raw,
                   },
-                  { requestKey: null },
-                );
+                  { requestKey: null },);
               }
               if (!nuMap[ujian.id]) nuMap[ujian.id] = {};
               nuMap[ujian.id][siswa.id] = { recordId: saved.id, nilai: raw };
@@ -1171,13 +1096,9 @@ export default function PilihMapelPenilaian() {
           if (curFilled && existing?.recordId) {
             tasks.push(async () => {
               try {
-                await pb
-                  .collection("nilai_ujian")
-                  .update(
-                    existing.recordId,
+                await db.update("nilai_ujian", existing.recordId,
                     { nilai: -1 },
-                    { requestKey: null },
-                  );
+                    { requestKey: null },);
                 nuMap[ujian.id][siswa.id] = {
                   recordId: existing.recordId,
                   nilai: -1,
@@ -1284,6 +1205,32 @@ export default function PilihMapelPenilaian() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Filter Semester */}
+      <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+        <label
+          htmlFor="filter-semester"
+          className="text-xs font-bold uppercase tracking-widest text-slate-400"
+        >
+          Semester
+        </label>
+        <select
+          id="filter-semester"
+          value={selectedSemesterId}
+          onChange={(e) => setSelectedSemesterId(e.target.value)}
+          disabled={semesterList.length === 0}
+          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 transition focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+        >
+          {semesterList.length === 0 && (
+            <option value="">Belum ada data semester</option>
+          )}
+          {semesterList.map((t) => (
+            <option key={t.id} value={t.id}>
+              {`${t.tahun} · Semester ${t.semester}`}
+            </option>
+          ))}
+        </select>
       </div>
 
       {/* Grid Mapel */}

@@ -1,6 +1,14 @@
 "use client";
 
-import { getCurrentUser, pb } from "@/lib/pocketbase";
+import { db } from "@/lib/db";
+import { getCurrentUser } from "@/lib/pocketbase";
+import {
+  getIctFullDataKelasList,
+  getIctFullDataMapel,
+  getIctFullDataExport,
+  getIctFullDataImportSiswa,
+  getIctFullDataMapelSheet,
+} from "@/actions/ict-full-data.action";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as ExcelJS from "exceljs";
@@ -149,10 +157,12 @@ export default function ICTPenilaianPage() {
       }
       try {
         setLoading(true);
-        const kelas = await pb.collection("kelas").getFullList({
-          sort: "tingkat,nama_kelas",
-          requestKey: null,
-        });
+        const res = await getIctFullDataKelasList();
+        if (res.error) {
+          console.error("Gagal load kelas:", res.error);
+          return;
+        }
+        const kelas = res.list;
         setKelasList(kelas);
         if (kelas.length > 0) setSelectedKelasId(kelas[0].id);
       } catch (err) {
@@ -178,78 +188,18 @@ export default function ICTPenilaianPage() {
         setMapel([]);
         setUjianAktif([]);
 
-        const fetchKhusus = pb.collection("mata_pelajaran").getFullList({
-          filter: `spesifik_kelas_id ~ "${kelas.id}"`,
-          requestKey: null,
-        });
-        const fetchTingkat = pb.collection("mata_pelajaran").getFullList({
-          filter: `target_tingkat ~ "${String(kelas.tingkat)}"`,
-          requestKey: null,
-        });
-        const fetchPloting = pb.collection("ploting_guru").getFullList({
-          filter: `kelas_id ~ "${kelas.id}"`,
-          expand: "guru_id",
-          requestKey: null,
-        });
-        const fetchUjian = pb.collection("pengaturan_ujian").getFullList({
-          filter: `status_akses = "buka" && (target_kelas_id ~ "${kelas.id}" || target_tingkat ~ "${String(kelas.tingkat)}")`,
-          requestKey: null,
+        const res = await getIctFullDataMapel({
+          kelasId: kelas.id,
+          tingkat: kelas.tingkat,
         });
 
-        const [mapelKhusus, mapelTingkat, plotingData, ujianData] =
-          await Promise.all([
-            fetchKhusus,
-            fetchTingkat,
-            fetchPloting,
-            fetchUjian,
-          ]);
+        if (res.error) {
+          console.error("Error fetching mapel:", res.error);
+          return;
+        }
 
-        setUjianAktif(ujianData);
-
-        const combinedMapel = [...mapelKhusus, ...mapelTingkat];
-        const uniqueMapelRaw = Array.from(
-          new Map(combinedMapel.map((item) => [item.id, item])).values(),
-        );
-
-        const uniqueMapel = uniqueMapelRaw.filter((m) => {
-          const spesifik = m.spesifik_kelas_id;
-          const punyaRestriksi = Array.isArray(spesifik) && spesifik.length > 0;
-          if (!punyaRestriksi) return true;
-          return spesifik.includes(kelas.id);
-        });
-
-        const guruMap = new Map();
-        plotingData.forEach((plot) => {
-          if (plot.mapel_id && plot.expand?.guru_id) {
-            const guruObj = Array.isArray(plot.expand.guru_id)
-              ? plot.expand.guru_id[0]
-              : plot.expand.guru_id;
-            const namaGuru =
-              guruObj?.nama_lengkap || guruObj?.name || guruObj?.username;
-            if (namaGuru) {
-              if (Array.isArray(plot.mapel_id)) {
-                plot.mapel_id.forEach((mId) => guruMap.set(mId, namaGuru));
-              } else {
-                guruMap.set(plot.mapel_id, namaGuru);
-              }
-            }
-          }
-        });
-
-        const mapelWithGuru = uniqueMapel.map((m) => ({
-          ...m,
-          guru_pengampu: guruMap.get(m.id) || "Walikelas",
-        }));
-
-        mapelWithGuru.sort((a, b) =>
-          String(a.nama_mapel || a.nama || "").localeCompare(
-            String(b.nama_mapel || b.nama || ""),
-            "id",
-            { numeric: true, sensitivity: "base" },
-          ),
-        );
-
-        setMapel(mapelWithGuru);
+        setUjianAktif(res.ujianAktif);
+        setMapel(res.mapel);
       } catch (error) {
         if (!error?.isAbort) console.error("Error fetching mapel:", error);
       } finally {
@@ -385,42 +335,25 @@ export default function ICTPenilaianPage() {
       setExportProgress("Mengambil data...");
 
       const mapelIds = mapel.map((m) => m.id);
-      const mapelFilter = mapelIds
-        .map((id) => `mapel_id ~ "${id}"`)
-        .join(" || ");
 
-      const [tpAll, lmAll, nfAll, nsAll, nuAll, siswaAll] = await Promise.all([
-        pb.collection("tujuan_pembelajaran").getFullList({
-          filter: `(${mapelFilter}) && kelas_id ~ "${currentKelas.id}"`,
-          requestKey: null,
-        }),
-        pb.collection("lingkup_materi").getFullList({
-          filter: `(${mapelFilter}) && kelas_id ~ "${currentKelas.id}"`,
-          sort: "created",
-          requestKey: null,
-        }),
-        pb.collection("nilai_formatif").getFullList({
-          filter: `kelas_id = "${currentKelas.id}"`,
-          requestKey: null,
-        }),
-        pb.collection("nilai_sumatif").getFullList({
-          filter: `kelas_id = "${currentKelas.id}"`,
-          requestKey: null,
-        }),
-        pb.collection("nilai_ujian").getFullList({
-          filter: `(${mapelFilter})`,
-          requestKey: null,
-        }),
-        pb.collection("siswa").getFullList({
-          filter: `kelas_id = "${currentKelas.id}"`,
-          sort: "nama_siswa",
-          requestKey: null,
-        }),
-      ]);
+      const res = await getIctFullDataExport({
+        kelasId: currentKelas.id,
+        mapelIds,
+      });
 
-      const tpById = new Map(tpAll.map((t) => [t.id, t]));
-      const lmById = new Map(lmAll.map((l) => [l.id, l]));
-      const lmOrder = new Map(lmAll.map((l, i) => [l.id, i]));
+      if (res.error) throw new Error(res.error);
+
+      const {
+        tpAll,
+        lmAll,
+        nfAll,
+        nsAll,
+        nuAll,
+        siswaSorted,
+        tpById,
+        lmById,
+        lmOrder,
+      } = res;
 
       setExportProgress("Menyusun file Excel...");
 
@@ -446,11 +379,6 @@ export default function ICTPenilaianPage() {
         cell.border = border;
       }
 
-      const collator = new Intl.Collator("id", { numeric: true });
-      const siswaSorted = [...siswaAll].sort((a, b) =>
-        collator.compare(a.nama_siswa || "", b.nama_siswa || ""),
-      );
-
       const ujianForExport = ujianSorted;
 
       for (let mi = 0; mi < mapel.length; mi++) {
@@ -466,11 +394,11 @@ export default function ICTPenilaianPage() {
         const tps = tpAll.filter((t) => firstOf(t.mapel_id) === m.id);
         const lms = lmAll.filter((l) => firstOf(l.mapel_id) === m.id);
         const nf = nfAll.filter((n) => {
-          const tp = tpById.get(firstOf(n.tp_id));
+          const tp = tpById[firstOf(n.tp_id)];
           return tp && firstOf(tp.mapel_id) === m.id;
         });
         const ns = nsAll.filter((n) => {
-          const lm = lmById.get(firstOf(n.lm_id));
+          const lm = lmById[firstOf(n.lm_id)];
           return lm && firstOf(lm.mapel_id) === m.id;
         });
         const nu = nuAll.filter((n) => firstOf(n.mapel_id) === m.id);
@@ -483,7 +411,7 @@ export default function ICTPenilaianPage() {
 
         const data = new Map();
         nf.forEach((n) => {
-          const tp = tpById.get(firstOf(n.tp_id));
+          const tp = tpById[firstOf(n.tp_id)];
           if (!tp) return;
           const noTp = parseInt(String(tp.no_tp || "").replace(/\D/g, ""), 10);
           if (!noTp) return;
@@ -497,7 +425,7 @@ export default function ICTPenilaianPage() {
         const lmNameToOrder = new Map();
         lms.forEach((l) => {
           const nm = (l.nama || "-").trim();
-          const ord = lmOrder.get(l.id) ?? 0;
+          const ord = lmOrder[l.id] ?? 0;
           if (!lmNameToOrder.has(nm) || ord < lmNameToOrder.get(nm)) {
             lmNameToOrder.set(nm, ord);
           }
@@ -509,7 +437,7 @@ export default function ICTPenilaianPage() {
 
         const sData = new Map();
         ns.forEach((n) => {
-          const lm = lmById.get(firstOf(n.lm_id));
+          const lm = lmById[firstOf(n.lm_id)];
           if (!lm) return;
           const nilai = numOrNull(n.nilai);
           if (nilai === null) return;
@@ -709,23 +637,16 @@ export default function ICTPenilaianPage() {
 
       setImportProgress("Menyiapkan data siswa...");
 
-      const siswaAll = await pb.collection("siswa").getFullList({
-        filter: `kelas_id = "${currentKelas.id}"`,
-        requestKey: null,
+      const siswaRes = await getIctFullDataImportSiswa({
+        kelasId: currentKelas.id,
       });
-      const siswaByNis = new Map();
-      const siswaByNama = new Map();
-      siswaAll.forEach((s) => {
-        const nis = normNis(s.nis);
-        if (nis && !siswaByNis.has(nis)) siswaByNis.set(nis, s);
-        const nm = normText(s.nama_siswa);
-        if (nm && !siswaByNama.has(nm)) siswaByNama.set(nm, s);
-      });
+      if (siswaRes.error) throw new Error(siswaRes.error);
+      const { siswaByNis, siswaByNama } = siswaRes;
       const findSiswa = (nama, nis) => {
         const n = normNis(nis);
-        if (n && siswaByNis.has(n)) return siswaByNis.get(n);
+        if (n && siswaByNis[n]) return siswaByNis[n];
         const nm = normText(nama);
-        return nm ? siswaByNama.get(nm) || null : null;
+        return nm ? siswaByNama[nm] || null : null;
       };
 
       const mapelByKey = new Map();
@@ -835,24 +756,24 @@ export default function ICTPenilaianPage() {
     };
 
     const [tpList, lmList, nfAll, nsAll, nuAll] = await Promise.all([
-      pb.collection("tujuan_pembelajaran").getFullList({
+      db.getFullList("tujuan_pembelajaran", {
         filter: `mapel_id ~ "${targetMapel.id}" && kelas_id ~ "${currentKelas.id}"`,
         requestKey: null,
       }),
-      pb.collection("lingkup_materi").getFullList({
+      db.getFullList("lingkup_materi", {
         filter: `mapel_id ~ "${targetMapel.id}" && kelas_id ~ "${currentKelas.id}"`,
         sort: "created",
         requestKey: null,
       }),
-      pb.collection("nilai_formatif").getFullList({
+      db.getFullList("nilai_formatif", {
         filter: `kelas_id = "${currentKelas.id}"`,
         requestKey: null,
       }),
-      pb.collection("nilai_sumatif").getFullList({
+      db.getFullList("nilai_sumatif", {
         filter: `kelas_id = "${currentKelas.id}"`,
         requestKey: null,
       }),
-      pb.collection("nilai_ujian").getFullList({
+      db.getFullList("nilai_ujian", {
         filter: `mapel_id ~ "${targetMapel.id}"`,
         requestKey: null,
       }),
@@ -958,12 +879,8 @@ export default function ICTPenilaianPage() {
     for (const no of tpNeeded) {
       if (tpByNo.has(no.toUpperCase())) continue;
       try {
-        const created = await pb
-          .collection("tujuan_pembelajaran")
-          .create(
-            { no_tp: no, mapel_id: targetMapel.id, kelas_id: currentKelas.id },
-            { requestKey: null },
-          );
+        const created = await db.create("tujuan_pembelajaran", { no_tp: no, mapel_id: targetMapel.id, kelas_id: currentKelas.id },
+            { requestKey: null },);
         tpByNo.set(no.toUpperCase(), created);
         result.formatif.created++;
       } catch (err) {
@@ -979,15 +896,13 @@ export default function ICTPenilaianPage() {
       let lm = lmByName.get(key);
       if (!lm) {
         try {
-          lm = await pb.collection("lingkup_materi").create(
-            {
+          lm = await db.create("lingkup_materi", {
               nama: String(sc.lmName).trim(),
               mapel_id: targetMapel.id,
               kelas_id: currentKelas.id,
               guru_id: user?.id,
             },
-            { requestKey: null },
-          );
+            { requestKey: null },);
           lmByName.set(key, lm);
           result.sumatif.created++;
         } catch (err) {
@@ -1081,19 +996,15 @@ export default function ICTPenilaianPage() {
           try {
             let saved;
             if (existing?.recordId) {
-              saved = await pb
-                .collection("nilai_formatif")
-                .update(existing.recordId, payload, { requestKey: null });
+              saved = await db.update("nilai_formatif", existing.recordId, payload, { requestKey: null });
             } else {
-              saved = await pb.collection("nilai_formatif").create(
-                {
+              saved = await db.create("nilai_formatif", {
                   tp_id: tp.id,
                   siswa_id: siswa.id,
                   kelas_id: currentKelas.id,
                   ...payload,
                 },
-                { requestKey: null },
-              );
+                { requestKey: null },);
             }
             if (!nfMap[siswa.id]) nfMap[siswa.id] = {};
             nfMap[siswa.id][tp.id] = { recordId: saved.id, ...payload };
@@ -1124,23 +1035,17 @@ export default function ICTPenilaianPage() {
             try {
               let saved;
               if (existing?.recordId) {
-                saved = await pb
-                  .collection("nilai_sumatif")
-                  .update(
-                    existing.recordId,
+                saved = await db.update("nilai_sumatif", existing.recordId,
                     { nilai: raw },
-                    { requestKey: null },
-                  );
+                    { requestKey: null },);
               } else {
-                saved = await pb.collection("nilai_sumatif").create(
-                  {
+                saved = await db.create("nilai_sumatif", {
                     lm_id: lm.id,
                     siswa_id: siswa.id,
                     kelas_id: currentKelas.id,
                     nilai: raw,
                   },
-                  { requestKey: null },
-                );
+                  { requestKey: null },);
               }
               if (!nsMap[siswa.id]) nsMap[siswa.id] = {};
               nsMap[siswa.id][lm.id] = { recordId: saved.id, nilai: raw };
@@ -1155,13 +1060,9 @@ export default function ICTPenilaianPage() {
           if (curFilled && existing?.recordId) {
             tasks.push(async () => {
               try {
-                await pb
-                  .collection("nilai_sumatif")
-                  .update(
-                    existing.recordId,
+                await db.update("nilai_sumatif", existing.recordId,
                     { nilai: -1 },
-                    { requestKey: null },
-                  );
+                    { requestKey: null },);
                 nsMap[siswa.id][lm.id] = {
                   recordId: existing.recordId,
                   nilai: -1,
@@ -1195,23 +1096,17 @@ export default function ICTPenilaianPage() {
             try {
               let saved;
               if (existing?.recordId) {
-                saved = await pb
-                  .collection("nilai_ujian")
-                  .update(
-                    existing.recordId,
+                saved = await db.update("nilai_ujian", existing.recordId,
                     { nilai: raw },
-                    { requestKey: null },
-                  );
+                    { requestKey: null },);
               } else {
-                saved = await pb.collection("nilai_ujian").create(
-                  {
+                saved = await db.create("nilai_ujian", {
                     siswa_id: siswa.id,
                     pengaturan_ujian_id: ujian.id,
                     mapel_id: targetMapel.id,
                     nilai: raw,
                   },
-                  { requestKey: null },
-                );
+                  { requestKey: null },);
               }
               if (!nuMap[ujian.id]) nuMap[ujian.id] = {};
               nuMap[ujian.id][siswa.id] = { recordId: saved.id, nilai: raw };
@@ -1226,13 +1121,9 @@ export default function ICTPenilaianPage() {
           if (curFilled && existing?.recordId) {
             tasks.push(async () => {
               try {
-                await pb
-                  .collection("nilai_ujian")
-                  .update(
-                    existing.recordId,
+                await db.update("nilai_ujian", existing.recordId,
                     { nilai: -1 },
-                    { requestKey: null },
-                  );
+                    { requestKey: null },);
                 nuMap[ujian.id][siswa.id] = {
                   recordId: existing.recordId,
                   nilai: -1,

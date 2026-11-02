@@ -1,14 +1,18 @@
 "use client";
 
+import { db } from "@/lib/db";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { pb, isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
+import { isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
+import {
+  getIctPlotingGuru,
+  getIctNilaiHarianIdsByLingkup,
+  getIctPlotingGuruUsage,
+} from "@/actions/ict-ploting-guru.action";
 
 /* ═══════════════════════════════════════════════════════════════
    KONSTANTA & HELPER
    ═══════════════════════════════════════════════════════════════ */
-
-const GURU_ROLES = ["guru walikelas", "guru pendamping", "guru mapel"];
 
 function eligibleKelasForMapel(mapel, kelasList) {
   if (!mapel) return [];
@@ -194,6 +198,8 @@ export default function PlotingGuruPage() {
   const [mapelList, setMapelList] = useState([]);
   const [kelasList, setKelasList] = useState([]);
   const [plotingList, setPlotingList] = useState([]);
+  const [outOfSyncIds, setOutOfSyncIds] = useState(() => new Set());
+  const [guruTerplotingCount, setGuruTerplotingCount] = useState(0);
   const [loadingData, setLoadingData] = useState(true);
   const [message, setMessage] = useState(null);
   const closeToast = useCallback(() => setMessage(null), []);
@@ -201,24 +207,20 @@ export default function PlotingGuruPage() {
   const loadAll = useCallback(async () => {
     setLoadingData(true);
     try {
-      const [guru, mapel, kelas, ploting] = await Promise.all([
-        pb.collection("users").getFullList({
-          filter: GURU_ROLES.map((r) => `role="${r}"`).join(" || "),
-          sort: "nama_lengkap",
-          requestKey: null,
-        }),
-        pb
-          .collection("mata_pelajaran")
-          .getFullList({ sort: "nama_mapel", requestKey: null }),
-        pb
-          .collection("kelas")
-          .getFullList({ sort: "nama_kelas", requestKey: null }),
-        pb.collection("ploting_guru").getFullList({ requestKey: null }),
-      ]);
-      setGuruList(guru);
-      setMapelList(mapel);
-      setKelasList(kelas);
-      setPlotingList(ploting);
+      const result = await getIctPlotingGuru();
+      if (result.error) {
+        setMessage({
+          type: "error",
+          text: "Gagal memuat data. Silakan muat ulang halaman.",
+        });
+        return;
+      }
+      setGuruList(result.guruList);
+      setMapelList(result.mapelList);
+      setKelasList(result.kelasList);
+      setPlotingList(result.plotingList);
+      setOutOfSyncIds(new Set(result.outOfSyncIds));
+      setGuruTerplotingCount(result.guruTerplotingCount);
     } catch (e) {
       setMessage({
         type: "error",
@@ -258,29 +260,6 @@ export default function PlotingGuruPage() {
       return ma.localeCompare(mb);
     });
   }, [plotingList, guruById, mapelById]);
-
-  const outOfSyncIds = useMemo(() => {
-    const set = new Set();
-    for (const r of plotingList) {
-      const current = eligibleKelasForMapel(
-        mapelById[r.mapel_id],
-        kelasList,
-      ).map((k) => k.id);
-      const saved = r.kelas_id || [];
-      if (
-        saved.length !== current.length ||
-        saved.some((kid) => !current.includes(kid))
-      ) {
-        set.add(r.id);
-      }
-    }
-    return set;
-  }, [plotingList, mapelById, kelasList]);
-
-  const guruTerplotingCount = useMemo(
-    () => new Set(plotingList.map((r) => r.guru_id)).size,
-    [plotingList],
-  );
 
   const [search, setSearch] = useState("");
   const filteredPloting = useMemo(() => {
@@ -411,47 +390,36 @@ export default function PlotingGuruPage() {
           editingRecord.mapel_id !== form.mapelId;
 
         if (guruOrMapelBerubah) {
-          const plotingFilter = `ploting_guru_id="${editingRecord.id}"`;
-          const [lingkup, nilaiUjian] = await Promise.all([
-            pb
-              .collection("lingkup_materi")
-              .getFullList({ filter: plotingFilter, requestKey: null }),
-            pb
-              .collection("nilai_ujian")
-              .getFullList({ filter: plotingFilter, requestKey: null }),
-          ]);
-          if (lingkup.length > 0 || nilaiUjian.length > 0) {
+          const usage = await getIctPlotingGuruUsage(editingRecord.id);
+          if (usage.error) throw new Error(usage.error);
+          if (usage.lingkupCount > 0 || usage.nilaiUjianCount > 0) {
             setFormError(
-              `Tidak bisa mengganti guru/mapel di sini karena masih ada ${lingkup.length} lingkup materi dan ${nilaiUjian.length} nilai ujian terkait ploting ini. Hapus dulu ploting ini lewat tombol "Hapus" di daftar, lalu buat ploting baru.`,
+              `Tidak bisa mengganti guru/mapel di sini karena masih ada ${usage.lingkupCount} lingkup materi dan ${usage.nilaiUjianCount} nilai ujian terkait ploting ini. Hapus dulu ploting ini lewat tombol "Hapus" di daftar, lalu buat ploting baru.`,
             );
             setSaving(false);
             return;
           }
         }
 
-        await pb.collection("ploting_guru").update(
-          editingRecord.id,
+        await db.update("ploting_guru", editingRecord.id,
           {
             guru_id: form.guruId,
             mapel_id: form.mapelId,
             kelas_id: eligibleIds,
           },
-          { requestKey: null },
-        );
+          { requestKey: null },);
 
         setMessage({
           type: "success",
           text: `Ploting diperbarui — tertaut ke ${eligibleIds.length} kelas.`,
         });
       } else {
-        await pb.collection("ploting_guru").create(
-          {
+        await db.create("ploting_guru", {
             guru_id: form.guruId,
             mapel_id: form.mapelId,
             kelas_id: eligibleIds,
           },
-          { requestKey: null },
-        );
+          { requestKey: null },);
 
         setMessage({
           type: "success",
@@ -478,37 +446,20 @@ export default function PlotingGuruPage() {
     setConfirmDeleteId(record.id);
     setDeleteImpact({ id: record.id, loading: true });
     try {
-      const plotingFilter = `ploting_guru_id="${record.id}"`;
-
-      const [lingkup, nilaiUjian] = await Promise.all([
-        pb
-          .collection("lingkup_materi")
-          .getFullList({ filter: plotingFilter, requestKey: null }),
-        pb
-          .collection("nilai_ujian")
-          .getFullList({ filter: plotingFilter, requestKey: null }),
-      ]);
-
-      let nilaiHarianCount = 0;
-      if (lingkup.length > 0) {
-        const lingkupFilter = lingkup
-          .map((l) => `lingkup_materi_id="${l.id}"`)
-          .join(" || ");
-        const nilaiHarian = await pb.collection("nilai_harian").getFullList({
-          filter: lingkupFilter,
-          requestKey: null,
-        });
-        nilaiHarianCount = nilaiHarian.length;
+      const usage = await getIctPlotingGuruUsage(record.id);
+      if (usage.error) {
+        setDeleteImpact({ id: record.id, loading: false, error: true });
+        return;
       }
 
       setDeleteImpact({
         id: record.id,
         loading: false,
-        lingkupIds: lingkup.map((l) => l.id),
-        nilaiUjianIds: nilaiUjian.map((n) => n.id),
-        lingkupCount: lingkup.length,
-        nilaiUjianCount: nilaiUjian.length,
-        nilaiHarianCount,
+        lingkupIds: usage.lingkupIds,
+        nilaiUjianIds: usage.nilaiUjianIds,
+        lingkupCount: usage.lingkupCount,
+        nilaiUjianCount: usage.nilaiUjianCount,
+        nilaiHarianCount: usage.nilaiHarianCount,
       });
     } catch (e) {
       setDeleteImpact({ id: record.id, loading: false, error: true });
@@ -523,36 +474,31 @@ export default function PlotingGuruPage() {
 
       if (impact && !impact.error) {
         if (impact.lingkupIds.length > 0) {
-          const lingkupFilter = impact.lingkupIds
-            .map((id) => `lingkup_materi_id="${id}"`)
-            .join(" || ");
-          const nilaiHarian = await pb.collection("nilai_harian").getFullList({
-            filter: lingkupFilter,
-            requestKey: null,
-          });
+          const nilaiHarian = await getIctNilaiHarianIdsByLingkup(
+            impact.lingkupIds,
+          );
+          if (nilaiHarian.error) throw new Error(nilaiHarian.error);
           await Promise.all(
-            nilaiHarian.map((n) =>
-              pb.collection("nilai_harian").delete(n.id, { requestKey: null }),
+            nilaiHarian.ids.map((id) =>
+              db.remove("nilai_harian", id, { requestKey: null }),
             ),
           );
           await Promise.all(
             impact.lingkupIds.map((id) =>
-              pb.collection("lingkup_materi").delete(id, { requestKey: null }),
+              db.remove("lingkup_materi", id, { requestKey: null }),
             ),
           );
         }
         if (impact.nilaiUjianIds.length > 0) {
           await Promise.all(
             impact.nilaiUjianIds.map((id) =>
-              pb.collection("nilai_ujian").delete(id, { requestKey: null }),
+              db.remove("nilai_ujian", id, { requestKey: null }),
             ),
           );
         }
       }
 
-      await pb
-        .collection("ploting_guru")
-        .delete(record.id, { requestKey: null });
+      await db.remove("ploting_guru", record.id, { requestKey: null });
       setMessage({ type: "success", text: "Ploting berhasil dihapus." });
       await loadAll();
     } catch (e) {
@@ -575,9 +521,7 @@ export default function PlotingGuruPage() {
     const eligible = eligibleKelasForMapel(mapel, kelasList).map((k) => k.id);
     setSyncingId(record.id);
     try {
-      await pb
-        .collection("ploting_guru")
-        .update(record.id, { kelas_id: eligible }, { requestKey: null });
+      await db.update("ploting_guru", record.id, { kelas_id: eligible }, { requestKey: null });
       setMessage({
         type: "success",
         text: `Kelas disinkronkan ulang (${eligible.length} kelas).`,

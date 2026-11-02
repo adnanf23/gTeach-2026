@@ -1,7 +1,8 @@
 "use client";
 
+import { db } from "@/lib/db";
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { pb, isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
+import { isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
 import { KelasToolbarButtons } from "@/components/organism/dashboard Comp/component";
 
 const TINGKAT_OPTIONS = ["1", "2", "3", "4", "5", "6"];
@@ -214,14 +215,12 @@ export default function MataPelajaranPage() {
     setErrorBase("");
     try {
       const [mapel, kelas] = await Promise.all([
-        pb.collection("mata_pelajaran").getFullList({
+        db.getFullList("mata_pelajaran", {
           sort: "nama_mapel",
           expand: "spesifik_kelas_id",
           requestKey: null,
         }),
-        pb
-          .collection("kelas")
-          .getFullList({ sort: "tingkat,nama_kelas", requestKey: null }),
+        db.getFullList("kelas", { sort: "tingkat,nama_kelas", requestKey: null }),
       ]);
       setMapelList(mapel);
       setKelasList(kelas);
@@ -378,19 +377,13 @@ export default function MataPelajaranPage() {
       };
 
       if (isEditing) {
-        const updated = await pb
-          .collection("mata_pelajaran")
-          .update(form.id, payload);
-        const full = await pb
-          .collection("mata_pelajaran")
-          .getOne(updated.id, { expand: "spesifik_kelas_id" });
+        const updated = await db.update("mata_pelajaran", form.id, payload);
+        const full = await db.getOne("mata_pelajaran", updated.id, { expand: "spesifik_kelas_id" });
         setMapelList((prev) => prev.map((m) => (m.id === full.id ? full : m)));
         setToast("Mata pelajaran berhasil diperbarui.");
       } else {
-        const created = await pb.collection("mata_pelajaran").create(payload);
-        const full = await pb
-          .collection("mata_pelajaran")
-          .getOne(created.id, { expand: "spesifik_kelas_id" });
+        const created = await db.create("mata_pelajaran", payload);
+        const full = await db.getOne("mata_pelajaran", created.id, { expand: "spesifik_kelas_id" });
         setMapelList((prev) =>
           [...prev, full].sort((a, b) =>
             a.nama_mapel.localeCompare(b.nama_mapel),
@@ -414,7 +407,7 @@ export default function MataPelajaranPage() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      await pb.collection("mata_pelajaran").delete(deleteTarget.id);
+      await db.remove("mata_pelajaran", deleteTarget.id);
       setMapelList((prev) => prev.filter((m) => m.id !== deleteTarget.id));
       setToast("Mata pelajaran berhasil dihapus.");
       setDeleteTarget(null);
@@ -732,7 +725,7 @@ export default function MataPelajaranPage() {
     for (let i = 0; i < valid.length; i++) {
       const item = valid[i];
       try {
-        await pb.collection("mata_pelajaran").create(item.payload);
+        await db.create("mata_pelajaran", item.payload);
         success++;
       } catch (err) {
         failed.push({

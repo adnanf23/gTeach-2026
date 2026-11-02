@@ -1,7 +1,8 @@
 "use client";
 
+import { db } from "@/lib/db";
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { pb, getCurrentUser } from "@/lib/pocketbase";
+import { getCurrentUser } from "@/lib/pocketbase";
 
 // ------------------------------------------------------------------
 // Helper tanggal (hari libur, weekend, hari efektif)
@@ -162,7 +163,7 @@ async function exportAgendaWorkbook({
   const kelasFilter = isSpecificClass ? ` && kelas_id = "${kelasId}"` : "";
   const filter = `date >= "${startDate} 00:00:00" && date <= "${endDate} 23:59:59"${kelasFilter}`;
 
-  const records = await pb.collection("agenda_mengajar").getFullList({
+  const records = await db.getFullList("agenda_mengajar", {
     filter,
     expand: "kelas_id,mapel_id",
     sort: "date,jam_mapel",
@@ -1053,19 +1054,19 @@ function AgendaContent({
 
   const loadPlotingGuru = useCallback(async () => {
     try {
-      const records = await pb.collection("ploting_guru").getFullList({
+      const records = await db.getFullList("ploting_guru", {
         expand: "guru_id,mapel_id,kelas_id",
         requestKey: null,
       });
       setPlotingGuruList(records);
 
       const [users, mapels] = await Promise.all([
-        pb.collection("users").getFullList({
+        db.getFullList("users", {
           filter:
             'role ?= "guru mapel" || role ?= "guru walikelas" || role ?= "guru pendamping"',
           requestKey: null,
         }),
-        pb.collection("mata_pelajaran").getFullList({
+        db.getFullList("mata_pelajaran", {
           requestKey: null,
         }),
       ]);
@@ -1086,7 +1087,7 @@ function AgendaContent({
   const loadRange = useCallback(async () => {
     setLoadingRange(true);
     try {
-      const records = await pb.collection("agenda_mengajar").getFullList({
+      const records = await db.getFullList("agenda_mengajar", {
         filter: `date >= "${daysAgoStr(30)} 00:00:00" && date <= "${todayStr()} 23:59:59"`,
         sort: "-date",
         requestKey: null,
@@ -1107,7 +1108,7 @@ function AgendaContent({
   const loadTanggal = useCallback(async (dateStr) => {
     setLoadingTanggal(true);
     try {
-      const records = await pb.collection("agenda_mengajar").getFullList({
+      const records = await db.getFullList("agenda_mengajar", {
         filter: `date >= "${dateStr} 00:00:00" && date <= "${dateStr} 23:59:59"`,
         expand: "kelas_id,mapel_id",
         requestKey: null,
@@ -1734,18 +1735,16 @@ export default function AgendaMengajarPage() {
     setErrorBase("");
     try {
       const [kelas, siswa, hariLibur] = await Promise.all([
-        pb.collection("kelas").getFullList({
+        db.getFullList("kelas", {
           sort: "tingkat,nama_kelas",
           expand: "walikelas_id,pendamping_id",
           requestKey: null,
         }),
-        pb.collection("siswa").getFullList({
+        db.getFullList("siswa", {
           sort: "nama_siswa",
           requestKey: null,
         }),
-        pb
-          .collection("hari_libur")
-          .getFullList({ requestKey: null })
+        db.getFullList("hari_libur", { requestKey: null })
           .catch(() => []),
       ]);
       setKelasList(kelas);

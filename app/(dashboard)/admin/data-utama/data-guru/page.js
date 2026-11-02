@@ -1,5 +1,6 @@
 "use client";
 
+import { db } from "@/lib/db";
 import {
   cn,
   TINGKAT_CONFIG,
@@ -16,7 +17,6 @@ import {
   Input,
   Field,
 } from "@/components/organism/dashboard Comp/component";
-import { pb } from "@/lib/pocketbase";
 import { useEffect, useState } from "react";
 
 const DEFAULT_PASSWORD = "gTeach2026";
@@ -69,11 +69,11 @@ export default function DataGuru() {
       setLoading(true);
 
       const [guru, kelas] = await Promise.all([
-        pb.collection("users").getFullList({
+        db.getFullList("users", {
           requestKey: null,
           filter: `role = "guru walikelas" || role = "guru pendamping" || role = "guru mapel"`,
         }),
-        pb.collection("kelas").getFullList({
+        db.getFullList("kelas", {
           expand: "walikelas_id,pendamping_id",
           requestKey: null,
         }),
@@ -181,7 +181,7 @@ export default function DataGuru() {
 
       if (modalMode === "edit") {
         // Edit: username & password tidak diubah dari sini
-        guruRecord = await pb.collection("users").update(form.id, payload);
+        guruRecord = await db.update("users", form.id, payload);
 
         const kelasLama = kelasList.filter(
           (k) => k.walikelas_id === form.id || k.pendamping_id === form.id,
@@ -190,7 +190,7 @@ export default function DataGuru() {
           const updateData = {};
           if (k.walikelas_id === form.id) updateData.walikelas_id = "";
           if (k.pendamping_id === form.id) updateData.pendamping_id = "";
-          await pb.collection("kelas").update(k.id, updateData);
+          await db.update("kelas", k.id, updateData);
         }
 
         if (form.kelas_id) {
@@ -203,9 +203,7 @@ export default function DataGuru() {
           } else {
             updateKelasPayload.walikelas_id = form.id;
           }
-          await pb
-            .collection("kelas")
-            .update(form.kelas_id, updateKelasPayload);
+          await db.update("kelas", form.kelas_id, updateKelasPayload);
         }
       } else {
         // Tambah: username digenerate random, password pakai default tetap
@@ -213,7 +211,7 @@ export default function DataGuru() {
         payload.password = DEFAULT_PASSWORD;
         payload.passwordConfirm = DEFAULT_PASSWORD;
 
-        guruRecord = await pb.collection("users").create(payload);
+        guruRecord = await db.create("users", payload);
 
         if (form.kelas_id && guruRecord) {
           const updateKelasPayload = {};
@@ -225,9 +223,7 @@ export default function DataGuru() {
           } else {
             updateKelasPayload.walikelas_id = guruRecord.id;
           }
-          await pb
-            .collection("kelas")
-            .update(form.kelas_id, updateKelasPayload);
+          await db.update("kelas", form.kelas_id, updateKelasPayload);
         }
       }
 
@@ -253,10 +249,10 @@ export default function DataGuru() {
         const updateData = {};
         if (k.walikelas_id === deleteTarget.id) updateData.walikelas_id = "";
         if (k.pendamping_id === deleteTarget.id) updateData.pendamping_id = "";
-        await pb.collection("kelas").update(k.id, updateData);
+        await db.update("kelas", k.id, updateData);
       }
 
-      await pb.collection("users").delete(deleteTarget.id);
+      await db.remove("users", deleteTarget.id);
       await fetchGuruDanKelas();
       handleCloseModal();
     } catch (error) {
@@ -270,9 +266,7 @@ export default function DataGuru() {
     setLoading(true);
     try {
       let successCount = 0;
-      let allUsers = await pb
-        .collection("users")
-        .getFullList({ requestKey: null });
+      let allUsers = await db.getFullList("users", { requestKey: null });
 
       // Tidak perlu lagi login sebagai _superusers,
       // karena operator (admin/ict) sudah punya izin create langsung.
@@ -331,7 +325,7 @@ export default function DataGuru() {
           if (no_whatsapp) payload.no_whatsapp = no_whatsapp;
           if (jenis_kelamin) payload.jenis_kelamin = jenis_kelamin;
 
-          const newGuru = await pb.collection("users").create(payload);
+          const newGuru = await db.create("users", payload);
 
           allUsers.push({
             id: newGuru.id,
@@ -355,9 +349,7 @@ export default function DataGuru() {
                 updateKelasPayload.pendamping_id = newGuru.id;
 
               if (Object.keys(updateKelasPayload).length > 0) {
-                await pb
-                  .collection("kelas")
-                  .update(kelasTerkait.id, updateKelasPayload);
+                await db.update("kelas", kelasTerkait.id, updateKelasPayload);
               }
             }
           }

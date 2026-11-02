@@ -2,6 +2,11 @@
 
 import { useState, useEffect, useMemo, Fragment } from "react";
 import { pb } from "@/lib/pocketbase";
+import {
+  getIctStats,
+  getRecentLogs,
+  getLoginLogs,
+} from "@/actions/ict-dashboard.action";
 
 // =========================================================
 // Konstanta & helper
@@ -719,66 +724,50 @@ export default function IctDashboard() {
 
     async function fetchInitialStats() {
       try {
-        const [allUsers, activeTeachers, activeAdmins] = await Promise.all([
-          pb.collection("users").getList(1, 1, {
-            filter: "is_aktif = true",
-            requestKey: null,
-          }),
-          pb.collection("users").getList(1, 1, {
-            // "guru" (bukan "guru_") supaya cocok dengan role berspasi
-            // seperti "guru walikelas" / "guru mapel" / "guru pendamping"
-            filter: "is_aktif = true && role ~ 'guru'",
-            requestKey: null,
-          }),
-          pb.collection("users").getList(1, 1, {
-            filter: "is_aktif = true && role = 'admin'",
-            requestKey: null,
-          }),
-        ]);
+        // Hitungan user aktif / guru / admin dilakukan di server action.
+        // Filter role ~ 'guru' (bukan "guru_") supaya cocok dengan role
+        // berspasi seperti "guru walikelas" / "guru mapel" / "guru pendamping".
+        const res = await getIctStats();
+
+        if (res.error) {
+          console.error("Gagal mengambil statistik database:", res.error);
+          setStats((prev) => ({ ...prev, dbStatus: "ERROR" }));
+          return;
+        }
 
         setStats({
-          totalUsers: allUsers.totalItems,
-          activeTeachers: activeTeachers.totalItems,
-          activeAdmins: activeAdmins.totalItems,
+          totalUsers: res.totalUsers,
+          activeTeachers: res.activeTeachers,
+          activeAdmins: res.activeAdmins,
           dbStatus: "ONLINE",
         });
       } catch (error) {
-        if (!error.isAbort) {
-          console.error("Gagal mengambil statistik database:", error);
-          setStats((prev) => ({ ...prev, dbStatus: "ERROR" }));
-        }
+        console.error("Gagal mengambil statistik database:", error);
+        setStats((prev) => ({ ...prev, dbStatus: "ERROR" }));
       }
     }
 
     async function fetchInitialLogs() {
       try {
-        const records = await pb.collection("system_log").getList(1, 15, {
-          sort: "-created",
-          expand: "user_id",
-          requestKey: null,
-        });
+        // 15 log terbaru; konversi ke bentuk siap-tampil + dedup by id
+        // dilakukan di server action.
+        const res = await getRecentLogs();
 
-        // Dedup berdasarkan id (jaga-jaga bila ada realtime event yang
-        // datang lebih dulu sebelum fetch selesai).
-        const seen = new Set();
-        const items = [];
-        for (const r of records.items) {
-          if (seen.has(r.id)) continue;
-          seen.add(r.id);
-          items.push(buildLogEntry(r));
+        if (res.error) {
+          console.error("Gagal mengambil data log awal:", res.error);
+          return;
         }
-        setLogs(items);
+
+        setLogs(res.logs);
       } catch (error) {
-        if (!error.isAbort) {
-          console.error("Gagal mengambil data log awal:", error);
-        }
+        console.error("Gagal mengambil data log awal:", error);
       } finally {
         setLogsLoading(false);
       }
     }
 
     // Ambil log sejak awal bulan / 7 hari terakhir (mana yang lebih awal),
-    // lalu saring yang merupakan login berhasil di sisi klien.
+    // lalu saring yang merupakan login berhasil di server action.
     async function fetchLoginLogs() {
       try {
         const now = new Date();
@@ -790,28 +779,18 @@ export default function IctDashboard() {
         );
         const start = startMonth < startWeek ? startMonth : startWeek;
 
-        const records = await pb.collection("system_log").getFullList({
-          filter: `created >= "${start.toISOString().replace("T", " ")}"`,
-          fields:
-            "id,created,user_id,aktivitas,msg,type,endpoint,status_code,payload_json",
-          sort: "-created",
-          requestKey: null,
+        const res = await getLoginLogs({
+          createdSince: start.toISOString().replace("T", " "),
         });
 
-        // Dedup berdasarkan id juga di sini.
-        const seen = new Set();
-        const logins = [];
-        for (const r of records) {
-          if (!isSuccessfulLogin(r)) continue;
-          if (seen.has(r.id)) continue;
-          seen.add(r.id);
-          logins.push(slimLogin(r));
+        if (res.error) {
+          console.error("Gagal mengambil data login:", res.error);
+          return;
         }
-        setLoginLogs(logins);
+
+        setLoginLogs(res.logs);
       } catch (error) {
-        if (!error.isAbort) {
-          console.error("Gagal mengambil data login:", error);
-        }
+        console.error("Gagal mengambil data login:", error);
       } finally {
         setLoginLoading(false);
       }

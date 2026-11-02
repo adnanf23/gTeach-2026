@@ -1,8 +1,13 @@
 "use client";
 
+import { db } from "@/lib/db";
+import {
+  getCatatanKasusOverview,
+  getCatatanKasusByKelas,
+} from "@/actions/ict-catatan-kasus.action";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { pb, isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
+import { isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
 import { createSystemLog } from "@/lib/logger";
 
 // =========================================================
@@ -706,31 +711,18 @@ export default function AdminCatatanKasusPage() {
     async function loadKelas() {
       setLoadingKelas(true);
       try {
-        const [kelasData, siswaData, catatanData] = await Promise.all([
-          pb.collection("kelas").getFullList({
-            sort: "tingkat,nama_kelas",
-            requestKey: null,
-          }),
-          pb.collection("siswa").getFullList({
-            fields: "id,kelas_id",
-            requestKey: null,
-          }),
-          pb.collection("catatan_kasus").getFullList({
-            fields: "id,kelas_id,jenis_kasus,sync_sias,date",
-            requestKey: null,
-          }),
-        ]);
-
-        const countMap = {};
-        siswaData.forEach((s) => {
-          const kid = firstOf(s.kelas_id);
-          if (kid) countMap[kid] = (countMap[kid] || 0) + 1;
-        });
-
+        // Baca kelas + siswa + ringkasan catatan kasus (beserta agregasi
+        // jumlah siswa per kelas) dilakukan di server action.
+        const res = await getCatatanKasusOverview();
         if (cancelled) return;
-        setKelasList(kelasData);
-        setSiswaCountMap(countMap);
-        setAllCatatan(catatanData);
+
+        if (res.error) {
+          console.error("Gagal memuat kelas:", res.error);
+        } else {
+          setKelasList(res.kelasList);
+          setSiswaCountMap(res.siswaCountMap);
+          setAllCatatan(res.allCatatan);
+        }
       } catch (err) {
         console.error("Gagal memuat kelas:", err);
       } finally {
@@ -751,21 +743,15 @@ export default function AdminCatatanKasusPage() {
     if (!selectedKelasId) return;
     setLoadingCatatan(true);
     try {
-      const [catatanRes, siswaRes] = await Promise.all([
-        pb.collection("catatan_kasus").getFullList({
-          filter: `kelas_id="${selectedKelasId}"`,
-          expand: "siswa_id,tahun_ajaran_id",
-          sort: "-date",
-          requestKey: null,
-        }),
-        pb.collection("siswa").getFullList({
-          filter: `kelas_id="${selectedKelasId}"`,
-          sort: "nama_siswa",
-          requestKey: null,
-        }),
-      ]);
-      setCatatanList(catatanRes);
-      setSiswaList(siswaRes);
+      // Baca catatan kasus + daftar siswa kelas terpilih di server action.
+      const res = await getCatatanKasusByKelas(selectedKelasId);
+      if (res.error) {
+        console.error("Gagal memuat catatan kasus:", res.error);
+        setMessage({ type: "error", text: "Gagal memuat catatan kasus." });
+      } else {
+        setCatatanList(res.catatanList);
+        setSiswaList(res.siswaList);
+      }
     } catch (err) {
       console.error("Gagal memuat catatan kasus:", err);
       setMessage({ type: "error", text: "Gagal memuat catatan kasus." });
@@ -789,9 +775,7 @@ export default function AdminCatatanKasusPage() {
     const newValue = !item.sync_sias;
     setTogglingId(item.id);
     try {
-      await pb
-        .collection("catatan_kasus")
-        .update(item.id, { sync_sias: newValue }, { requestKey: null });
+      await db.update("catatan_kasus", item.id, { sync_sias: newValue }, { requestKey: null });
 
       setCatatanList((prev) =>
         prev.map((c) => (c.id === item.id ? { ...c, sync_sias: newValue } : c)),

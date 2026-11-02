@@ -1,5 +1,10 @@
 "use client";
 
+import { db } from "@/lib/db";
+import {
+  getIctDataSiswa,
+  getIctKelasList,
+} from "@/actions/ict-data-siswa.action";
 import { useEffect, useState } from "react";
 import { pb } from "@/lib/pocketbase";
 import { createSystemLog } from "@/lib/logger";
@@ -645,22 +650,12 @@ export default function DataSiswaPage() {
   async function fetchSiswa() {
     try {
       setLoadData(true);
-      const data = await pb.collection("siswa").getFullList({
-        expand: "kelas_id",
-        requestKey: null,
-      });
-
-      const dataFormated = data.map((siswa) => {
-        let jkFull = siswa.jenis_kelamin;
-        if (siswa.jenis_kelamin) {
-          const jkLower = siswa.jenis_kelamin.toLowerCase();
-          if (jkLower === "l") jkFull = "Laki-Laki";
-          if (jkLower === "p") jkFull = "Perempuan";
-        }
-        return { ...siswa, jenis_kelamin: jkFull };
-      });
-
-      setDataSiswa(dataFormated);
+      // Baca daftar siswa (+ expand kelas & formatting turunannya) via server action.
+      const res = await getIctDataSiswa();
+      if (res.error) {
+        console.log("Data gagal diambil:", res.error);
+      }
+      setDataSiswa(res.dataSiswa || []);
     } catch (error) {
       console.log("Data gagal diambil:", error);
     } finally {
@@ -670,10 +665,12 @@ export default function DataSiswaPage() {
 
   async function fetchKelas() {
     try {
-      const data = await pb
-        .collection("kelas")
-        .getFullList({ requestKey: null });
-      setKelasList(data);
+      // Baca daftar kelas via server action.
+      const res = await getIctKelasList();
+      if (res.error) {
+        console.log(res.error);
+      }
+      setKelasList(res.kelasList || []);
     } catch (error) {
       console.log(error);
     }
@@ -807,7 +804,7 @@ export default function DataSiswaPage() {
     try {
       setLoading(true);
       if (isEdit) {
-        await pb.collection("siswa").update(EditTarget, form);
+        await db.update("siswa", EditTarget, form);
         const user = currentUser();
         await createSystemLog({
           type: "succes",
@@ -818,7 +815,7 @@ export default function DataSiswaPage() {
         });
         showToast("Berhasil mengubah data");
       } else {
-        await pb.collection("siswa").create(form);
+        await db.create("siswa", form);
         const user = currentUser();
         await createSystemLog({
           type: "succes",
@@ -850,7 +847,7 @@ export default function DataSiswaPage() {
   const handleDelete = async (e) => {
     e.preventDefault();
     try {
-      await pb.collection("siswa").delete(deleteTarget);
+      await db.remove("siswa", deleteTarget);
       showToast("Berhasil menghapus data siswa");
       handleCloseModal();
       fetchSiswa();
@@ -891,7 +888,7 @@ export default function DataSiswaPage() {
     setImportState("processing");
     setImportProgress({ current: 0, total: rows.length });
 
-    const allKelas = await pb.collection("kelas").getFullList();
+    const { kelasList: allKelas } = await getIctKelasList();
     let successCount = 0;
 
     for (let i = 0; i < rows.length; i++) {
@@ -905,7 +902,7 @@ export default function DataSiswaPage() {
           if (jkUpper.startsWith("L")) jkClean = "L";
           else if (jkUpper.startsWith("P")) jkClean = "P";
         }
-        await pb.collection("siswa").create({
+        await db.create("siswa", {
           nama_siswa: row.nama_siswa,
           nis: row.nis,
           nisn: row.nisn,

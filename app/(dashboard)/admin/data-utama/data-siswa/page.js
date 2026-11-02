@@ -1,5 +1,6 @@
 "use client";
 
+import { db } from "@/lib/db";
 import { useEffect, useState } from "react";
 import {
   cn,
@@ -67,7 +68,7 @@ export default function DataSiswaPage() {
   async function fetchSiswa() {
     try {
       setLoadData(true);
-      const data = await pb.collection("siswa").getFullList({
+      const data = await db.getFullList("siswa", {
         expand: "kelas_id",
         requestKey: null,
       });
@@ -92,9 +93,7 @@ export default function DataSiswaPage() {
 
   async function fetchKelas() {
     try {
-      const data = await pb
-        .collection("kelas")
-        .getFullList({ requestKey: null });
+      const data = await db.getFullList("kelas", { requestKey: null });
       setKelasList(data);
     } catch (error) {
       console.log(error);
@@ -201,7 +200,7 @@ export default function DataSiswaPage() {
     try {
       setLoading(true);
       if (isEdit) {
-        await pb.collection("siswa").update(EditTarget, form);
+        await db.update("siswa", EditTarget, form);
         const user = currentUser();
         await createSystemLog({
           type: "succes",
@@ -212,7 +211,7 @@ export default function DataSiswaPage() {
         });
         showToast("Berhasil mengubah data");
       } else {
-        await pb.collection("siswa").create(form);
+        await db.create("siswa", form);
         const user = currentUser();
         await createSystemLog({
           type: "succes",
@@ -244,7 +243,7 @@ export default function DataSiswaPage() {
   const handleDelete = async (e) => {
     e.preventDefault();
     try {
-      await pb.collection("siswa").delete(deleteTarget);
+      await db.remove("siswa", deleteTarget);
       showToast("Berhasil menghapus data siswa");
       handleCloseModal();
       fetchSiswa();
@@ -286,7 +285,7 @@ export default function DataSiswaPage() {
     setImportState("processing");
     setImportProgress({ current: 0, total: rows.length });
 
-    const allKelas = await pb.collection("kelas").getFullList();
+    const allKelas = await db.getFullList("kelas");
     let successCount = 0;
 
     for (let i = 0; i < rows.length; i++) {
@@ -300,7 +299,7 @@ export default function DataSiswaPage() {
           if (jkUpper.startsWith("L")) jkClean = "L";
           else if (jkUpper.startsWith("P")) jkClean = "P";
         }
-        await pb.collection("siswa").create({
+        await db.create("siswa", {
           nama_siswa: row.nama_siswa,
           nis: row.nis,
           nisn: row.nisn,

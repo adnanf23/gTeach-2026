@@ -1,7 +1,11 @@
 "use client";
 
+import { db } from "@/lib/db";
+import {
+  getCapaianKompetensiData,
+} from "@/actions/walikelas-capaian-kompetensi.action";
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { pb } from "@/lib/pocketbase";
+import { getCurrentUser } from "@/lib/pocketbase";
 import * as XLSX from "xlsx-js-style";
 
 // ------------------------------------------------------------------
@@ -23,10 +27,6 @@ function firstErrorMessage(err) {
     if (firstKey) return data[firstKey]?.message || "Data tidak valid.";
   }
   return err?.message || "Terjadi kesalahan. Coba lagi.";
-}
-
-function pbQuote(str) {
-  return String(str).replace(/"/g, '\\"');
 }
 
 export default function CapaianKompetensiPage() {
@@ -68,82 +68,19 @@ export default function CapaianKompetensiPage() {
     setLoading(true);
     setErrorBase("");
     try {
-      const currentUser = pb.authStore.model;
+      const currentUser = getCurrentUser();
       if (!currentUser) {
         setErrorBase("Kamu belum login.");
         setLoading(false);
         return;
       }
 
-      const kelasGuru = await pb.collection("kelas").getFullList({
-        filter: `walikelas_id = "${pbQuote(currentUser.id)}" || pendamping_id = "${pbQuote(currentUser.id)}"`,
-        sort: "tingkat,nama_kelas",
-        requestKey: null,
-      });
-      setGuruKelasList(kelasGuru);
-
-      if (kelasGuru.length === 0) {
-        setMyMapelList([]);
-        setList([]);
-        setLoading(false);
-        return;
-      }
-
-      const myKelasIds = kelasGuru.map((k) => k.id);
-      const myTingkat = Array.from(
-        new Set(kelasGuru.map((k) => String(k.tingkat || ""))),
-      );
-
-      const orParts = [
-        ...myKelasIds.map((id) => `spesifik_kelas_id ~ "${pbQuote(id)}"`),
-        ...myTingkat.map((t) => `target_tingkat ~ "${pbQuote(t)}"`),
-      ];
-      const mapelFilter = orParts.length > 0 ? orParts.join(" || ") : "";
-
-      const mapelRes = await pb.collection("mata_pelajaran").getFullList({
-        filter: mapelFilter,
-        sort: "nama_mapel",
-        requestKey: null,
-      });
-
-      const myKelasSet = new Set(myKelasIds);
-      const myTingkatSet = new Set(myTingkat);
-      const filteredMapel = mapelRes.filter((m) => {
-        const spesifik = Array.isArray(m.spesifik_kelas_id)
-          ? m.spesifik_kelas_id
-          : m.spesifik_kelas_id
-            ? [m.spesifik_kelas_id]
-            : [];
-        if (spesifik.length > 0) {
-          return spesifik.some((id) => myKelasSet.has(id));
-        }
-        const target = Array.isArray(m.target_tingkat)
-          ? m.target_tingkat
-          : m.target_tingkat
-            ? [m.target_tingkat]
-            : [];
-        if (target.length === 0) return true;
-        return target.some((t) => myTingkatSet.has(String(t)));
-      });
-      setMyMapelList(filteredMapel);
-
-      const mapelIds = filteredMapel.map((m) => m.id);
-      if (mapelIds.length === 0) {
-        setList([]);
-        setLoading(false);
-        return;
-      }
-
-      const ckFilter = `(${myKelasIds.map((id) => `kelas_id = "${pbQuote(id)}"`).join(" || ")}) && (${mapelIds.map((id) => `mapel_id = "${pbQuote(id)}"`).join(" || ")})`;
-
-      const ck = await pb.collection("capaian_kompetensi").getFullList({
-        filter: ckFilter,
-        sort: "-created",
-        expand: "mapel_id,kelas_id",
-        requestKey: null,
-      });
-
-      setList(ck);
+      // Fetch + filter + agregasi dilakukan di server action.
+      const res = await getCapaianKompetensiData({ userId: currentUser.id });
+      setGuruKelasList(res.guruKelasList);
+      setMyMapelList(res.myMapelList);
+      setList(res.list);
+      if (res.error) setErrorBase(res.error);
     } catch (err) {
       console.error(err);
       setErrorBase(
@@ -483,15 +420,13 @@ export default function CapaianKompetensiPage() {
         }
 
         try {
-          const created = await pb.collection("capaian_kompetensi").create({
+          const created = await db.create("capaian_kompetensi", {
             mapel_id: mapel.id,
             kelas_id: autoKelasId,
             capaian_tinggi: capTinggi,
             capaian_rendah: capRendah,
           });
-          const full = await pb
-            .collection("capaian_kompetensi")
-            .getOne(created.id, { expand: "mapel_id,kelas_id" });
+          const full = await db.getOne("capaian_kompetensi", created.id, { expand: "mapel_id,kelas_id" });
           createdItems.push(full);
           success++;
         } catch (err) {
@@ -596,21 +531,13 @@ export default function CapaianKompetensiPage() {
       };
 
       if (isEditing) {
-        const updated = await pb
-          .collection("capaian_kompetensi")
-          .update(form.id, payload);
-        const full = await pb
-          .collection("capaian_kompetensi")
-          .getOne(updated.id, { expand: "mapel_id,kelas_id" });
+        const updated = await db.update("capaian_kompetensi", form.id, payload);
+        const full = await db.getOne("capaian_kompetensi", updated.id, { expand: "mapel_id,kelas_id" });
         setList((prev) => prev.map((c) => (c.id === full.id ? full : c)));
         setToast("Capaian kompetensi berhasil diperbarui.");
       } else {
-        const created = await pb
-          .collection("capaian_kompetensi")
-          .create(payload);
-        const full = await pb
-          .collection("capaian_kompetensi")
-          .getOne(created.id, { expand: "mapel_id,kelas_id" });
+        const created = await db.create("capaian_kompetensi", payload);
+        const full = await db.getOne("capaian_kompetensi", created.id, { expand: "mapel_id,kelas_id" });
         setList((prev) => [full, ...prev]);
         setToast("Capaian kompetensi berhasil ditambahkan.");
       }
@@ -630,7 +557,7 @@ export default function CapaianKompetensiPage() {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
-      await pb.collection("capaian_kompetensi").delete(deleteTarget.id);
+      await db.remove("capaian_kompetensi", deleteTarget.id);
       setList((prev) => prev.filter((c) => c.id !== deleteTarget.id));
       setToast("Capaian kompetensi berhasil dihapus.");
       setDeleteTarget(null);

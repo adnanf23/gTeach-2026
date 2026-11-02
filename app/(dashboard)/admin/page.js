@@ -1,8 +1,9 @@
 "use client";
 
+import { db } from "@/lib/db";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { pb, getCurrentUser, isAuthenticated } from "@/lib/pocketbase";
+import { getCurrentUser, isAuthenticated } from "@/lib/pocketbase";
 
 const ALLOWED_ROLES = ["admin", "ict"];
 
@@ -378,22 +379,61 @@ export default function OverviewAdminPage() {
         setLoading(true);
         setErrorMsg("");
 
-        // Data dasar
-        const semuaKelas = await pb.collection("kelas").getFullList();
-        const semuaSiswa = await pb.collection("siswa").getFullList();
+        const { start: todayStart, end: todayEnd } = todayRange();
+        const { start: monthStart, end: monthEnd } = monthRange();
+
+        const weekly = last7Days();
+        const monthly = monthBuckets();
+
+        // Rentang gabungan (supaya 1x query saja)
+        const rangeStart =
+          weekly[0].start < monthly[0].start
+            ? weekly[0].start
+            : monthly[0].start;
+        const rangeEnd =
+          weekly[weekly.length - 1].end > monthly[monthly.length - 1].end
+            ? weekly[weekly.length - 1].end
+            : monthly[monthly.length - 1].end;
+
+        // Semua query saling independen -> jalankan paralel
+        const [
+          semuaKelas,
+          semuaSiswa,
+          absensiHariIni,
+          agendaHariIni,
+          absensiBulanIni,
+          absensiRange,
+          agendaRange,
+        ] = await Promise.all([
+          db.getFullList("kelas"),
+          db.getFullList("siswa", { fields: "id" }),
+          db.getFullList("absensi", {
+            filter: `tanggal>="${todayStart}" && tanggal<"${todayEnd}"`,
+            fields: "id,kelas_id,status,tanggal",
+          }),
+          db.getFullList("agenda_mengajar", {
+            filter: `date>="${todayStart}" && date<"${todayEnd}"`,
+            fields: "id,kelas_id,date",
+          }),
+          db.getFullList("absensi", {
+            filter: `tanggal>="${monthStart}" && tanggal<"${monthEnd}"`,
+            fields: "id,kelas_id,status,tanggal",
+          }),
+          db.getFullList("absensi", {
+            filter: `tanggal>="${rangeStart}" && tanggal<"${rangeEnd}"`,
+            fields: "id,status,tanggal",
+          }),
+          db.getFullList("agenda_mengajar", {
+            filter: `date>="${rangeStart}" && date<"${rangeEnd}"`,
+            fields: "id,kelas_id,date",
+          }),
+        ]);
 
         if (isMounted) {
           setTotalKelas(semuaKelas.length);
           setTotalSiswa(semuaSiswa.length);
         }
 
-        const { start: todayStart, end: todayEnd } = todayRange();
-        const { start: monthStart, end: monthEnd } = monthRange();
-
-        // Absensi hari ini
-        const absensiHariIni = await pb.collection("absensi").getFullList({
-          filter: `tanggal>="${todayStart}" && tanggal<"${todayEnd}"`,
-        });
         const kelasSudahAbsenSet = new Set(
           absensiHariIni.map((a) =>
             Array.isArray(a.kelas_id) ? a.kelas_id[0] : a.kelas_id,
@@ -404,12 +444,6 @@ export default function OverviewAdminPage() {
           .sort((a, b) => Number(a.sudah) - Number(b.sudah));
         if (isMounted) setStatusAbsensiPerKelas(statusAbsensi);
 
-        // Agenda hari ini
-        const agendaHariIni = await pb
-          .collection("agenda_mengajar")
-          .getFullList({
-            filter: `date>="${todayStart}" && date<"${todayEnd}"`,
-          });
         const kelasSudahAgendaSet = new Set(
           agendaHariIni.map((a) =>
             Array.isArray(a.kelas_id) ? a.kelas_id[0] : a.kelas_id,
@@ -421,9 +455,6 @@ export default function OverviewAdminPage() {
         if (isMounted) setStatusAgendaPerKelas(statusAgenda);
 
         // Rekap kehadiran bulan ini
-        const absensiBulanIni = await pb.collection("absensi").getFullList({
-          filter: `tanggal>="${monthStart}" && tanggal<"${monthEnd}"`,
-        });
         const rekapPerKelas = {};
         semuaKelas.forEach((k) => {
           rekapPerKelas[k.id] = { kelas: k, hadir: 0, total: 0 };
@@ -442,29 +473,7 @@ export default function OverviewAdminPage() {
           .sort((a, b) => b.persen - a.persen);
         if (isMounted) setRankingKehadiran(rankingHitung);
 
-        // === Trend: minggu ini & bulan ini ===
-        const weekly = last7Days();
-        const monthly = monthBuckets();
         const totalKelasAktif = semuaKelas.length || 1;
-
-        // Rentang gabungan (supaya 1x query saja)
-        const rangeStart =
-          weekly[0].start < monthly[0].start
-            ? weekly[0].start
-            : monthly[0].start;
-        const rangeEnd =
-          weekly[weekly.length - 1].end > monthly[monthly.length - 1].end
-            ? weekly[weekly.length - 1].end
-            : monthly[monthly.length - 1].end;
-
-        const [absensiRange, agendaRange] = await Promise.all([
-          pb.collection("absensi").getFullList({
-            filter: `tanggal>="${rangeStart}" && tanggal<"${rangeEnd}"`,
-          }),
-          pb.collection("agenda_mengajar").getFullList({
-            filter: `date>="${rangeStart}" && date<"${rangeEnd}"`,
-          }),
-        ]);
 
         // Bucket absensi per tanggal: { hadir, total }
         const absensiByDate = {};

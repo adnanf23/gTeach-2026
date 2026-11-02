@@ -1,7 +1,8 @@
 "use client";
 
+import { db } from "@/lib/db";
 import { useState, useEffect, useMemo, useCallback } from "react";
-import { pb, getCurrentUser } from "@/lib/pocketbase";
+import { getCurrentUser } from "@/lib/pocketbase";
 
 // ------------------------------------------------------------------
 // Helper tanggal & sistem absensi (hari libur, weekend, hari efektif)
@@ -147,9 +148,7 @@ async function exportAbsensiWorkbook({
   const kelasFilter = kelasId !== "semua" ? ` && kelas_id = "${kelasId}"` : "";
   const filter = `tanggal >= "${startDate} 00:00:00" && tanggal <= "${endDate} 23:59:59"${kelasFilter}`;
 
-  const records = await pb
-    .collection("absensi")
-    .getFullList({ filter, requestKey: null });
+  const records = await db.getFullList("absensi", { filter, requestKey: null });
 
   const targetKelas =
     kelasId === "semua" ? kelasList : kelasList.filter((k) => k.id === kelasId);
@@ -943,7 +942,7 @@ function AbsensiContent({
   const loadRange = useCallback(async () => {
     setLoadingRange(true);
     try {
-      const records = await pb.collection("absensi").getFullList({
+      const records = await db.getFullList("absensi", {
         filter: `tanggal >= "${daysAgoStr(30)} 00:00:00" && tanggal <= "${todayStr()} 23:59:59"`,
         sort: "-tanggal",
         requestKey: null,
@@ -964,7 +963,7 @@ function AbsensiContent({
   const loadTanggal = useCallback(async (dateStr) => {
     setLoadingTanggal(true);
     try {
-      const records = await pb.collection("absensi").getFullList({
+      const records = await db.getFullList("absensi", {
         filter: `tanggal >= "${dateStr} 00:00:00" && tanggal <= "${dateStr} 23:59:59"`,
         expand: "siswa_id,kelas_id",
         requestKey: null,
@@ -1508,18 +1507,16 @@ export default function AbsensiPage() {
     setErrorBase("");
     try {
       const [kelas, siswa, hariLibur] = await Promise.all([
-        pb.collection("kelas").getFullList({
+        db.getFullList("kelas", {
           sort: "tingkat,nama_kelas",
           expand: "walikelas_id,pendamping_id",
           requestKey: null,
         }),
-        pb.collection("siswa").getFullList({
+        db.getFullList("siswa", {
           sort: "nama_siswa",
           requestKey: null,
         }),
-        pb
-          .collection("hari_libur")
-          .getFullList({ requestKey: null })
+        db.getFullList("hari_libur", { requestKey: null })
           .catch(() => []),
       ]);
       setKelasList(kelas);

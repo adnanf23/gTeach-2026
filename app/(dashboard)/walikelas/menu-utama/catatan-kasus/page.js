@@ -1,8 +1,15 @@
 "use client";
 
+import { db } from "@/lib/db";
+import {
+  resolveKelasWalikelas,
+  getTahunAjaranAktif,
+  getCatatanKasusData,
+  getRiwayatKasusSiswa,
+} from "@/actions/walikelas-catatan-kasus.action";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { pb, isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
+import { isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
 import { createSystemLog } from "@/lib/logger";
 
 // =========================================================
@@ -196,21 +203,13 @@ function CatatanKasusModal({
 
     async function fetchHistory() {
       setLoadingHistory(true);
-      try {
-        const filter = initialData
-          ? `siswa_id="${siswaId}" && id != "${initialData.id}"`
-          : `siswa_id="${siswaId}"`;
-        const records = await pb.collection("catatan_kasus").getFullList({
-          filter,
-          sort: "-date",
-          requestKey: null,
-        });
-        if (!cancelled) setHistory(records);
-      } catch (e) {
-        if (!cancelled) setHistory([]);
-      } finally {
-        if (!cancelled) setLoadingHistory(false);
-      }
+      const res = await getRiwayatKasusSiswa({
+        siswaId,
+        excludeId: initialData ? initialData.id : null,
+      });
+      if (cancelled) return;
+      setHistory(res.records);
+      setLoadingHistory(false);
     }
 
     fetchHistory();
@@ -484,6 +483,11 @@ export default function CatatanKasusPage() {
   const [siswaList, setSiswaList] = useState([]);
   const [catatanList, setCatatanList] = useState([]);
   const [loadingData, setLoadingData] = useState(false);
+  const [stats, setStats] = useState({
+    totalKasus: 0,
+    totalBerat: 0,
+    siswaTerlibat: 0,
+  });
 
   const [search, setSearch] = useState("");
   const [filterJenis, setFilterJenis] = useState("semua");
@@ -514,19 +518,14 @@ export default function CatatanKasusPage() {
     async function resolve() {
       setResolvingKelas(true);
       setNoKelasAssigned(false);
-      try {
-        const rec = await pb
-          .collection("kelas")
-          .getFirstListItem(
-            `walikelas_id="${user.id}" || pendamping_id="${user.id}"`,
-            { requestKey: null },
-          );
-        if (!cancelled) setKelas(rec);
-      } catch (e) {
-        if (!cancelled) setNoKelasAssigned(true);
-      } finally {
-        if (!cancelled) setResolvingKelas(false);
+      const res = await resolveKelasWalikelas(user.id);
+      if (cancelled) return;
+      if (res.kelas) {
+        setKelas(res.kelas);
+      } else {
+        setNoKelasAssigned(true);
       }
+      setResolvingKelas(false);
     }
 
     resolve();
@@ -542,19 +541,13 @@ export default function CatatanKasusPage() {
     let cancelled = false;
 
     async function fetchTahunAjaran() {
-      try {
-        const rec = await pb
-          .collection("tahun_ajaran")
-          .getFirstListItem(`is_aktif=true`, { requestKey: null });
-        if (!cancelled) setTahunAjaran(rec);
-      } catch (e) {
-        if (!cancelled) {
-          setTahunAjaran(null);
-          setMessage({
-            type: "error",
-            text: "Tahun ajaran aktif belum diatur. Hubungi admin/ICT.",
-          });
-        }
+      const res = await getTahunAjaranAktif();
+      if (cancelled) return;
+      if (res.tahunAjaran) {
+        setTahunAjaran(res.tahunAjaran);
+      } else {
+        setTahunAjaran(null);
+        setMessage({ type: "error", text: res.error });
       }
     }
 
@@ -570,27 +563,18 @@ export default function CatatanKasusPage() {
   const loadData = useCallback(async () => {
     if (!kelas) return;
     setLoadingData(true);
-    try {
-      const [siswaRes, catatanRes] = await Promise.all([
-        pb.collection("siswa").getFullList({
-          filter: `kelas_id="${kelas.id}"`,
-          sort: "nama_siswa",
-          requestKey: null,
-        }),
-        pb.collection("catatan_kasus").getFullList({
-          filter: `kelas_id="${kelas.id}"`,
-          expand: "siswa_id",
-          sort: "-date",
-          requestKey: null,
-        }),
-      ]);
-      setSiswaList(siswaRes);
-      setCatatanList(catatanRes);
-    } catch (e) {
-      setMessage({ type: "error", text: "Gagal memuat data catatan kasus." });
-    } finally {
-      setLoadingData(false);
+
+    // Fetch + agregasi statistik dilakukan di server action.
+    const res = await getCatatanKasusData(kelas.id);
+    if (res.error) {
+      setMessage({ type: "error", text: res.error });
+    } else {
+      setSiswaList(res.siswaList);
+      setCatatanList(res.catatanList);
+      setStats(res.stats);
     }
+
+    setLoadingData(false);
   }, [kelas]);
 
   useEffect(() => {
@@ -602,8 +586,7 @@ export default function CatatanKasusPage() {
   // =========================================================
   const handleCreate = async (data) => {
     try {
-      await pb.collection("catatan_kasus").create(
-        {
+      await db.create("catatan_kasus", {
           siswa_id: data.siswa_id,
           date: data.date,
           jenis_kasus: data.jenis_kasus,
@@ -613,8 +596,7 @@ export default function CatatanKasusPage() {
           tahun_ajaran_id: tahunAjaran?.id || null,
           sync_sias: false,
         },
-        { requestKey: null },
-      );
+        { requestKey: null },);
 
       await createSystemLog({
         type: "succes",
@@ -647,16 +629,14 @@ export default function CatatanKasusPage() {
   const handleUpdate = async (data) => {
     if (!editingItem) return;
     try {
-      await pb.collection("catatan_kasus").update(
-        editingItem.id,
+      await db.update("catatan_kasus", editingItem.id,
         {
           date: data.date,
           jenis_kasus: data.jenis_kasus,
           surat_diberikan: data.surat_diberikan,
           tindak_lanjut: data.tindak_lanjut,
         },
-        { requestKey: null },
-      );
+        { requestKey: null },);
 
       await createSystemLog({
         type: "succes",
@@ -688,7 +668,7 @@ export default function CatatanKasusPage() {
   const handleDelete = async (id) => {
     if (!confirm("Yakin ingin menghapus catatan kasus ini?")) return;
     try {
-      await pb.collection("catatan_kasus").delete(id, { requestKey: null });
+      await db.remove("catatan_kasus", id, { requestKey: null });
       setMessage({ type: "success", text: "Catatan kasus berhasil dihapus." });
       await loadData();
     } catch (err) {
@@ -721,15 +701,6 @@ export default function CatatanKasusPage() {
       return matchSearch && matchJenis;
     });
   }, [catatanList, search, filterJenis]);
-
-  const stats = useMemo(() => {
-    const totalKasus = catatanList.length;
-    const totalBerat = catatanList.filter(
-      (c) => c.jenis_kasus === "pelanggaran berat",
-    ).length;
-    const siswaTerlibat = new Set(catatanList.map((c) => c.siswa_id)).size;
-    return { totalKasus, totalBerat, siswaTerlibat };
-  }, [catatanList]);
 
   // =========================================================
   // Render

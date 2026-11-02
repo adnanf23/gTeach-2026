@@ -6,8 +6,10 @@
 // - Field di DB:  sakit | izin | hadir    ← `hadir` dipetakan ke Alpha di UI
 // - Hanya baris yang berubah yang disimpan (batch create/update).
 
+import { getKehadiranData } from "@/actions/walikelas-kehadiran.action";
+import { db } from "@/lib/db";
 import { useEffect, useMemo, useState } from "react";
-import { getCurrentUser, pb } from "@/lib/pocketbase";
+import { getCurrentUser } from "@/lib/pocketbase";
 
 const CARD_SHADOW = "shadow-[0_4px_14px_rgba(99,120,200,0.12)]";
 
@@ -37,52 +39,16 @@ export default function KehadiranManualPage() {
         setLoading(true);
         setError("");
 
-        const kelasData = await pb
-          .collection("kelas")
-          .getFirstListItem(
-            `walikelas_id = "${userId}" || pendamping_id = "${userId}"`,
-            { requestKey: null },
-          );
-        setKelas(kelasData);
+        // Fetch kelas + siswa + kehadiran manual dilakukan di server action.
+        const res = await getKehadiranData({ userId });
 
-        const [siswaData, kehadiranData] = await Promise.all([
-          pb.collection("siswa").getFullList({
-            filter: `kelas_id = "${kelasData.id}"`,
-            sort: "nama_siswa",
-            requestKey: null,
-          }),
-          pb
-            .collection("kehadiran_manual")
-            .getFullList({
-              filter: `kelas_id = "${kelasData.id}"`,
-              requestKey: null,
-            })
-            .catch((err) => {
-              console.warn("kehadiran_manual tidak bisa dibaca:", err?.status);
-              return [];
-            }),
-        ]);
+        setKelas(res.kelas);
+        setSiswaList(res.siswaList);
+        setValues(res.values);
+        setSaved(res.saved);
+        setRecordIds(res.recordIds);
 
-        setSiswaList(siswaData);
-
-        const initValues = {};
-        const initIds = {};
-
-        siswaData.forEach((s) => {
-          const rec = kehadiranData.find((k) => k.siswa_id === s.id);
-          // Mapping UI ↔ DB:
-          //   UI alpha  ↔  DB `hadir`
-          initValues[s.id] = {
-            sakit: Number(rec?.sakit ?? 0),
-            izin: Number(rec?.izin ?? 0),
-            alpha: Number(rec?.hadir ?? 0),
-          };
-          if (rec) initIds[s.id] = rec.id;
-        });
-
-        setValues(initValues);
-        setSaved(JSON.parse(JSON.stringify(initValues)));
-        setRecordIds(initIds);
+        if (res.error) setError(res.error);
       } catch (e) {
         if (e?.status !== 404 && !e?.isAbort) {
           console.error(e);
@@ -148,16 +114,12 @@ export default function KehadiranManualPage() {
       if (rid) {
         tasksWithSiswaId.push({
           siswaId: s.id,
-          promise: pb
-            .collection("kehadiran_manual")
-            .update(rid, payload, { requestKey: null }),
+          promise: db.update("kehadiran_manual", rid, payload, { requestKey: null }),
         });
       } else {
         tasksWithSiswaId.push({
           siswaId: s.id,
-          promise: pb
-            .collection("kehadiran_manual")
-            .create(payload, { requestKey: null }),
+          promise: db.create("kehadiran_manual", payload, { requestKey: null }),
         });
       }
     }
