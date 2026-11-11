@@ -39,6 +39,7 @@ const emptyForm = {
   template_rapor: "akademik",
   jenis_ujian: "ahb",
   status_akses: "tutup",
+  akses_guru_rapor: false,
 };
 
 export default function ManajemenUjianPage() {
@@ -177,6 +178,7 @@ export default function ManajemenUjianPage() {
       template_rapor: u.template_rapor || "akademik",
       jenis_ujian: u.jenis_ujian || "ahb",
       status_akses: u.status_akses || "tutup",
+      akses_guru_rapor: !!u.akses_guru_rapor,
     });
     setShowForm(true);
   }
@@ -220,6 +222,7 @@ export default function ManajemenUjianPage() {
         template_rapor: form.template_rapor,
         jenis_ujian: form.jenis_ujian,
         status_akses: form.status_akses,
+        akses_guru_rapor: !!form.akses_guru_rapor,
       };
 
       if (editingId) {
@@ -523,6 +526,33 @@ export default function ManajemenUjianPage() {
                     </option>
                   ))}
                 </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-slate-500">
+                  Akses Preview Rapor Guru
+                </label>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setForm((f) => ({
+                      ...f,
+                      akses_guru_rapor: !f.akses_guru_rapor,
+                    }))
+                  }
+                  className={`mt-1.5 flex h-[42px] w-full items-center justify-between rounded-lg border px-3 text-sm transition ${
+                    form.akses_guru_rapor
+                      ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                      : "border-slate-300 bg-slate-50 text-slate-500"
+                  }`}
+                >
+                  <span>{form.akses_guru_rapor ? "Dibuka" : "Ditutup"}</span>
+                  <span
+                    className={`h-2.5 w-2.5 rounded-full ${
+                      form.akses_guru_rapor ? "bg-emerald-500" : "bg-slate-300"
+                    }`}
+                  />
+                </button>
               </div>
             </div>
 

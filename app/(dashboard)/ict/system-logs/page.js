@@ -2,11 +2,13 @@
 
 import {
   getSystemLogs,
+  getAllSystemLogs,
   getSystemLogCounts,
   getSystemLogUser,
 } from "@/actions/ict-system-logs.action";
 import { useState, useEffect, useCallback, useRef, Fragment } from "react";
 import { pb } from "@/lib/pocketbase";
+import { newWorkbook, addSheet, saveWorkbook } from "@/lib/excel-export";
 
 // =========================================================
 // Konstanta
@@ -478,6 +480,7 @@ export default function SystemLogsPage() {
     error: 0,
   });
   const [countsLoading, setCountsLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
 
   const totalPages = Math.max(1, Math.ceil(totalItems / PER_PAGE));
   const reqId = useRef(0);
@@ -546,6 +549,73 @@ export default function SystemLogsPage() {
   useEffect(() => {
     fetchCounts();
   }, [fetchCounts]);
+
+  // ── Export semua log (sesuai filter aktif) ke Excel ─────────────────────
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const filterParts = [];
+      if (activeFilter !== "all") filterParts.push(`type = "${activeFilter}"`);
+      const q = debouncedSearch.trim();
+      if (q) {
+        const e = escapeFilter(q);
+        filterParts.push(
+          `(aktivitas ~ "${e}" || endpoint ~ "${e}" || user_id.nama_lengkap ~ "${e}")`,
+        );
+      }
+
+      const res = await getAllSystemLogs({
+        sort: sortOrder,
+        filter: filterParts.join(" && ") || undefined,
+      });
+      if (res.error) {
+        console.error("Gagal export log:", res.error);
+        return;
+      }
+
+      const rows = res.logs.map((log) => {
+        const user = log.expand?.user_id;
+        const { full } = formatLogDate(log.created);
+        return {
+          waktu: full,
+          pengguna: user?.nama_lengkap || "-",
+          role:
+            user?.role ||
+            (user?.collectionName === "wali_murid" ? "wali murid" : "-"),
+          tipe: log.type || "",
+          aktivitas: log.aktivitas || log.msg || "",
+          endpoint: log.endpoint || "-",
+          status: log.status_code ?? "",
+          payload: log.payload_json ? JSON.stringify(log.payload_json) : "",
+        };
+      });
+
+      const wb = newWorkbook();
+      addSheet(
+        wb,
+        "System Log",
+        [
+          "waktu",
+          "pengguna",
+          "role",
+          "tipe",
+          "aktivitas",
+          "endpoint",
+          "status",
+          "payload",
+        ],
+        rows,
+      );
+      await saveWorkbook(
+        wb,
+        `system-log-${new Date().toISOString().slice(0, 10)}.xlsx`,
+      );
+    } catch (e) {
+      console.error("Gagal export log:", e);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   // Debounce pencarian (sekali jalan, tanpa fetch ganda)
   useEffect(() => {
@@ -752,6 +822,14 @@ export default function SystemLogsPage() {
               { value: "created", label: "Terlama" },
             ]}
           />
+          <button
+            type="button"
+            onClick={handleExport}
+            disabled={exporting}
+            className="inline-flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:opacity-60"
+          >
+            {exporting ? "Menyiapkan..." : "Download Excel"}
+          </button>
         </div>
       </div>
 

@@ -1,4 +1,5 @@
 import * as raporPrintRepository from "@/repositories/ict-rapor-print.repository";
+import * as tahfizhService from "@/services/tahfizh.service";
 
 // Logika bisnis halaman ICT > Rapor > Cek & Print Rapor.
 // Seluruh helper murni & agregasi (nilai akhir per mapel, penyusunan rapor
@@ -100,7 +101,11 @@ function average(arr) {
   return nums.reduce((a, b) => a + b, 0) / nums.length;
 }
 
-async function hitungNilaiAkhir(kelasData, siswaData) {
+async function hitungNilaiAkhir(kelasData, siswaData, tanggalMax) {
+  // Batas tanggal rapor: hanya nilai yang dibuat sampai tanggal itu.
+  const createdMax = tanggalMax
+    ? `${String(tanggalMax).slice(0, 10)} 23:59:59.999Z`
+    : null;
   const tingkat = String(kelasData.tingkat);
 
   const [mapelKhusus, mapelTingkat, plotingData, ujianData] = await Promise.all(
@@ -153,6 +158,7 @@ async function hitungNilaiAkhir(kelasData, siswaData) {
   if (ujianData.length > 0) {
     nilaiUjianData = await raporPrintRepository.findNilaiUjianByPengaturanIds(
       ujianData.map((u) => u.id),
+      createdMax,
     );
   }
   const ujianMap = {};
@@ -186,8 +192,8 @@ async function hitungNilaiAkhir(kelasData, siswaData) {
   lpAll.forEach((lp) => (lpToMapel[lp.id] = lp.mapel_id));
 
   const [nfData, nsData] = await Promise.all([
-    raporPrintRepository.findNilaiFormatifByKelas(kelasData.id),
-    raporPrintRepository.findNilaiSumatifByKelas(kelasData.id),
+    raporPrintRepository.findNilaiFormatifByKelas(kelasData.id, createdMax),
+    raporPrintRepository.findNilaiSumatifByKelas(kelasData.id, createdMax),
   ]);
 
   const formatifValues = {};
@@ -246,7 +252,8 @@ async function buildRapor(
   const ta = ujian.expand?.tahun_ajaran_id;
   const sid = siswa.id;
 
-  const [absenRes, ekskulRes, catatanRes, kehadiranRes] = await Promise.all([
+  const [absenRes, ekskulRes, catatanRes, kokurikulerRes, kehadiranRes] =
+    await Promise.all([
     ta?.Mulai && ta?.Akhir
       ? raporPrintRepository.findAbsensiBySiswaRange({
           siswaId: sid,
@@ -254,10 +261,21 @@ async function buildRapor(
           akhir: ta.Akhir,
         })
       : Promise.resolve([]),
-    raporPrintRepository.findNilaiEkskulBySiswa(sid),
+    raporPrintRepository.findNilaiEkskulBySiswa(
+      sid,
+      pengaturanRapor?.tanggal_rapor
+        ? `${String(pengaturanRapor.tanggal_rapor).slice(0, 10)} 23:59:59.999Z`
+        : null,
+    ),
     raporPrintRepository.findCatatanBySiswaKelas({
       siswaId: sid,
       kelasId: kelas.id,
+      ujianId: ujian.id,
+    }),
+    raporPrintRepository.findKokurikulerBySiswaKelas({
+      siswaId: sid,
+      kelasId: kelas.id,
+      ujianId: ujian.id,
     }),
     raporPrintRepository.findKehadiranManualBySiswaKelas({
       siswaId: sid,
@@ -310,13 +328,62 @@ async function buildRapor(
         .join("\n")
     : "-";
 
+  // Catatan kokurikuler (koleksi catatan_kokurikuler) untuk rapor ASAS.
+  const kokurikulerTeks = kokurikulerRes.length
+    ? kokurikulerRes
+        .map((c) =>
+          String(
+            c.catatan || c.isi || c.deskripsi || c.keterangan || c.pesan || "",
+          ).trim(),
+        )
+        .filter(Boolean)
+        .join("\n")
+    : "-";
+
   const waliUser = kelas?.expand?.walikelas_id;
   const waliKelasTtd =
     waliUser && waliUser.ttd
       ? await raporPrintRepository.getRecordFileUrl(waliUser, waliUser.ttd)
       : null;
 
+  // Data lembar tahfizh (template tahfiz / kombinasi).
+  let tahfizh = null;
+  if (
+    ujian?.template_rapor === "tahfiz" ||
+    ujian?.template_rapor === "kombinasi"
+  ) {
+    const ctx = await tahfizhService.getRaporTahfizhContext({
+      kelasId: kelas.id,
+    });
+    if (!ctx.error) {
+      const res = await tahfizhService.getRaporTahfizhSiswa({
+        kelasId: kelas.id,
+        tahunAjaranId: ctx.tahunAjaranId,
+        mapelTahfizhId: ctx.mapelTahfizh?.id,
+        tahsinMapelId: ctx.tahsinMapel?.id,
+        siswaId: sid,
+      });
+      if (!res.error) {
+        tahfizh = {
+          kelas: ctx.kelas,
+          data: res,
+          tahsinNama: ctx.tahsinMapel?.nama_mapel || "Tahsin",
+          jenisSemester: pengaturanRapor?.jenis_semester || "",
+          tanggalRapor: pengaturanRapor?.tanggal_rapor
+            ? new Date(pengaturanRapor.tanggal_rapor).toLocaleDateString(
+                "id-ID",
+                { day: "numeric", month: "long", year: "numeric" },
+              )
+            : "",
+          kepalaSekolah:
+            pengaturanRapor?.kepala_sekolah || SEKOLAH_DEFAULT.kepala_sekolah,
+        };
+      }
+    }
+  }
+
   return {
+    tahfizh,
     judul: judulRapor(ujian, ta?.semester),
     semester: ta?.semester,
     tahun_ajaran: pengaturanRapor?.tahun_ajaran || ta?.tahun,
@@ -331,6 +398,7 @@ async function buildRapor(
     kota: SEKOLAH_DEFAULT.kota,
     tanggal_rapor: pengaturanRapor?.tanggal_rapor || null,
     catatan: catatanTeks,
+    kokurikuler: kokurikulerTeks,
     sakit,
     izin,
     alpa,
@@ -374,11 +442,11 @@ export async function getRaporPrintBase() {
 
 // Data satu kelas: daftar siswa, capaian kompetensi, dan nilai akhir seluruh
 // mapel (hasil agregasi hitungNilaiAkhir).
-export async function getRaporPrintKelasData({ kelas }) {
+export async function getRaporPrintKelasData({ kelas, tanggalMax, ujianId }) {
   try {
     const [siswaData, capaianData] = await Promise.all([
       raporPrintRepository.findSiswaByKelas(kelas.id),
-      raporPrintRepository.findCapaianByKelas(kelas.id),
+      raporPrintRepository.findCapaianByKelas(kelas.id, ujianId),
     ]);
 
     const cMap = new Map();
@@ -387,7 +455,7 @@ export async function getRaporPrintKelasData({ kelas }) {
       if (mid) cMap.set(mid, c);
     });
 
-    const hasil = await hitungNilaiAkhir(kelas, siswaData);
+    const hasil = await hitungNilaiAkhir(kelas, siswaData, tanggalMax);
 
     return {
       siswaList: siswaData,

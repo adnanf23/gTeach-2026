@@ -13,6 +13,17 @@ export async function findLogs({ page, perPage, filter, sort, expand }) {
   });
 }
 
+// Ambil SEMUA log (tanpa paginasi) untuk keperluan export.
+export async function findAllLogs({ filter, sort, expand }) {
+  const pb = await getServerPb();
+  return pb.collection("system_log").getFullList({
+    expand,
+    sort,
+    filter,
+    requestKey: null,
+  });
+}
+
 // Menghitung jumlah log sesuai filter (perPage=1, hanya butuh totalItems).
 export async function countLogs({ filter, fields }) {
   const pb = await getServerPb();

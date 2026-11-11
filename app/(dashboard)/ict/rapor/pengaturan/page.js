@@ -51,6 +51,7 @@ const emptyForm = {
   alamat: "",
   tahun_ajaran: "",
   tanggal_rapor: "",
+  jenis_semester: "",
 };
 
 export default function PengaturanRaporPage() {
@@ -191,6 +192,7 @@ export default function PengaturanRaporPage() {
           ? `${selectedTahunAjaran.tahun} · Semester ${selectedTahunAjaran.semester}`
           : ""),
       tanggal_rapor: toDateInput(existing?.tanggal_rapor),
+      jenis_semester: existing?.jenis_semester || "",
     });
   }
 
@@ -213,6 +215,7 @@ export default function PengaturanRaporPage() {
         alamat: form.alamat.trim(),
         tahun_ajaran: form.tahun_ajaran.trim(),
         tanggal_rapor: form.tanggal_rapor || null,
+        jenis_semester: form.jenis_semester || "",
       };
 
       const existing = raporList.find(
@@ -475,6 +478,26 @@ export default function PengaturanRaporPage() {
                   Preview: {formatDate(form.tanggal_rapor)}
                 </p>
               )}
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-slate-500">
+                Semester (Ganjil/Genap)
+              </label>
+              <select
+                value={form.jenis_semester}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, jenis_semester: e.target.value }))
+                }
+                className="mt-1.5 w-full sm:w-64 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 outline-none focus:border-slate-500 focus:bg-white transition-colors"
+              >
+                <option value="">— Pilih —</option>
+                <option value="ganjil">Ganjil</option>
+                <option value="genap">Genap</option>
+              </select>
+              <p className="mt-1.5 text-xs text-slate-400">
+                Dipakai pada rapor tahfizh.
+              </p>
             </div>
 
             <div className="flex gap-2 justify-between pt-4 border-t border-slate-100">

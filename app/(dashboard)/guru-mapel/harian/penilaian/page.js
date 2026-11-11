@@ -26,6 +26,7 @@ import {
   UjianTable,
   RaporTable,
 } from "@/components/organism/table/penilaian-tables";
+import TahsinPanel from "@/components/organism/tahfizh/TahsinPanel";
 
 // ================================================================
 // KONFIGURASI
@@ -212,6 +213,14 @@ function isMapelKoding(mapel) {
       .trim()
       .toLowerCase() === "koding"
   );
+}
+// Mapel TAHSIN = kategori tahfizh dan namanya memuat "TAHSIN".
+function isMapelTahsin(mapel) {
+  const kategori = String(mapel?.kategori || "")
+    .trim()
+    .toLowerCase();
+  const nama = String(mapel?.nama_mapel || "").toUpperCase();
+  return kategori === "tahfizh" && nama.includes("TAHSIN");
 }
 // Rule generic: ujian koding hanya untuk mapel koding.
 // Kalau nanti admin menambah kategori lain, tambahkan cabang di sini.
@@ -498,6 +507,7 @@ export default function PenilaianGuruMapelPage() {
     () => firstOf(selectedPloting?.expand?.mapel_id) || null,
     [selectedPloting],
   );
+  const isTahsin = useMemo(() => isMapelTahsin(mapel), [mapel]);
 
   // Step 2: pilih kelas
   const [kelasOptions, setKelasOptions] = useState([]);
@@ -514,6 +524,17 @@ export default function PenilaianGuruMapelPage() {
   const [siswaList, setSiswaList] = useState([]);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [activeTab, setActiveTab] = useState("formatif");
+
+  // Tab default mengikuti jenis mapel (Tahsin punya 2 tab sendiri).
+  useEffect(() => {
+    if (isTahsin && !String(activeTab).startsWith("tahsin_")) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setActiveTab("tahsin_nilai");
+    } else if (!isTahsin && String(activeTab).startsWith("tahsin_")) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setActiveTab("formatif");
+    }
+  }, [isTahsin, activeTab]);
 
   // ================= PINDAH KELAS CEPAT =================
   const [quickOpen, setQuickOpen] = useState(false);
@@ -3465,6 +3486,11 @@ export default function PenilaianGuruMapelPage() {
     },
     { key: "rapor", label: "Nilai rapor" },
   ];
+  const TAHSIN_TABS = [
+    { key: "tahsin_nilai", label: "Penilaian" },
+    { key: "tahsin_catatan", label: "Catatan Tahsin" },
+  ];
+  const tabsForMapel = isTahsin ? TAHSIN_TABS : TABS;
 
   const scanStepIdx = SCAN_STEPS.findIndex((s) => s.key === scanStep);
 
@@ -4041,7 +4067,7 @@ export default function PenilaianGuruMapelPage() {
               role="tablist"
               className="inline-flex min-w-full gap-1 rounded-xl bg-slate-100 p-1 sm:min-w-0"
             >
-              {TABS.map((tab) => (
+              {tabsForMapel.map((tab) => (
                 <button
                   key={tab.key}
                   type="button"
@@ -4060,7 +4086,14 @@ export default function PenilaianGuruMapelPage() {
             </div>
           </div>
 
-          {loadingDetail ? (
+          {isTahsin ? (
+            <TahsinPanel
+              kelasId={selectedKelas?.id}
+              tahunAjaranId={selectedSemesterId}
+              siswaList={siswaList}
+              activeTab={activeTab}
+            />
+          ) : loadingDetail ? (
             <LoadingSkeleton />
           ) : (
             <>

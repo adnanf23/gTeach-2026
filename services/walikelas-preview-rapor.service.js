@@ -96,8 +96,12 @@ function average(arr) {
   return nums.reduce((a, b) => a + b, 0) / nums.length;
 }
 
-async function hitungNilaiAkhir(kelasData, siswaData) {
+async function hitungNilaiAkhir(kelasData, siswaData, tanggalMax) {
   const tingkat = String(kelasData.tingkat);
+  // Hanya nilai yang dibuat sampai tanggal rapor yang ikut dihitung.
+  const createdMax = tanggalMax
+    ? `${String(tanggalMax).slice(0, 10)} 23:59:59.999Z`
+    : null;
 
   const [mapelKhusus, mapelTingkat, plotingData, ujianData] = await Promise.all(
     [
@@ -150,6 +154,7 @@ async function hitungNilaiAkhir(kelasData, siswaData) {
     nilaiUjianData =
       await previewRaporRepository.findNilaiUjianByPengaturanIds(
         ujianData.map((u) => u.id),
+        createdMax,
       );
   }
   const ujianMap = {};
@@ -183,8 +188,8 @@ async function hitungNilaiAkhir(kelasData, siswaData) {
   lpAll.forEach((lp) => (lpToMapel[lp.id] = lp.mapel_id));
 
   const [nfData, nsData] = await Promise.all([
-    previewRaporRepository.findNilaiFormatifByKelas(kelasData.id),
-    previewRaporRepository.findNilaiSumatifByKelas(kelasData.id),
+    previewRaporRepository.findNilaiFormatifByKelas(kelasData.id, createdMax),
+    previewRaporRepository.findNilaiSumatifByKelas(kelasData.id, createdMax),
   ]);
 
   const formatifValues = {};
@@ -243,21 +248,36 @@ async function buildRapor(
   const ta = ujian.expand?.tahun_ajaran_id;
   const sid = siswa.id;
 
-  const [absenRes, ekskulRes, catatanRes, kehadiranRes] = await Promise.all([
-    ta?.Mulai && ta?.Akhir
-      ? previewRaporRepository.findAbsensiBySiswaRange({
-          siswaId: sid,
-          mulai: ta.Mulai,
-          akhir: ta.Akhir,
-        })
-      : Promise.resolve([]),
-    previewRaporRepository.findNilaiEkskulBySiswa(sid),
-    previewRaporRepository.findCatatanBySiswaKelas({ siswaId: sid, kelasId: kelas.id }),
-    previewRaporRepository.findKehadiranManualBySiswaKelas({
-      siswaId: sid,
-      kelasId: kelas.id,
-    }),
-  ]);
+  const [absenRes, ekskulRes, catatanRes, kokurikulerRes, kehadiranRes] =
+    await Promise.all([
+      ta?.Mulai && ta?.Akhir
+        ? previewRaporRepository.findAbsensiBySiswaRange({
+            siswaId: sid,
+            mulai: ta.Mulai,
+            akhir: ta.Akhir,
+          })
+        : Promise.resolve([]),
+      previewRaporRepository.findNilaiEkskulBySiswa(
+        sid,
+        pengaturanRapor?.tanggal_rapor
+          ? `${String(pengaturanRapor.tanggal_rapor).slice(0, 10)} 23:59:59.999Z`
+          : null,
+      ),
+      previewRaporRepository.findCatatanBySiswaKelas({
+        siswaId: sid,
+        kelasId: kelas.id,
+        ujianId: ujian.id,
+      }),
+      previewRaporRepository.findKokurikulerBySiswaKelas({
+        siswaId: sid,
+        kelasId: kelas.id,
+        ujianId: ujian.id,
+      }),
+      previewRaporRepository.findKehadiranManualBySiswaKelas({
+        siswaId: sid,
+        kelasId: kelas.id,
+      }),
+    ]);
 
   const nilai = mapelList
     .map((mapel) => {
@@ -304,6 +324,18 @@ async function buildRapor(
         .join("\n")
     : "-";
 
+  // Catatan kokurikuler (koleksi catatan_kokurikuler) untuk rapor ASAS.
+  const kokurikulerTeks = kokurikulerRes.length
+    ? kokurikulerRes
+        .map((c) =>
+          String(
+            c.catatan || c.isi || c.deskripsi || c.keterangan || c.pesan || "",
+          ).trim(),
+        )
+        .filter(Boolean)
+        .join("\n")
+    : "-";
+
   const waliUser = kelas?.expand?.walikelas_id;
   const waliKelasTtd =
     waliUser && waliUser.ttd
@@ -325,6 +357,7 @@ async function buildRapor(
     kota: SEKOLAH_DEFAULT.kota,
     tanggal_rapor: pengaturanRapor?.tanggal_rapor || null,
     catatan: catatanTeks,
+    kokurikuler: kokurikulerTeks,
     sakit,
     izin,
     alpa,
@@ -339,7 +372,7 @@ async function buildRapor(
 /* ───────────── layanan ───────────── */
 
 // Kelas + siswa + daftar periode rapor + nilai akhir seluruh mapel.
-export async function getPreviewRaporBase({ userId }) {
+export async function getPreviewRaporBase({ userId, tanggalMax, ujianId }) {
   let kelasData;
   try {
     kelasData =
@@ -354,7 +387,7 @@ export async function getPreviewRaporBase({ userId }) {
     const [siswaData, ujianData, capaianData] = await Promise.all([
       previewRaporRepository.findSiswaByKelas(kelasData.id),
       previewRaporRepository.findUjianAksesRapor(),
-      previewRaporRepository.findCapaianByKelas(kelasData.id),
+      previewRaporRepository.findCapaianByKelas(kelasData.id, ujianId),
     ]);
 
     const cMap = new Map();
@@ -363,7 +396,7 @@ export async function getPreviewRaporBase({ userId }) {
       if (mid) cMap.set(mid, c);
     });
 
-    const hasil = await hitungNilaiAkhir(kelasData, siswaData);
+    const hasil = await hitungNilaiAkhir(kelasData, siswaData, tanggalMax);
 
     const sorted = sortUjian(ujianData);
 

@@ -18,11 +18,11 @@ export async function findKelasDenganWali() {
   });
 }
 
-// Periode rapor yang dibuka (akses_rapor) beserta tahun ajarannya.
+// Periode rapor yang bisa dicetak (akses_rapor atau akses_guru_rapor) + tahun ajaran.
 export async function findUjianAksesRapor() {
   const pb = await getServerPb();
   return pb.collection("pengaturan_ujian").getFullList({
-    filter: `akses_rapor = true`,
+    filter: `akses_rapor = true || akses_guru_rapor = true`,
     expand: "tahun_ajaran_id",
     requestKey: null,
   });
@@ -37,10 +37,11 @@ export async function findSiswaByKelas(kelasId) {
   });
 }
 
-export async function findCapaianByKelas(kelasId) {
+export async function findCapaianByKelas(kelasId, ujianId) {
   const pb = await getServerPb();
   return pb.collection("capaian_kompetensi").getFullList({
-    filter: `kelas_id = "${kelasId}"`,
+    filter:
+      `kelas_id = "${kelasId}"` + (ujianId ? ` && ujian_id = "${ujianId}"` : ""),
     requestKey: null,
   });
 }
@@ -86,12 +87,18 @@ export async function findUjianBukaByKelasOrTingkat({ kelasId, tingkat }) {
   });
 }
 
-export async function findNilaiUjianByPengaturanIds(ujianIds) {
+// Filter `created` tidak didukung PocketBase -> disaring di kode.
+function sampaiTanggal(rows, createdMax) {
+  return createdMax ? rows.filter((r) => r.created <= createdMax) : rows;
+}
+
+export async function findNilaiUjianByPengaturanIds(ujianIds, createdMax) {
   const pb = await getServerPb();
-  return pb.collection("nilai_ujian").getFullList({
+  const rows = await pb.collection("nilai_ujian").getFullList({
     filter: ujianIds.map((id) => `pengaturan_ujian_id = "${id}"`).join(" || "),
     requestKey: null,
   });
+  return sampaiTanggal(rows, createdMax);
 }
 
 export async function findTpByMapelIds(mapelIds) {
@@ -110,20 +117,22 @@ export async function findLmByMapelIds(mapelIds) {
   });
 }
 
-export async function findNilaiFormatifByKelas(kelasId) {
+export async function findNilaiFormatifByKelas(kelasId, createdMax) {
   const pb = await getServerPb();
-  return pb.collection("nilai_formatif").getFullList({
+  const rows = await pb.collection("nilai_formatif").getFullList({
     filter: `kelas_id = "${kelasId}"`,
     requestKey: null,
   });
+  return sampaiTanggal(rows, createdMax);
 }
 
-export async function findNilaiSumatifByKelas(kelasId) {
+export async function findNilaiSumatifByKelas(kelasId, createdMax) {
   const pb = await getServerPb();
-  return pb.collection("nilai_sumatif").getFullList({
+  const rows = await pb.collection("nilai_sumatif").getFullList({
     filter: `kelas_id = "${kelasId}"`,
     requestKey: null,
   });
+  return sampaiTanggal(rows, createdMax);
 }
 
 /* ───────────── lampiran rapor per siswa ───────────── */
@@ -136,18 +145,32 @@ export async function findAbsensiBySiswaRange({ siswaId, mulai, akhir }) {
   });
 }
 
-export async function findNilaiEkskulBySiswa(siswaId) {
+export async function findNilaiEkskulBySiswa(siswaId, createdMax) {
   const pb = await getServerPb();
-  return pb.collection("nilai_ekskul").getFullList({
+  const rows = await pb.collection("nilai_ekskul").getFullList({
     filter: `siswa_id = "${siswaId}"`,
+    requestKey: null,
+  });
+  return sampaiTanggal(rows, createdMax);
+}
+
+export async function findCatatanBySiswaKelas({ siswaId, kelasId, ujianId }) {
+  const pb = await getServerPb();
+  return pb.collection("catatan_siswa").getFullList({
+    filter:
+      `siswa_id = "${siswaId}" && kelas_id = "${kelasId}"` +
+      (ujianId ? ` && ujian_id = "${ujianId}"` : ""),
+    sort: "-created",
     requestKey: null,
   });
 }
 
-export async function findCatatanBySiswaKelas({ siswaId, kelasId }) {
+export async function findKokurikulerBySiswaKelas({ siswaId, kelasId, ujianId }) {
   const pb = await getServerPb();
-  return pb.collection("catatan_siswa").getFullList({
-    filter: `siswa_id = "${siswaId}" && kelas_id = "${kelasId}"`,
+  return pb.collection("catatan_kokurikuler").getFullList({
+    filter:
+      `siswa_id = "${siswaId}" && kelas_id = "${kelasId}"` +
+      (ujianId ? ` && ujian_id = "${ujianId}"` : ""),
     sort: "-created",
     requestKey: null,
   });

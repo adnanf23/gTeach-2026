@@ -1,6 +1,7 @@
 import { describeError } from "@/lib/app-error";
 import * as recordRepository from "@/repositories/record.repository";
 import { findAllTahunAjaran } from "@/repositories/tahun-ajaran.repository";
+import { writeLog } from "@/services/systemLog.service";
 
 // Koleksi yang menyimpan tahun_ajaran_id (sesuai skema PocketBase).
 const TAHUN_AJARAN_COLLECTIONS = new Set([
@@ -41,6 +42,23 @@ async function withActiveTahunAjaran(collection, data) {
   return { ...data, tahun_ajaran_id: id };
 }
 
+// Catat aksi CRUD ke system_log. Kegagalan logging tidak boleh menggagalkan
+// operasi utama, dan menulis ke system_log sendiri tidak perlu dicatat lagi.
+async function logCrud(verb, collection, id) {
+  if (collection === "system_log") return;
+  try {
+    await writeLog({
+      type: verb === "menghapus" ? "warning" : "info",
+      msg: `${verb} data '${collection}'${id ? ` [${id}]` : ""}.`,
+      endpoint: "-",
+      statusCode: 200,
+      payload: { aksi: verb, collection, recordId: id || null },
+    });
+  } catch {
+    /* abaikan error logging */
+  }
+}
+
 // Service generik: membungkus tiap operasi agar mengembalikan { data, error }
 // (objek polos), sehingga action cukup meneruskan hasilnya.
 async function run(operation) {
@@ -72,14 +90,24 @@ export async function getFirstListItem(collection, filter, options) {
 export async function create(collection, data, options) {
   return run(async () => {
     const payload = await withActiveTahunAjaran(collection, data);
-    return recordRepository.insert(collection, payload, options);
+    const result = await recordRepository.insert(collection, payload, options);
+    await logCrud("menambah", collection, result?.id);
+    return result;
   });
 }
 
 export async function update(collection, id, data, options) {
-  return run(() => recordRepository.modify(collection, id, data, options));
+  return run(async () => {
+    const result = await recordRepository.modify(collection, id, data, options);
+    await logCrud("memperbarui", collection, id);
+    return result;
+  });
 }
 
 export async function remove(collection, id) {
-  return run(() => recordRepository.remove(collection, id));
+  return run(async () => {
+    const result = await recordRepository.remove(collection, id);
+    await logCrud("menghapus", collection, id);
+    return result;
+  });
 }

@@ -1,11 +1,19 @@
 import { describeError } from "@/lib/app-error";
 import * as userRepository from "@/repositories/user.repository";
+import { writeLog } from "@/services/systemLog.service";
 
 export async function updateProfileAsAdmin(userId, data) {
   if (!userId) return { success: false, error: "User ID tidak valid." };
 
   try {
     const updated = await userRepository.updateUserAsAdmin(userId, data);
+    await writeLog({
+      type: "info",
+      msg: `Memperbarui profil user [${userId}].`,
+      endpoint: "-",
+      statusCode: 200,
+      payload: { userId },
+    });
     return {
       success: true,
       record: {
@@ -38,6 +46,13 @@ export async function uploadTtdAsAdmin(userId, formData) {
 
   try {
     const updated = await userRepository.updateUserAsAdmin(userId, formData);
+    await writeLog({
+      type: "info",
+      msg: `Mengunggah TTD user [${userId}].`,
+      endpoint: "-",
+      statusCode: 200,
+      payload: { userId },
+    });
     return {
       success: true,
       record: {

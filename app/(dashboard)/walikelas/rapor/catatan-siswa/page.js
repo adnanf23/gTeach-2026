@@ -12,6 +12,7 @@ import * as XLSX from "xlsx-js-style";
 function emptyForm() {
   return {
     id: null,
+    ujian_id: "",
     siswa_id: "",
     kelas_id: "",
     catatan: "",
@@ -73,6 +74,25 @@ export default function CatatanSiswaPage() {
   const fileInputRef = useRef(null);
 
   const isEditing = Boolean(form.id);
+
+  // Daftar ujian (dropdown) + default ujian yang sedang dibuka.
+  const [ujianOptions, setUjianOptions] = useState([]);
+  const [defaultUjianId, setDefaultUjianId] = useState("");
+  useEffect(() => {
+    (async () => {
+      try {
+        const rows = await db.getFullList("pengaturan_ujian", {
+          sort: "-created",
+          requestKey: null,
+        });
+        setUjianOptions(rows);
+        const buka = rows.find((u) => u.status_akses === "buka");
+        if (buka) setDefaultUjianId(buka.id);
+      } catch (err) {
+        console.warn("[catatan] gagal memuat daftar ujian:", err?.message);
+      }
+    })();
+  }, []);
 
   // ------------------------------------------------------------------
   // Fetch
@@ -456,6 +476,7 @@ export default function CatatanSiswaPage() {
 
         try {
           const created = await db.create("catatan_siswa", {
+            ujian_id: defaultUjianId || "",
             siswa_id: siswa.id,
             kelas_id: kelasId,
             catatan,
@@ -504,7 +525,7 @@ export default function CatatanSiswaPage() {
       setToast("Tidak ada siswa di kelas yang kamu ampu.");
       return;
     }
-    setForm(emptyForm());
+    setForm({ ...emptyForm(), ujian_id: defaultUjianId });
     setFormError("");
     setModalOpen(true);
   };
@@ -512,6 +533,7 @@ export default function CatatanSiswaPage() {
   const openEdit = (c) => {
     setForm({
       id: c.id,
+      ujian_id: c.ujian_id || "",
       siswa_id: c.siswa_id || "",
       kelas_id: c.kelas_id || "",
       catatan: c.catatan || "",
@@ -557,6 +579,7 @@ export default function CatatanSiswaPage() {
     setSaving(true);
     try {
       const payload = {
+        ujian_id: form.ujian_id || "",
         siswa_id: form.siswa_id,
         kelas_id: form.kelas_id,
         catatan: form.catatan.trim(),
@@ -1169,6 +1192,24 @@ export default function CatatanSiswaPage() {
                 <span>{formError}</span>
               </div>
             )}
+
+            <Field label="Ujian">
+              <select
+                value={form.ujian_id}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, ujian_id: e.target.value }))
+                }
+                className="w-full rounded-xl border border-neutral-200 bg-neutral-50/60 px-3.5 py-2.5 text-sm transition focus:border-blue-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-100"
+              >
+                <option value="">Pilih ujian</option>
+                {ujianOptions.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.nama_ujian}
+                    {u.status_akses === "buka" ? " — buka" : ""}
+                  </option>
+                ))}
+              </select>
+            </Field>
 
             <Field label="Siswa">
               <select

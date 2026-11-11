@@ -25,6 +25,40 @@ import { pb } from "@/lib/pocketbase";
 
 // ✅ TTD kepala sekolah dari folder assets (static import Next.js)
 import ttdKepsekAsset from "@/assets/TTD BUNDA AHDA_STAMPEL_BOLD.png";
+import RaporTahfizhSheet from "@/components/organism/tahfizh/RaporTahfizhSheet";
+import {
+  getRaporTahfizhContext,
+  getRaporTahfizhSiswa,
+} from "@/actions/tahfizh.action";
+
+// Pilih lembar rapor sesuai template ujian (akademik / tahfiz / kombinasi).
+const RaporSheet = ({ siswa, rapor, ujian }) => {
+  const t = rapor?.tahfizh || null;
+  const tgl = (
+    <RaporTahfizhSheet
+      kelas={t?.kelas}
+      siswa={siswa}
+      rapor={t?.data}
+      tahsinNama={t?.tahsinNama}
+      jenisSemester={t?.jenisSemester}
+      tanggalRapor={t?.tanggalRapor}
+      kepalaSekolah={t?.kepalaSekolah}
+    />
+  );
+  if (ujian?.template_rapor === "tahfiz") return t ? tgl : null;
+  return (
+    <>
+      {rapor ? (
+        <RaporPreview
+          siswa={siswa}
+          rapor={rapor}
+          jenisUjian={ujian?.jenis_ujian}
+        />
+      ) : null}
+      {ujian?.template_rapor === "kombinasi" && t ? tgl : null}
+    </>
+  );
+};
 
 /* ───────────── konfigurasi ───────────── */
 const SEKOLAH_DEFAULT = {
@@ -276,7 +310,11 @@ function average(arr) {
   return nums.reduce((a, b) => a + b, 0) / nums.length;
 }
 
-async function hitungNilaiAkhir(kelasData, siswaData) {
+async function hitungNilaiAkhir(kelasData, siswaData, tanggalMax) {
+  // Batas tanggal rapor: hanya nilai yang dibuat sampai tanggal itu.
+  const createdMax = tanggalMax
+    ? `${String(tanggalMax).slice(0, 10)} 23:59:59.999Z`
+    : "";
   const tingkat = String(kelasData.tingkat);
 
   const [mapelKhusus, mapelTingkat, plotingData, ujianData] = await Promise.all(
@@ -342,6 +380,10 @@ async function hitungNilaiAkhir(kelasData, siswaData) {
         .join(" || "),
       requestKey: null,
     });
+    if (createdMax) {
+      // filter `created` disaring di kode (tidak didukung PB).
+      nilaiUjianData = nilaiUjianData.filter((r) => r.created <= createdMax);
+    }
   }
   const ujianMap = {};
   nilaiUjianData.forEach((n) => {
@@ -381,7 +423,7 @@ async function hitungNilaiAkhir(kelasData, siswaData) {
   const lpToMapel = {};
   lpAll.forEach((lp) => (lpToMapel[lp.id] = lp.mapel_id));
 
-  const [nfData, nsData] = await Promise.all([
+  let [nfData, nsData] = await Promise.all([
     db.getFullList("nilai_formatif", {
       filter: `kelas_id = "${kelasData.id}"`,
       requestKey: null,
@@ -391,6 +433,10 @@ async function hitungNilaiAkhir(kelasData, siswaData) {
       requestKey: null,
     }),
   ]);
+  if (createdMax) {
+    nfData = nfData.filter((r) => r.created <= createdMax);
+    nsData = nsData.filter((r) => r.created <= createdMax);
+  }
 
   const formatifValues = {};
   nfData.forEach((n) => {
@@ -448,27 +494,33 @@ async function buildRapor(
   const ta = ujian.expand?.tahun_ajaran_id;
   const sid = siswa.id;
 
-  const [absenRes, ekskulRes, catatanRes, kehadiranRes] = await Promise.all([
-    ta?.Mulai && ta?.Akhir
-      ? db.getFullList("absensi", {
-          filter: `siswa_id = "${sid}" && tanggal >= "${ta.Mulai}" && tanggal <= "${ta.Akhir}"`,
-          requestKey: null,
-        })
-      : Promise.resolve([]),
-    db.getFullList("nilai_ekskul", {
-      filter: `siswa_id = "${sid}"`,
-      requestKey: null,
-    }),
-    db.getFullList("catatan_siswa", {
-      filter: `siswa_id = "${sid}" && kelas_id = "${kelas.id}"`,
-      sort: "-created",
-      requestKey: null,
-    }),
-    db.getFullList("kehadiran_manual", {
-      filter: `siswa_id = "${sid}" && kelas_id = "${kelas.id}"`,
-      requestKey: null,
-    }),
-  ]);
+  const [absenRes, ekskulRes, catatanRes, kokurikulerRes, kehadiranRes] =
+    await Promise.all([
+      ta?.Mulai && ta?.Akhir
+        ? db.getFullList("absensi", {
+            filter: `siswa_id = "${sid}" && tanggal >= "${ta.Mulai}" && tanggal <= "${ta.Akhir}"`,
+            requestKey: null,
+          })
+        : Promise.resolve([]),
+      db.getFullList("nilai_ekskul", {
+        filter: `siswa_id = "${sid}"`,
+        requestKey: null,
+      }),
+      db.getFullList("catatan_siswa", {
+        filter: `siswa_id = "${sid}" && kelas_id = "${kelas.id}" && ujian_id = "${ujian.id}"`,
+        sort: "-created",
+        requestKey: null,
+      }),
+      db.getFullList("catatan_kokurikuler", {
+        filter: `siswa_id = "${sid}" && kelas_id = "${kelas.id}" && ujian_id = "${ujian.id}"`,
+        sort: "-created",
+        requestKey: null,
+      }),
+      db.getFullList("kehadiran_manual", {
+        filter: `siswa_id = "${sid}" && kelas_id = "${kelas.id}"`,
+        requestKey: null,
+      }),
+    ]);
 
   const nilai = mapelList
     .map((mapel) => {
@@ -515,11 +567,58 @@ async function buildRapor(
         .join("\n")
     : "-";
 
+  // Catatan kokurikuler (koleksi catatan_kokurikuler) untuk rapor ASAS.
+  const kokurikulerTeks = kokurikulerRes.length
+    ? kokurikulerRes
+        .map((c) =>
+          String(
+            c.catatan || c.isi || c.deskripsi || c.keterangan || c.pesan || "",
+          ).trim(),
+        )
+        .filter(Boolean)
+        .join("\n")
+    : "-";
+
   const waliUser = kelas?.expand?.walikelas_id;
   const waliKelasTtd =
     waliUser && waliUser.ttd ? pb.files.getURL(waliUser, waliUser.ttd) : null;
 
+  // Data lembar tahfizh (template tahfiz / kombinasi).
+  let tahfizh = null;
+  if (
+    ujian?.template_rapor === "tahfiz" ||
+    ujian?.template_rapor === "kombinasi"
+  ) {
+    const ctx = await getRaporTahfizhContext({ kelasId: kelas.id });
+    if (!ctx.error) {
+      const res = await getRaporTahfizhSiswa({
+        kelasId: kelas.id,
+        tahunAjaranId: ctx.tahunAjaranId,
+        mapelTahfizhId: ctx.mapelTahfizh?.id,
+        tahsinMapelId: ctx.tahsinMapel?.id,
+        siswaId: sid,
+      });
+      if (!res.error) {
+        tahfizh = {
+          kelas: ctx.kelas,
+          data: res,
+          tahsinNama: ctx.tahsinMapel?.nama_mapel || "Tahsin",
+          jenisSemester: pengaturanRapor?.jenis_semester || "",
+          tanggalRapor: pengaturanRapor?.tanggal_rapor
+            ? new Date(pengaturanRapor.tanggal_rapor).toLocaleDateString(
+                "id-ID",
+                { day: "numeric", month: "long", year: "numeric" },
+              )
+            : "",
+          kepalaSekolah:
+            pengaturanRapor?.kepala_sekolah || SEKOLAH_DEFAULT.kepala_sekolah,
+        };
+      }
+    }
+  }
+
   return {
+    tahfizh,
     judul: judulRapor(ujian, ta?.semester),
     semester: ta?.semester,
     tahun_ajaran: pengaturanRapor?.tahun_ajaran || ta?.tahun,
@@ -534,14 +633,22 @@ async function buildRapor(
     kota: SEKOLAH_DEFAULT.kota,
     tanggal_rapor: pengaturanRapor?.tanggal_rapor || null,
     catatan: catatanTeks,
+    kokurikuler: kokurikulerTeks,
     sakit,
     izin,
     alpa,
     nilai,
-    ekstrakurikuler: ekskulRes.map((e) => ({
-      nama: e.nama_ekskul,
-      keterangan: [e.predikat, e.catatan].filter(Boolean).join(" — ") || "-",
-    })),
+    ekstrakurikuler: ekskulRes
+      .filter(
+        (e) =>
+          !pengaturanRapor?.tanggal_rapor ||
+          e.created <=
+            `${String(pengaturanRapor.tanggal_rapor).slice(0, 10)} 23:59:59.999Z`,
+      )
+      .map((e) => ({
+        nama: e.nama_ekskul,
+        keterangan: [e.predikat, e.catatan].filter(Boolean).join(" — ") || "-",
+      })),
   };
 }
 
@@ -591,7 +698,8 @@ const NilaiTable = ({ rows, startIndex = 0, rowH }) => (
 );
 
 /* ───────────── preview rapor ───────────── */
-const RaporPreview = ({ siswa, rapor }) => {
+const RaporPreview = ({ siswa, rapor, jenisUjian }) => {
+  const isAsas = String(jenisUjian || "").trim().toLowerCase() === "asas";
   const nilai = toArray(rapor.nilai);
   const ekskul = toArray(rapor.ekstrakurikuler);
   const ekskulRows = ekskul.length
@@ -695,48 +803,82 @@ const RaporPreview = ({ siswa, rapor }) => {
           </tbody>
         </table>
 
-        <table className="rapor-table gap-top catatan-table">
-          <thead>
-            <tr>
-              <th>CATATAN</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td className="catatan">{rapor.catatan || "-"}</td>
-            </tr>
-          </tbody>
-        </table>
+        {!isAsas && (
+          <table className="rapor-table gap-top catatan-table">
+            <thead>
+              <tr>
+                <th>CATATAN</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td className="catatan">{rapor.catatan || "-"}</td>
+              </tr>
+            </tbody>
+          </table>
+        )}
 
-        <table className="rapor-table gap-top absen">
-          <colgroup>
-            <col style={{ width: "60%" }} />
-            <col style={{ width: "15%" }} />
-            <col style={{ width: "25%" }} />
-          </colgroup>
-          <thead>
-            <tr>
-              <th colSpan={3}>Ketidakhadiran</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr className="row-absen">
-              <td className="absen-label">Sakit</td>
-              <td className="absen-angka">{rapor.sakit ?? 0}</td>
-              <td className="absen-satuan">hari</td>
-            </tr>
-            <tr className="row-absen">
-              <td className="absen-label">Izin</td>
-              <td className="absen-angka">{rapor.izin ?? 0}</td>
-              <td className="absen-satuan">hari</td>
-            </tr>
-            <tr className="row-absen">
-              <td className="absen-label">Tanpa Keterangan</td>
-              <td className="absen-angka">{rapor.alpa ?? 0}</td>
-              <td className="absen-satuan">hari</td>
-            </tr>
-          </tbody>
-        </table>
+        {isAsas && (
+          <table className="rapor-table gap-top catatan-table">
+            <thead>
+              <tr>
+                <th>CATATAN KOKURIKULER</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td className="catatan">{rapor.kokurikuler || "-"}</td>
+              </tr>
+            </tbody>
+          </table>
+        )}
+
+        <div className={isAsas ? "absen-catatan-row" : ""}>
+          <table className="rapor-table gap-top absen">
+            <colgroup>
+              <col style={{ width: "60%" }} />
+              <col style={{ width: "15%" }} />
+              <col style={{ width: "25%" }} />
+            </colgroup>
+            <thead>
+              <tr>
+                <th colSpan={3}>Ketidakhadiran</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr className="row-absen">
+                <td className="absen-label">Sakit</td>
+                <td className="absen-angka">{rapor.sakit ?? 0}</td>
+                <td className="absen-satuan">hari</td>
+              </tr>
+              <tr className="row-absen">
+                <td className="absen-label">Izin</td>
+                <td className="absen-angka">{rapor.izin ?? 0}</td>
+                <td className="absen-satuan">hari</td>
+              </tr>
+              <tr className="row-absen">
+                <td className="absen-label">Tanpa Keterangan</td>
+                <td className="absen-angka">{rapor.alpa ?? 0}</td>
+                <td className="absen-satuan">hari</td>
+              </tr>
+            </tbody>
+          </table>
+
+          {isAsas && (
+            <table className="rapor-table gap-top catatan-table">
+              <thead>
+                <tr>
+                  <th>CATATAN</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td className="catatan">{rapor.catatan || "-"}</td>
+                </tr>
+              </tbody>
+            </table>
+          )}
+        </div>
 
         <div className="ttd">
           <div className="ttd-row">
@@ -759,7 +901,7 @@ const RaporPreview = ({ siswa, rapor }) => {
               <br />
               <p className="text-center ttd-jabatan">Wali Kelas,</p>
               <div className="ttd-space ttd-space-wali">
-                {rapor.wali_kelas_ttd && (
+                {!isAsas && rapor.wali_kelas_ttd && (
                   <img
                     src={rapor.wali_kelas_ttd}
                     alt=""
@@ -775,7 +917,7 @@ const RaporPreview = ({ siswa, rapor }) => {
             <p>Mengetahui,</p>
             <p>Kepala Sekolah</p>
             <div className="ttd-space">
-              {ttdKepsekSrc && (
+              {!isAsas && ttdKepsekSrc && (
                 <img
                   src={ttdKepsekSrc}
                   alt=""
@@ -1132,6 +1274,8 @@ export default function AdminRaporPage() {
   });
   const [loadedKelasId, setLoadedKelasId] = useState("");
   const [pengaturan, setPengaturan] = useState(null);
+  // Tanggal rapor (pengaturan_rapor) -> batas nilai yang dihitung.
+  const [baseTanggal, setBaseTanggal] = useState(null);
 
   // alur: "pilih" → "cek" → "ringkasan"
   const [phase, setPhase] = useState("pilih");
@@ -1165,7 +1309,7 @@ export default function AdminRaporPage() {
             requestKey: null,
           }),
           db.getFullList("pengaturan_ujian", {
-            filter: `akses_rapor = true`,
+            filter: `akses_rapor = true || akses_guru_rapor = true`,
             expand: "tahun_ajaran_id",
             requestKey: null,
           }),
@@ -1230,7 +1374,9 @@ export default function AdminRaporPage() {
             requestKey: null,
           }),
           db.getFullList("capaian_kompetensi", {
-            filter: `kelas_id = "${kelas.id}"`,
+            filter:
+              `kelas_id = "${kelas.id}"` +
+              (ujian?.id ? ` && ujian_id = "${ujian.id}"` : ""),
             requestKey: null,
           }),
         ]);
@@ -1241,7 +1387,7 @@ export default function AdminRaporPage() {
           if (mid) cMap.set(mid, c);
         });
 
-        const hasil = await hitungNilaiAkhir(kelas, siswaData);
+        const hasil = await hitungNilaiAkhir(kelas, siswaData, baseTanggal);
         if (cancelled) return;
         setNilaiAkhirData(hasil);
         setCapaianMap(cMap);
@@ -1260,7 +1406,7 @@ export default function AdminRaporPage() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kelasId, kelasList]);
+  }, [kelasId, kelasList, baseTanggal, ujian?.id]);
 
   /* ───── pengaturan_rapor per periode ───── */
   useEffect(() => {
@@ -1282,6 +1428,15 @@ export default function AdminRaporPage() {
       cancelled = true;
     };
   }, [ujian]);
+
+  // Batas tanggal rapor -> nilai dihitung ulang hanya sampai tanggal itu.
+  const tanggalRaporKey = pengaturan?.data?.tanggal_rapor || null;
+  useEffect(() => {
+    if (tanggalRaporKey) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setBaseTanggal(tanggalRaporKey);
+    }
+  }, [tanggalRaporKey]);
 
   const pengaturanSiap = !!ujian && pengaturan?.ujianId === ujian.id;
   const siap =
@@ -1444,65 +1599,31 @@ export default function AdminRaporPage() {
   const handleDownloadFull = async () => {
     if (!siap || proses) return;
     setError("");
-    setProses({ jenis: "pdf", done: 0, total });
+    setProses({ jenis: "print", done: 0, total });
     try {
-      const [{ toJpeg }, { jsPDF }] = await Promise.all([
-        import("html-to-image"),
-        import("jspdf"),
-      ]);
-
-      const pdf = new jsPDF({
-        unit: "mm",
-        format: [215, 330],
-        orientation: "portrait",
-        compress: true,
-      });
-
-      let halamanPertama = true;
-      let meta = null;
-
+      // Cetak lewat browser agar PDF berisi teks asli (bisa diseleksi).
+      const items = [];
       for (let i = 0; i < siswaList.length; i++) {
         const s = siswaList[i];
         const data = await bangun(s);
-        meta = meta || data;
-
-        // render satu siswa di stage tersembunyi, lalu tangkap tiap halaman
-        flushSync(() => setStage({ siswa: s, rapor: data }));
-        await tungguFrame();
-        await tungguGambar(stageRef.current);
-        if (document.fonts?.ready) {
-          try {
-            await document.fonts.ready;
-          } catch {
-            /* ignore */
-          }
-        }
-
-        const pages = Array.from(stageRef.current.querySelectorAll(".page"));
-        for (const p of pages) {
-          const url = await toJpeg(p, {
-            pixelRatio: 2,
-            quality: 0.95,
-            backgroundColor: "#ffffff",
-            cacheBust: true,
-          });
-          if (!halamanPertama) pdf.addPage([215, 330], "portrait");
-          halamanPertama = false;
-          pdf.addImage(url, "JPEG", 0, 0, 215, 330);
-        }
-        setProses({ jenis: "pdf", done: i + 1, total });
+        items.push({ siswa: s, rapor: data });
+        setProses({ jenis: "print", done: i + 1, total });
       }
-
-      pdf.save(
-        `Rapor_${slug(kelas?.nama_kelas)}_Semester_${meta?.semester ?? ""}_${slug(
-          meta?.tahun_ajaran,
-        )}.pdf`,
-      );
+      flushSync(() => setPrintItems(items));
+      await tungguFrame();
+      await tungguGambar(printRef.current);
+      if (document.fonts?.ready) {
+        try {
+          await document.fonts.ready;
+        } catch {
+          /* ignore */
+        }
+      }
+      window.print();
     } catch (e) {
       console.error(e);
-      setError("Gagal membuat PDF.");
+      setError("Gagal menyiapkan cetak.");
     } finally {
-      setStage(null);
       setProses(null);
     }
   };
@@ -1567,10 +1688,11 @@ export default function AdminRaporPage() {
         createPortal(
           <div ref={printRef} className="print-root">
             {printItems.map((it) => (
-              <RaporPreview
+              <RaporSheet
                 key={it.siswa.id}
                 siswa={it.siswa}
                 rapor={it.rapor}
+                ujian={ujian}
               />
             ))}
           </div>,
@@ -1579,7 +1701,7 @@ export default function AdminRaporPage() {
       {stage &&
         createPortal(
           <div ref={stageRef} className="rapor-stage">
-            <RaporPreview siswa={stage.siswa} rapor={stage.rapor} />
+            <RaporSheet siswa={stage.siswa} rapor={stage.rapor} ujian={ujian} />
           </div>,
           document.body,
         )}
@@ -1858,7 +1980,7 @@ export default function AdminRaporPage() {
                   style={{ transform: `scale(${fit.scale})` }}
                 >
                   <div className="rapor-paper">
-                    <RaporPreview siswa={siswa} rapor={rapor} />
+                    <RaporSheet siswa={siswa} rapor={rapor} ujian={ujian} />
                   </div>
                 </div>
               </div>
@@ -2284,6 +2406,17 @@ const CSS = `
     }
 
     /* ── Tanda tangan ── */
+    /* ✅ Ketidakhadiran berdampingan dengan Catatan (rapor ASAS) */
+    .absen-catatan-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0 16px;
+      align-items: stretch;
+    }
+    .absen-catatan-row > .absen,
+    .absen-catatan-row > .catatan-table {
+      height: 100%;
+    }
     .ttd {
       margin-top: 24px;
       text-align: center;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { getCurrentUser } from "@/lib/pocketbase";
 import {
   getBaseData,
@@ -50,11 +50,12 @@ function isHoliday(date, hariLiburList) {
 }
 
 // ------------------------------------------------------------------
-// Helper status — alpha & warning tetap merah
+// Helper status — alpha & warning tetap merah, sisanya hitam/abu
 // ------------------------------------------------------------------
 const STATUS_CONFIG = {
   hadir: {
     label: "Hadir",
+    hex: "#111827",
     dot: "bg-gray-900",
     text: "text-gray-900",
     bg: "bg-gray-100",
@@ -62,6 +63,7 @@ const STATUS_CONFIG = {
   },
   sakit: {
     label: "Sakit",
+    hex: "#4b5563",
     dot: "bg-gray-600",
     text: "text-gray-700",
     bg: "bg-gray-100",
@@ -69,6 +71,7 @@ const STATUS_CONFIG = {
   },
   izin: {
     label: "Izin",
+    hex: "#9ca3af",
     dot: "bg-gray-400",
     text: "text-gray-600",
     bg: "bg-gray-50",
@@ -77,6 +80,7 @@ const STATUS_CONFIG = {
   // WARNING — tetap merah
   alpha: {
     label: "Alpha",
+    hex: "#f43f5e",
     dot: "bg-rose-500",
     text: "text-rose-700",
     bg: "bg-rose-50",
@@ -84,6 +88,14 @@ const STATUS_CONFIG = {
   },
 };
 const STATUS_ORDER = ["hadir", "sakit", "izin", "alpha"];
+const BELUM_CONFIG = {
+  label: "Belum tercatat",
+  hex: "#e5e7eb",
+  dot: "bg-gray-200",
+  text: "text-gray-500",
+  bg: "bg-gray-50",
+  ring: "ring-gray-200",
+};
 
 function todayStr() {
   const d = new Date();
@@ -329,6 +341,8 @@ const ICONS = {
     "M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15",
   search: "M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z",
   chevron: "M19 9l-7 7-7-7",
+  left: "M15 19l-7-7 7-7",
+  right: "M9 5l7 7-7 7",
   check: "M5 13l4 4L19 7",
   alert:
     "M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z",
@@ -406,60 +420,220 @@ const CARD = "rounded-2xl bg-white ring-1 ring-slate-200/70";
 const INPUT =
   "w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-sm text-slate-800 outline-none transition focus:border-gray-900 focus:ring-4 focus:ring-gray-900/10";
 
-function PageHeader({
-  eyebrow,
-  title,
+// Angka yang naik halus saat nilainya berubah
+function useCountUp(target, duration = 600) {
+  const [val, setVal] = useState(0);
+  const fromRef = useRef(0);
+  useEffect(() => {
+    if (typeof target !== "number") return;
+    const from = fromRef.current;
+    const start = performance.now();
+    let raf;
+    const tick = (now) => {
+      const p = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - p, 3);
+      const cur = from + (target - from) * eased;
+      setVal(cur);
+      fromRef.current = cur;
+      if (p < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target, duration]);
+  return typeof target === "number" ? Math.round(val) : target;
+}
+
+function AnimatedNumber({ value }) {
+  const v = useCountUp(value);
+  return <>{v}</>;
+}
+
+// ------------------------------------------------------------------
+// Donut chart (SVG, tanpa library)
+// ------------------------------------------------------------------
+function DonutChart({
+  segments,
+  size = 200,
+  thickness = 24,
+  activeKey = null,
+  onHover,
+  onSelect,
+  children,
+}) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setMounted(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+
+  const total = segments.reduce((s, x) => s + x.value, 0);
+  const visible = segments.filter((s) => s.value > 0);
+  const grow = onSelect ? 6 : 0;
+  const r = (size - thickness - grow - 2) / 2;
+  const c = size / 2;
+  const C = 2 * Math.PI * r;
+  const gap = visible.length > 1 ? Math.min(3, C * 0.012) : 0;
+  let acc = 0;
+
+  return (
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <circle
+          cx={c}
+          cy={c}
+          r={r}
+          fill="none"
+          stroke="#f3f4f6"
+          strokeWidth={thickness}
+        />
+        <g transform={`rotate(-90 ${c} ${c})`}>
+          {total > 0 &&
+            visible.map((s) => {
+              const len = (s.value / total) * C;
+              const dash = mounted ? Math.max(len - gap, 0.001) : 0;
+              const offset = -acc;
+              acc += len;
+              const isActive = activeKey === s.key;
+              const dim = activeKey && !isActive;
+              return (
+                <circle
+                  key={s.key}
+                  cx={c}
+                  cy={c}
+                  r={r}
+                  fill="none"
+                  stroke={s.color}
+                  strokeWidth={isActive ? thickness + grow : thickness}
+                  strokeDasharray={`${dash} ${C - dash}`}
+                  strokeDashoffset={offset}
+                  opacity={dim ? 0.3 : 1}
+                  style={{
+                    transition:
+                      "stroke-dasharray .9s cubic-bezier(.22,1,.36,1), stroke-width .2s ease, opacity .2s ease",
+                    cursor: onSelect ? "pointer" : "default",
+                  }}
+                  onMouseEnter={() => onHover?.(s.key)}
+                  onMouseLeave={() => onHover?.(null)}
+                  onClick={() => onSelect?.(s.key)}
+                />
+              );
+            })}
+        </g>
+      </svg>
+      <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-center">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------
+// Hero header (hitam)
+// ------------------------------------------------------------------
+function HeroHeader({
   selectedDate,
   setSelectedDate,
   user,
   canExport,
   onExport,
   onRefresh,
+  persenLengkap,
+  lengkapText,
+  isWorkday,
+  loading,
 }) {
+  const shift = (n) => {
+    const d = parseISODate(selectedDate);
+    d.setDate(d.getDate() + n);
+    setSelectedDate(toISODate(d));
+  };
+  const isToday = selectedDate === todayStr();
+
+  const ctrl =
+    "flex h-9 items-center justify-center rounded-xl bg-white/10 text-white transition hover:bg-white/20 active:scale-95";
+
   return (
-    <header className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-widest text-gray-900">
-          {eyebrow}
-        </p>
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">
-          {title}
-        </h1>
-        <p className="mt-1 text-sm text-slate-500">
-          {formatTanggalID(selectedDate)}
-        </p>
+    <header className="mb-6 overflow-hidden rounded-3xl bg-gray-900 p-5 text-white sm:p-7">
+      <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <p className="text-xs font-medium text-white/50">Monitoring</p>
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
+            Absensi Siswa
+          </h1>
+          <p className="mt-1 text-sm text-white/60">
+            {formatTanggalID(selectedDate)}
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => shift(-1)}
+            title="Hari sebelumnya"
+            className={`${ctrl} w-9`}
+          >
+            <Icon name="left" />
+          </button>
+          <input
+            type="date"
+            value={selectedDate}
+            onChange={(e) => e.target.value && setSelectedDate(e.target.value)}
+            className="h-9 rounded-xl bg-white/10 px-3 text-sm text-white outline-none transition [color-scheme:dark] hover:bg-white/20 focus:ring-2 focus:ring-white/40"
+          />
+          <button
+            onClick={() => shift(1)}
+            title="Hari berikutnya"
+            className={`${ctrl} w-9`}
+          >
+            <Icon name="right" />
+          </button>
+          <button
+            onClick={() => setSelectedDate(todayStr())}
+            disabled={isToday}
+            className={`${ctrl} px-3 text-sm font-medium disabled:opacity-40`}
+          >
+            Hari ini
+          </button>
+          <button
+            onClick={onRefresh}
+            title="Segarkan"
+            className={`${ctrl} w-9`}
+          >
+            <Icon name="refresh" />
+          </button>
+          {canExport && (
+            <button
+              onClick={onExport}
+              className="flex h-9 items-center gap-2 rounded-xl bg-white px-4 text-sm font-medium text-gray-900 transition hover:bg-gray-200 active:scale-95"
+            >
+              <Icon name="download" />
+              Export
+            </button>
+          )}
+          <div className="flex h-9 items-center gap-2 rounded-xl bg-white/10 pl-1 pr-3">
+            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-white text-[11px] font-semibold text-gray-900">
+              {initials(user?.nama_lengkap || "G")}
+            </div>
+            <span className="max-w-[110px] truncate text-xs font-medium">
+              {user?.nama_lengkap || "Guru"}
+            </span>
+          </div>
+        </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <input
-          type="date"
-          value={selectedDate}
-          onChange={(e) => setSelectedDate(e.target.value)}
-          className="rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-sm text-slate-700 outline-none transition focus:border-gray-900 focus:ring-4 focus:ring-gray-900/10"
-        />
-        <button
-          onClick={onRefresh}
-          title="Segarkan"
-          className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50 hover:text-slate-800"
-        >
-          <Icon name="refresh" />
-        </button>
-        {canExport && (
-          <button
-            onClick={onExport}
-            className="flex items-center gap-2 rounded-xl bg-gray-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-black"
-          >
-            <Icon name="download" />
-            Export
-          </button>
-        )}
-        <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white py-1 pl-1 pr-3">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gray-900 text-[11px] font-semibold text-white">
-            {initials(user?.nama_lengkap || "G")}
-          </div>
-          <span className="max-w-[110px] truncate text-xs font-medium text-slate-700">
-            {user?.nama_lengkap || "Guru"}
+      <div className="mt-6">
+        <div className="mb-2 flex items-end justify-between gap-3 text-sm">
+          <span className="text-white/60">
+            {isWorkday ? "Kelengkapan input absensi" : "Bukan hari kerja"}
           </span>
+          <span className="font-semibold">
+            {loading ? "…" : isWorkday ? lengkapText : "—"}
+          </span>
+        </div>
+        <div className="h-2 w-full overflow-hidden rounded-full bg-white/15">
+          <div
+            className="h-full rounded-full bg-white transition-all duration-700"
+            style={{ width: `${isWorkday ? persenLengkap : 0}%` }}
+          />
         </div>
       </div>
     </header>
@@ -480,11 +654,9 @@ function Banner({ tone, icon, title, children }) {
       <div className="min-w-0 flex-1">
         <p className={`text-sm font-semibold ${t.text}`}>{title}</p>
         {children && (
-          <p
-            className={`mt-0.5 break-words text-xs leading-relaxed ${t.text} opacity-80`}
-          >
+          <div className={`mt-1 break-words text-xs leading-relaxed ${t.text}`}>
             {children}
-          </p>
+          </div>
         )}
       </div>
     </div>
@@ -500,10 +672,27 @@ function LoadingState({ label }) {
   );
 }
 
-function StatCard({ label, value, sub, icon, tone = "slate", progress }) {
+function StatCard({
+  label,
+  value,
+  sub,
+  icon,
+  tone = "slate",
+  progress,
+  onClick,
+  suffix = "",
+}) {
   const t = TONES[tone];
+  const Tag = onClick ? "button" : "div";
   return (
-    <div className={`${CARD} p-4 sm:p-5`}>
+    <Tag
+      onClick={onClick}
+      className={`${CARD} p-4 text-left sm:p-5 ${
+        onClick
+          ? "transition hover:-translate-y-0.5 hover:ring-gray-900/40 hover:shadow-md active:translate-y-0"
+          : ""
+      }`}
+    >
       <div className="flex items-center justify-between">
         <p className="text-xs font-medium text-slate-500">{label}</p>
         <span
@@ -513,18 +702,19 @@ function StatCard({ label, value, sub, icon, tone = "slate", progress }) {
         </span>
       </div>
       <p className="mt-3 text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">
-        {value}
+        {typeof value === "number" ? <AnimatedNumber value={value} /> : value}
+        {typeof value === "number" && suffix}
       </p>
       {typeof progress === "number" && (
         <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
           <div
-            className={`h-full rounded-full ${t.bar} transition-all`}
+            className={`h-full rounded-full ${t.bar} transition-all duration-700`}
             style={{ width: `${Math.min(100, progress)}%` }}
           />
         </div>
       )}
       {sub && <p className="mt-2 text-xs text-slate-400">{sub}</p>}
-    </div>
+    </Tag>
   );
 }
 
@@ -552,9 +742,9 @@ function StatusListCard({
         </div>
         <button
           onClick={onLihatSemua}
-          className="text-xs font-medium text-gray-900 hover:text-black"
+          className="text-xs font-medium text-gray-900 hover:underline"
         >
-          Lihat semua →
+          Lihat semua
         </button>
       </header>
 
@@ -565,30 +755,30 @@ function StatusListCard({
       ) : (
         <ul className="divide-y divide-slate-100">
           {kelasArr.slice(0, 4).map((k) => (
-            <li
-              key={k.id}
-              className="flex items-center justify-between gap-3 py-2.5"
-            >
-              <div className="flex min-w-0 items-center gap-3">
-                <span
-                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[11px] font-semibold ${t.soft} ${t.text}`}
-                >
-                  {k.nama_kelas?.slice(0, 2).toUpperCase()}
-                </span>
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-slate-800">
-                    {k.nama_kelas}
-                  </p>
-                  <p className="text-xs text-slate-400">
-                    {siswaPerKelas[k.id]?.length || 0} siswa
-                  </p>
-                </div>
-              </div>
+            <li key={k.id}>
               <button
                 onClick={() => onLihatDetail(k.id)}
-                className="shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
+                className="group flex w-full items-center justify-between gap-3 rounded-lg px-1 py-2.5 text-left transition hover:bg-slate-50"
               >
-                Detail
+                <div className="flex min-w-0 items-center gap-3">
+                  <span
+                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[11px] font-semibold ${t.soft} ${t.text}`}
+                  >
+                    {k.nama_kelas?.slice(0, 2).toUpperCase()}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-slate-800">
+                      {k.nama_kelas}
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      {siswaPerKelas[k.id]?.length || 0} siswa
+                    </p>
+                  </div>
+                </div>
+                <Icon
+                  name="right"
+                  className="h-4 w-4 shrink-0 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-gray-900"
+                />
               </button>
             </li>
           ))}
@@ -608,46 +798,98 @@ function StatusListCard({
   );
 }
 
-function RankingCard({ title, subtitle, data, tone }) {
-  const t = TONES[tone];
+function RankingCard({ data, avg, onPick, loading }) {
+  const [tab, setTab] = useState("terbaik");
+  const [showAll, setShowAll] = useState(false);
+
+  const sorted = tab === "terbaik" ? data : [...data].reverse();
+  const rows = showAll ? sorted : sorted.slice(0, 5);
+  const barClass = tab === "terbaik" ? "bg-gray-900" : "bg-rose-500";
+  const textClass = tab === "terbaik" ? "text-gray-900" : "text-rose-700";
+
   return (
     <section className={`${CARD} p-4 sm:p-5`}>
-      <h3 className="text-sm font-semibold text-slate-800">{title}</h3>
-      <p className="mb-4 text-xs text-slate-400">{subtitle}</p>
-      {data.length === 0 ? (
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-800">
+            Ranking Kehadiran
+          </h3>
+          <p className="text-xs text-slate-400">
+            30 hari terakhir · rata-rata {avg.toFixed(1)}%
+          </p>
+        </div>
+        <div className="flex gap-1 rounded-xl bg-slate-100 p-1">
+          {[
+            ["terbaik", "Terbaik"],
+            ["terendah", "Terendah"],
+          ].map(([k, l]) => (
+            <button
+              key={k}
+              onClick={() => setTab(k)}
+              className={`rounded-lg px-3 py-1 text-xs font-medium transition ${
+                tab === k
+                  ? "bg-gray-900 text-white shadow-sm"
+                  : "text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              {l}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {loading ? (
+        <p className="py-8 text-center text-sm text-slate-400">Memuat…</p>
+      ) : rows.length === 0 ? (
         <p className="py-8 text-center text-sm text-slate-400">
           Belum ada data.
         </p>
       ) : (
-        <ul className="space-y-3.5">
-          {data.map(({ kelas, rate, display }, i) => (
+        <ul className="space-y-1">
+          {rows.map(({ kelas, rate, display }, i) => (
             <li key={kelas.id}>
-              <div className="mb-1.5 flex items-center justify-between gap-2 text-xs">
-                <span className="flex min-w-0 items-center gap-2 font-medium text-slate-700">
-                  <span
-                    className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[10px] font-bold ${
-                      i < 3
-                        ? "bg-gray-900 text-white"
-                        : "bg-slate-100 text-slate-500"
-                    }`}
-                  >
-                    {i + 1}
+              <button
+                onClick={() => onPick(kelas.id)}
+                className="group w-full rounded-xl px-2 py-2 text-left transition hover:bg-slate-50"
+              >
+                <div className="mb-1.5 flex items-center justify-between gap-2 text-xs">
+                  <span className="flex min-w-0 items-center gap-2 font-medium text-slate-700">
+                    <span
+                      className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[10px] font-bold ${
+                        i < 3
+                          ? "bg-gray-900 text-white"
+                          : "bg-slate-100 text-slate-500"
+                      }`}
+                    >
+                      {i + 1}
+                    </span>
+                    <span className="truncate">{kelas.nama_kelas}</span>
                   </span>
-                  <span className="truncate">{kelas.nama_kelas}</span>
-                </span>
-                <span className={`shrink-0 font-semibold ${t.text}`}>
-                  {display ?? `${rate.toFixed(1)}%`}
-                </span>
-              </div>
-              <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
-                <div
-                  className={`h-full rounded-full ${t.bar}`}
-                  style={{ width: `${Math.min(100, rate)}%` }}
-                />
-              </div>
+                  <span className={`shrink-0 font-semibold ${textClass}`}>
+                    {display ?? `${rate.toFixed(1)}%`}
+                  </span>
+                </div>
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+                  <div
+                    className={`h-full rounded-full ${barClass} transition-all duration-700`}
+                    style={{ width: `${Math.min(100, rate)}%` }}
+                  />
+                </div>
+              </button>
             </li>
           ))}
         </ul>
+      )}
+
+      {sorted.length > 5 && (
+        <button
+          onClick={() => setShowAll((v) => !v)}
+          className="mt-3 w-full rounded-xl py-2 text-xs font-medium text-slate-500 transition hover:bg-slate-50 hover:text-gray-900"
+        >
+          {showAll
+            ? "Tampilkan 5 teratas"
+            : `Tampilkan semua (${sorted.length})`}
+        </button>
       )}
     </section>
   );
@@ -829,6 +1071,234 @@ function ExportModal({
 }
 
 // ------------------------------------------------------------------
+// Donut: ringkasan status siswa pada tanggal terpilih
+// ------------------------------------------------------------------
+function StatusDonutCard({
+  totals,
+  belum,
+  totalSiswa,
+  isWorkday,
+  isWeekend,
+  loading,
+  activeStatus,
+  onSelect,
+}) {
+  const [hover, setHover] = useState(null);
+
+  const segments = [
+    ...STATUS_ORDER.map((k) => ({
+      key: k,
+      label: STATUS_CONFIG[k].label,
+      value: totals[k],
+      color: STATUS_CONFIG[k].hex,
+    })),
+    {
+      key: "belum",
+      label: BELUM_CONFIG.label,
+      value: belum,
+      color: BELUM_CONFIG.hex,
+    },
+  ];
+
+  const tercatat = STATUS_ORDER.reduce((s, k) => s + totals[k], 0);
+  const focusKey = hover || activeStatus;
+  const focus = segments.find((s) => s.key === focusKey);
+  const totalAll = segments.reduce((s, x) => s + x.value, 0);
+  const pct = (v) => (totalAll ? Math.round((v / totalAll) * 100) : 0);
+
+  const centerBig = !isWorkday
+    ? "Libur"
+    : loading
+      ? "…"
+      : focus
+        ? `${pct(focus.value)}%`
+        : `${pct(totals.hadir)}%`;
+  const centerSmall = !isWorkday
+    ? isWeekend
+      ? "Akhir pekan"
+      : "Hari libur"
+    : focus
+      ? `${focus.label} · ${focus.value}`
+      : "Hadir";
+
+  return (
+    <section className={`${CARD} p-4 sm:p-5 lg:col-span-2`}>
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-800">
+            Kehadiran Siswa
+          </h3>
+          <p className="text-xs text-slate-400">
+            Klik bagian donut atau legenda untuk memfilter daftar siswa.
+          </p>
+        </div>
+        {activeStatus && (
+          <button
+            onClick={() => onSelect(null)}
+            className="flex items-center gap-1 rounded-full bg-gray-900 px-3 py-1 text-xs font-medium text-white transition hover:bg-black"
+          >
+            Reset filter
+            <Icon name="x" className="h-3 w-3" />
+          </button>
+        )}
+      </div>
+
+      <div className="flex flex-col items-center gap-6 sm:flex-row sm:gap-8">
+        <div className={loading ? "animate-pulse" : ""}>
+          <DonutChart
+            segments={isWorkday && !loading ? segments : []}
+            size={210}
+            thickness={26}
+            activeKey={focusKey}
+            onHover={setHover}
+            onSelect={
+              isWorkday
+                ? (k) => onSelect(activeStatus === k ? null : k)
+                : undefined
+            }
+          >
+            <div>
+              <p className="text-3xl font-semibold tracking-tight text-slate-900">
+                {centerBig}
+              </p>
+              <p className="mt-0.5 text-xs text-slate-500">{centerSmall}</p>
+            </div>
+          </DonutChart>
+        </div>
+
+        <ul className="w-full flex-1 space-y-1.5">
+          {segments.map((s) => {
+            const active = activeStatus === s.key;
+            return (
+              <li key={s.key}>
+                <button
+                  disabled={!isWorkday}
+                  onClick={() => onSelect(active ? null : s.key)}
+                  onMouseEnter={() => setHover(s.key)}
+                  onMouseLeave={() => setHover(null)}
+                  className={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm transition disabled:opacity-50 ${
+                    active
+                      ? "bg-gray-900 text-white"
+                      : "text-slate-700 hover:bg-slate-50"
+                  }`}
+                >
+                  <span className="flex items-center gap-2.5">
+                    <span
+                      className="h-2.5 w-2.5 rounded-full ring-1 ring-black/10"
+                      style={{ background: s.color }}
+                    />
+                    {s.label}
+                  </span>
+                  <span className="flex items-baseline gap-2">
+                    <span className="font-semibold tabular-nums">
+                      {isWorkday ? s.value : 0}
+                    </span>
+                    <span
+                      className={`w-9 text-right text-xs tabular-nums ${
+                        active ? "text-white/60" : "text-slate-400"
+                      }`}
+                    >
+                      {isWorkday ? `${pct(s.value)}%` : "—"}
+                    </span>
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+          <li className="px-3 pt-2 text-xs text-slate-400">
+            {isWorkday
+              ? `${tercatat} dari ${totalSiswa} siswa sudah tercatat`
+              : "Tidak ada absensi pada hari ini."}
+          </li>
+        </ul>
+      </div>
+    </section>
+  );
+}
+
+// ------------------------------------------------------------------
+// Donut: kelengkapan input per kelas
+// ------------------------------------------------------------------
+function KelengkapanDonutCard({
+  sudah,
+  belum,
+  isWorkday,
+  loading,
+  activeFilter,
+  onSelect,
+}) {
+  const [hover, setHover] = useState(null);
+  const total = sudah + belum;
+  const segments = [
+    { key: "sudah", label: "Lengkap", value: sudah, color: "#111827" },
+    { key: "belum", label: "Belum lengkap", value: belum, color: "#f43f5e" },
+  ];
+  const focusKey = hover || (activeFilter !== "semua" ? activeFilter : null);
+  const pct = total ? Math.round((sudah / total) * 100) : 0;
+
+  return (
+    <section className={`${CARD} flex flex-col p-4 sm:p-5`}>
+      <h3 className="text-sm font-semibold text-slate-800">
+        Kelengkapan Input
+      </h3>
+      <p className="mb-4 text-xs text-slate-400">Jumlah kelas hari ini</p>
+
+      <div className="flex flex-1 flex-col items-center justify-center gap-4">
+        <div className={loading ? "animate-pulse" : ""}>
+          <DonutChart
+            segments={isWorkday && !loading ? segments : []}
+            size={150}
+            thickness={20}
+            activeKey={focusKey}
+            onHover={setHover}
+            onSelect={
+              isWorkday
+                ? (k) => onSelect(activeFilter === k ? "semua" : k)
+                : undefined
+            }
+          >
+            <div>
+              <p className="text-2xl font-semibold text-slate-900">
+                {!isWorkday ? "—" : loading ? "…" : `${pct}%`}
+              </p>
+              <p className="text-[11px] text-slate-500">lengkap</p>
+            </div>
+          </DonutChart>
+        </div>
+
+        <div className="flex w-full gap-2">
+          {segments.map((s) => (
+            <button
+              key={s.key}
+              disabled={!isWorkday}
+              onClick={() => onSelect(activeFilter === s.key ? "semua" : s.key)}
+              onMouseEnter={() => setHover(s.key)}
+              onMouseLeave={() => setHover(null)}
+              className={`flex-1 rounded-xl px-3 py-2 text-left transition disabled:opacity-50 ${
+                activeFilter === s.key
+                  ? "bg-gray-900 text-white"
+                  : "bg-slate-50 text-slate-700 hover:bg-slate-100"
+              }`}
+            >
+              <span className="flex items-center gap-1.5 text-[11px]">
+                <span
+                  className="h-2 w-2 rounded-full"
+                  style={{ background: s.color }}
+                />
+                {s.label}
+              </span>
+              <span className="mt-0.5 block text-lg font-semibold tabular-nums">
+                {isWorkday ? s.value : 0}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ------------------------------------------------------------------
 // Toolbar
 // ------------------------------------------------------------------
 function Toolbar({
@@ -842,15 +1312,26 @@ function Toolbar({
   filterKelas,
   setFilterKelas,
   kelasList,
+  siswaStatus,
+  setSiswaStatus,
+  siswaStatusCounts,
+  onExpandAll,
+  onCollapseAll,
+  disabledStatus,
 }) {
   const segments = [
     { key: "semua", label: "Semua" },
     { key: "sudah", label: "Lengkap" },
     { key: "belum", label: "Belum lengkap" },
   ];
+  const chips = [
+    { key: "semua", label: "Semua status" },
+    ...STATUS_ORDER.map((k) => ({ key: k, label: STATUS_CONFIG[k].label })),
+    { key: "belum", label: "Belum tercatat" },
+  ];
 
   return (
-    <div className={`${CARD} p-3 sm:p-4`}>
+    <div className={`${CARD} space-y-3 p-3 sm:p-4`}>
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
         <h2 className="text-base font-semibold text-slate-900 lg:mr-auto">
           {title}
@@ -864,8 +1345,16 @@ function Toolbar({
             value={searchValue}
             onChange={(e) => setSearchValue(e.target.value)}
             placeholder={searchPlaceholder}
-            className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm outline-none transition focus:border-gray-900 focus:bg-white focus:ring-4 focus:ring-gray-900/10"
+            className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-9 text-sm outline-none transition focus:border-gray-900 focus:bg-white focus:ring-4 focus:ring-gray-900/10"
           />
+          {searchValue && (
+            <button
+              onClick={() => setSearchValue("")}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+            >
+              <Icon name="x" className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
 
         <select
@@ -882,21 +1371,68 @@ function Toolbar({
         </select>
       </div>
 
-      <div className="mt-3 flex gap-1 rounded-xl bg-slate-100 p-1">
+      <div className="flex gap-1 rounded-xl bg-slate-100 p-1">
         {segments.map((s) => (
           <button
             key={s.key}
             onClick={() => setFilterStatus(s.key)}
             className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-medium transition ${
               filterStatus === s.key
-                ? "bg-white text-slate-900 shadow-sm"
+                ? "bg-gray-900 text-white shadow-sm"
                 : "text-slate-500 hover:text-slate-800"
             }`}
           >
             {s.label}{" "}
-            <span className="text-slate-400">({statusCounts[s.key]})</span>
+            <span
+              className={
+                filterStatus === s.key ? "text-white/60" : "text-slate-400"
+              }
+            >
+              ({statusCounts[s.key]})
+            </span>
           </button>
         ))}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        {chips.map((c) => {
+          const active = siswaStatus === c.key;
+          return (
+            <button
+              key={c.key}
+              disabled={disabledStatus}
+              onClick={() => setSiswaStatus(c.key)}
+              className={`rounded-full px-3 py-1 text-xs font-medium ring-1 transition disabled:opacity-40 ${
+                active
+                  ? "bg-gray-900 text-white ring-gray-900"
+                  : "bg-white text-slate-600 ring-slate-200 hover:ring-gray-900/40"
+              }`}
+            >
+              {c.label}
+              {c.key !== "semua" && (
+                <span
+                  className={`ml-1.5 ${active ? "text-white/60" : "text-slate-400"}`}
+                >
+                  {siswaStatusCounts[c.key] ?? 0}
+                </span>
+              )}
+            </button>
+          );
+        })}
+        <span className="ml-auto flex gap-1">
+          <button
+            onClick={onExpandAll}
+            className="rounded-lg px-2.5 py-1 text-xs font-medium text-slate-500 transition hover:bg-slate-100 hover:text-gray-900"
+          >
+            Buka semua
+          </button>
+          <button
+            onClick={onCollapseAll}
+            className="rounded-lg px-2.5 py-1 text-xs font-medium text-slate-500 transition hover:bg-slate-100 hover:text-gray-900"
+          >
+            Tutup semua
+          </button>
+        </span>
       </div>
     </div>
   );
@@ -913,6 +1449,7 @@ function AbsensiContent({
   totalSiswa,
   hariLiburList,
   hariEfektif30,
+  onSummary,
 }) {
   const [statistikKelas, setStatistikKelas] = useState([]);
   const [absensiPerKelas, setAbsensiPerKelas] = useState({});
@@ -920,9 +1457,13 @@ function AbsensiContent({
   const [loadingRange, setLoadingRange] = useState(true);
   const [loadingTanggal, setLoadingTanggal] = useState(false);
 
+  // ← tambahan: belum siap sampai kedua fetch pertama selesai
+  const [initialReady, setInitialReady] = useState(false);
+
   const [expandedKelas, setExpandedKelas] = useState(() => new Set());
   const [filterKelas, setFilterKelas] = useState("semua");
   const [filterStatus, setFilterStatus] = useState("semua");
+  const [siswaStatus, setSiswaStatus] = useState("semua");
   const [searchSiswa, setSearchSiswa] = useState("");
 
   const selectedDateObj = useMemo(
@@ -938,6 +1479,12 @@ function AbsensiContent({
   const selectedIsWorkday = !selectedIsWeekend && !selectedIsHoliday;
 
   const loadRange = useCallback(async () => {
+    // Data dasar belum siap — berhenti & pastikan loading berakhir,
+    // effect akan terpicu ulang begitu kelasList/hariEfektif30 terisi.
+    if (!kelasList.length || !hariEfektif30) {
+      setLoadingRange(false);
+      return;
+    }
     setLoadingRange(true);
     try {
       const res = await getAbsensiRange({
@@ -961,6 +1508,13 @@ function AbsensiContent({
 
   const loadTanggal = useCallback(
     async (dateStr) => {
+      // Data dasar (kelas & jumlah siswa) belum siap — skip, karena hasil
+      // pengelompokan akan dihitung ulang saat loadTanggal dipanggil lagi
+      // setelah loadBaseData selesai (via perubahan dependency useCallback).
+      if (!kelasList.length) {
+        setLoadingTanggal(false);
+        return;
+      }
       setLoadingTanggal(true);
       try {
         const res = await getAbsensiTanggal({
@@ -986,6 +1540,14 @@ function AbsensiContent({
     loadTanggal(selectedDate);
   }, [selectedDate, loadTanggal]);
 
+  // ← tambahan: begitu kedua loading berhenti (walau data kosong), tandai siap
+  useEffect(() => {
+    if (initialReady) return;
+    if (!loadingRange && !loadingTanggal) {
+      setInitialReady(true);
+    }
+  }, [initialReady, loadingRange, loadingTanggal]);
+
   const kelasSudah = useMemo(() => {
     if (!selectedIsWorkday) return [];
     return kelasList.filter((k) => kelasLengkapIds.has(k.id));
@@ -996,8 +1558,76 @@ function AbsensiContent({
     return kelasList.filter((k) => !kelasLengkapIds.has(k.id));
   }, [kelasList, kelasLengkapIds, selectedIsWorkday]);
 
-  const terbaik = statistikKelas.slice(0, 5);
-  const terendah = [...statistikKelas].reverse().slice(0, 5);
+  // Map status siswa per kelas (siswaId -> status)
+  const statusMapPerKelas = useMemo(() => {
+    const out = {};
+    for (const kid of Object.keys(absensiPerKelas || {})) {
+      const m = new Map();
+      for (const r of absensiPerKelas[kid] || []) {
+        const sid = firstOf(r.siswa_id);
+        if (sid) m.set(sid, r.status);
+      }
+      out[kid] = m;
+    }
+    return out;
+  }, [absensiPerKelas]);
+
+  // Total status seluruh kelas pada tanggal terpilih (untuk donut)
+  const totalsHari = useMemo(() => {
+    const t = { hadir: 0, sakit: 0, izin: 0, alpha: 0 };
+    for (const k of kelasList) {
+      for (const r of absensiPerKelas[k.id] || []) {
+        if (r.status in t) t[r.status] += 1;
+      }
+    }
+    return t;
+  }, [kelasList, absensiPerKelas]);
+
+  const tercatatHari = STATUS_ORDER.reduce((s, k) => s + totalsHari[k], 0);
+  const belumTercatatHari = Math.max(0, totalSiswa - tercatatHari);
+
+  const siswaStatusCounts = {
+    ...totalsHari,
+    belum: belumTercatatHari,
+  };
+
+  const avgKehadiran = useMemo(() => {
+    if (!statistikKelas.length) return 0;
+    return (
+      statistikKelas.reduce((s, x) => s + x.rate, 0) / statistikKelas.length
+    );
+  }, [statistikKelas]);
+
+  const persenSudah =
+    kelasList.length && selectedIsWorkday
+      ? Math.round((kelasSudah.length / kelasList.length) * 100)
+      : 0;
+
+  // Kirim ringkasan ke hero header
+  useEffect(() => {
+    onSummary?.({
+      persen: persenSudah,
+      text: `${kelasSudah.length} dari ${kelasList.length} kelas`,
+      isWorkday: selectedIsWorkday,
+      loading: loadingTanggal,
+    });
+  }, [
+    persenSudah,
+    kelasSudah.length,
+    kelasList.length,
+    selectedIsWorkday,
+    loadingTanggal,
+    onSummary,
+  ]);
+
+  const matchSiswaStatus = useCallback(
+    (kelasId, siswaId) => {
+      if (siswaStatus === "semua") return true;
+      const st = statusMapPerKelas[kelasId]?.get(siswaId);
+      return siswaStatus === "belum" ? !st : st === siswaStatus;
+    },
+    [siswaStatus, statusMapPerKelas],
+  );
 
   const kelasUntukDitampilkan = useMemo(() => {
     let list =
@@ -1017,6 +1647,11 @@ function AbsensiContent({
         );
       });
     }
+    if (siswaStatus !== "semua" && selectedIsWorkday) {
+      list = list.filter((k) =>
+        (siswaPerKelas[k.id] || []).some((s) => matchSiswaStatus(k.id, s.id)),
+      );
+    }
     return list;
   }, [
     kelasList,
@@ -1025,6 +1660,9 @@ function AbsensiContent({
     searchSiswa,
     siswaPerKelas,
     kelasLengkapIds,
+    siswaStatus,
+    selectedIsWorkday,
+    matchSiswaStatus,
   ]);
 
   const toggleExpand = (kelasId) => {
@@ -1035,26 +1673,52 @@ function AbsensiContent({
     });
   };
 
-  const goToDetail = (kelasId, status) => {
-    setFilterKelas(kelasId || "semua");
-    setFilterStatus(status || "semua");
-    setExpandedKelas(kelasId ? new Set([kelasId]) : new Set());
+  const scrollToList = () =>
     document
       .getElementById("absensi-list-section")
       ?.scrollIntoView({ behavior: "smooth", block: "start" });
+
+  const goToDetail = (kelasId, status) => {
+    setFilterKelas(kelasId || "semua");
+    setFilterStatus(status || "semua");
+    setSiswaStatus("semua");
+    setSearchSiswa("");
+    setExpandedKelas(kelasId ? new Set([kelasId]) : new Set());
+    scrollToList();
   };
 
-  const persenSudah =
-    kelasList.length && selectedIsWorkday
-      ? Math.round((kelasSudah.length / kelasList.length) * 100)
-      : 0;
+  // Klik donut / legenda status siswa
+  const selectSiswaStatus = (key) => {
+    const next = key || "semua";
+    setSiswaStatus(next);
+    if (next !== "semua") {
+      setFilterKelas("semua");
+      setFilterStatus("semua");
+      // Buka otomatis kelas yang cocok bila jumlahnya sedikit
+      const ids = kelasList
+        .filter((k) =>
+          (siswaPerKelas[k.id] || []).some((s) => {
+            const st = statusMapPerKelas[k.id]?.get(s.id);
+            return next === "belum" ? !st : st === next;
+          }),
+        )
+        .map((k) => k.id);
+      setExpandedKelas(ids.length <= 5 ? new Set(ids) : new Set());
+      scrollToList();
+    }
+  };
+
   const statusCounts = {
     semua: kelasList.length,
     sudah: selectedIsWorkday ? kelasSudah.length : 0,
     belum: selectedIsWorkday ? kelasBelum.length : 0,
   };
 
-  const kelasBelumNama = kelasBelum.map((k) => k.nama_kelas);
+  // ← tambahan: gerbang utama. Semua hook di atas tetap terpanggil,
+  //    jadi ringkasan (onSummary) tetap mengirim status loading ke header.
+  if (!initialReady) {
+    return <LoadingState label="Memuat data absensi..." />;
+  }
 
   return (
     <div className="space-y-5 sm:space-y-6">
@@ -1074,9 +1738,25 @@ function AbsensiContent({
           icon="alert"
           title={`${kelasBelum.length} kelas belum lengkap isi absensi pada ${formatTanggalID(selectedDate)}`}
         >
-          {kelasBelumNama.slice(0, 20).join(", ")}
-          {kelasBelumNama.length > 20 &&
-            ` +${kelasBelumNama.length - 20} kelas lain`}
+          <div className="flex flex-wrap gap-1.5">
+            {kelasBelum.slice(0, 20).map((k) => (
+              <button
+                key={k.id}
+                onClick={() => goToDetail(k.id, null)}
+                className="rounded-full bg-white px-2.5 py-0.5 text-xs font-medium ring-1 ring-rose-200 transition hover:bg-rose-100"
+              >
+                {k.nama_kelas}
+              </button>
+            ))}
+            {kelasBelum.length > 20 && (
+              <button
+                onClick={() => goToDetail(null, "belum")}
+                className="rounded-full px-2.5 py-0.5 text-xs font-medium underline"
+              >
+                +{kelasBelum.length - 20} kelas lain
+              </button>
+            )}
+          </div>
         </Banner>
       ) : kelasList.length > 0 ? (
         <Banner
@@ -1094,6 +1774,7 @@ function AbsensiContent({
           sub={`${totalSiswa} siswa`}
           icon="grid"
           tone="slate"
+          onClick={() => goToDetail(null, null)}
         />
         {!selectedIsWorkday ? (
           <StatCard
@@ -1111,6 +1792,7 @@ function AbsensiContent({
             icon="check"
             tone="indigo"
             progress={persenSudah}
+            onClick={() => goToDetail(null, "sudah")}
           />
         )}
         {!selectedIsWorkday ? (
@@ -1128,19 +1810,47 @@ function AbsensiContent({
             sub="perlu ditindaklanjuti"
             icon="alert"
             tone="rose"
+            onClick={() => goToDetail(null, "belum")}
           />
         )}
         <StatCard
           label="Rata-rata Hadir"
-          value={`${Math.round(avgRate(terbaik, terendah))}%`}
+          value={loadingRange ? "…" : Math.round(avgKehadiran)}
+          suffix="%"
           sub="30 hari terakhir"
           icon="users"
           tone="emerald"
-          progress={avgRate(terbaik, terendah)}
+          progress={avgKehadiran}
         />
       </div>
 
-      {/* Status kelas */}
+      {/* Donut charts */}
+      <div className="grid gap-3 sm:gap-4 lg:grid-cols-3">
+        <StatusDonutCard
+          totals={totalsHari}
+          belum={belumTercatatHari}
+          totalSiswa={totalSiswa}
+          isWorkday={selectedIsWorkday}
+          isWeekend={selectedIsWeekend}
+          loading={loadingTanggal}
+          activeStatus={siswaStatus === "semua" ? null : siswaStatus}
+          onSelect={selectSiswaStatus}
+        />
+        <KelengkapanDonutCard
+          sudah={kelasSudah.length}
+          belum={kelasBelum.length}
+          isWorkday={selectedIsWorkday}
+          loading={loadingTanggal}
+          activeFilter={filterStatus}
+          onSelect={(k) => {
+            setFilterStatus(k);
+            setSiswaStatus("semua");
+            if (k !== "semua") scrollToList();
+          }}
+        />
+      </div>
+
+      {/* Status kelas + ranking */}
       <div className="grid gap-3 sm:gap-4 lg:grid-cols-2">
         {selectedIsWorkday ? (
           <>
@@ -1179,21 +1889,12 @@ function AbsensiContent({
         )}
       </div>
 
-      {/* Ranking */}
-      <div className="grid gap-3 sm:gap-4 lg:grid-cols-2">
-        <RankingCard
-          title="Kehadiran Terbaik"
-          subtitle={`30 hari · ${hariEfektif30} hari efektif × jumlah siswa`}
-          data={terbaik}
-          tone="emerald"
-        />
-        <RankingCard
-          title="Kehadiran Terendah"
-          subtitle={`30 hari · ${hariEfektif30} hari efektif × jumlah siswa`}
-          data={terendah}
-          tone="rose"
-        />
-      </div>
+      <RankingCard
+        data={statistikKelas}
+        avg={avgKehadiran}
+        loading={loadingRange}
+        onPick={(id) => goToDetail(id, null)}
+      />
 
       {/* Daftar kelas */}
       <div id="absensi-list-section" className="scroll-mt-6 space-y-3">
@@ -1208,6 +1909,14 @@ function AbsensiContent({
           filterKelas={filterKelas}
           setFilterKelas={setFilterKelas}
           kelasList={kelasList}
+          siswaStatus={siswaStatus}
+          setSiswaStatus={selectSiswaStatus}
+          siswaStatusCounts={siswaStatusCounts}
+          disabledStatus={!selectedIsWorkday}
+          onExpandAll={() =>
+            setExpandedKelas(new Set(kelasUntukDitampilkan.map((k) => k.id)))
+          }
+          onCollapseAll={() => setExpandedKelas(new Set())}
         />
 
         {loadingTanggal ? (
@@ -1231,6 +1940,8 @@ function AbsensiContent({
                 onToggle={() => toggleExpand(k.id)}
                 selectedIsWorkday={selectedIsWorkday}
                 selectedIsWeekend={selectedIsWeekend}
+                siswaStatus={siswaStatus}
+                query={searchSiswa.trim().toLowerCase()}
               />
             ))}
           </div>
@@ -1238,17 +1949,6 @@ function AbsensiContent({
       </div>
     </div>
   );
-}
-
-function avgRate(a, b) {
-  const seen = new Set();
-  const all = [...a, ...b].filter((x) => {
-    if (seen.has(x.kelas.id)) return false;
-    seen.add(x.kelas.id);
-    return true;
-  });
-  if (!all.length) return 0;
-  return all.reduce((s, x) => s + x.rate, 0) / all.length;
 }
 
 function KelasAbsensiCard({
@@ -1260,6 +1960,8 @@ function KelasAbsensiCard({
   onToggle,
   selectedIsWorkday,
   selectedIsWeekend,
+  siswaStatus,
+  query,
 }) {
   const counts = { hadir: 0, sakit: 0, izin: 0, alpha: 0 };
   const statusBySiswaId = new Map();
@@ -1268,7 +1970,7 @@ function KelasAbsensiCard({
     if (r.status in counts) counts[r.status] += 1;
     if (sid) statusBySiswaId.set(sid, r.status);
   }
-  const belumTercatat = siswaKelas.length - records.length;
+  const belumTercatat = Math.max(0, siswaKelas.length - records.length);
   const progress = siswaKelas.length
     ? Math.min(100, (records.length / siswaKelas.length) * 100)
     : 0;
@@ -1292,18 +1994,48 @@ function KelasAbsensiCard({
         : "rose";
   const t = TONES[tone];
 
+  const miniSegments = [
+    ...STATUS_ORDER.map((s) => ({
+      key: s,
+      value: counts[s],
+      color: STATUS_CONFIG[s].hex,
+    })),
+    { key: "belum", value: belumTercatat, color: BELUM_CONFIG.hex },
+  ];
+
+  const kelasCocokQuery =
+    !query || kelas.nama_kelas.toLowerCase().includes(query);
+
+  const rows = [...siswaKelas]
+    .sort((a, b) => a.nama_siswa.localeCompare(b.nama_siswa))
+    .filter((s) => {
+      if (!kelasCocokQuery && !s.nama_siswa.toLowerCase().includes(query))
+        return false;
+      if (siswaStatus === "semua") return true;
+      const st = statusBySiswaId.get(s.id);
+      return siswaStatus === "belum" ? !st : st === siswaStatus;
+    });
+
   return (
-    <div className={`${CARD} overflow-hidden transition hover:shadow-md`}>
+    <div
+      className={`${CARD} overflow-hidden transition hover:shadow-md ${
+        expanded ? "ring-gray-900/30" : ""
+      }`}
+    >
       <button
         onClick={onToggle}
         className="flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left transition hover:bg-slate-50/70 sm:px-5"
       >
         <div className="flex min-w-0 flex-1 items-center gap-3.5">
-          <div
-            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm font-semibold ${t.soft} ${t.text}`}
+          <DonutChart
+            segments={selectedIsWorkday ? miniSegments : []}
+            size={44}
+            thickness={6}
           >
-            {kelas.nama_kelas?.slice(0, 2).toUpperCase()}
-          </div>
+            <span className={`text-[11px] font-semibold ${t.text}`}>
+              {kelas.nama_kelas?.slice(0, 2).toUpperCase()}
+            </span>
+          </DonutChart>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold text-slate-900">
               {kelas.nama_kelas}
@@ -1311,7 +2043,7 @@ function KelasAbsensiCard({
             <div className="mt-1 flex items-center gap-2">
               <div className="h-1 w-24 overflow-hidden rounded-full bg-slate-100">
                 <div
-                  className={`h-full rounded-full ${t.bar}`}
+                  className={`h-full rounded-full ${t.bar} transition-all duration-500`}
                   style={{ width: `${progress}%` }}
                 />
               </div>
@@ -1378,9 +2110,17 @@ function KelasAbsensiCard({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {[...siswaKelas]
-                      .sort((a, b) => a.nama_siswa.localeCompare(b.nama_siswa))
-                      .map((s, idx) => {
+                    {rows.length === 0 ? (
+                      <tr>
+                        <td
+                          colSpan={4}
+                          className="px-4 py-6 text-center text-sm text-slate-400"
+                        >
+                          Tidak ada siswa yang cocok dengan filter.
+                        </td>
+                      </tr>
+                    ) : (
+                      rows.map((s, idx) => {
                         const status = statusBySiswaId.get(s.id);
                         const cfg = status ? STATUS_CONFIG[status] : null;
                         return (
@@ -1415,7 +2155,8 @@ function KelasAbsensiCard({
                             </td>
                           </tr>
                         );
-                      })}
+                      })
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -1443,6 +2184,12 @@ export default function AbsensiPage() {
   const [selectedDate, setSelectedDate] = useState(todayStr());
   const [user, setUser] = useState(null);
   const [exportOpen, setExportOpen] = useState(false);
+  const [summary, setSummary] = useState({
+    persen: 0,
+    text: "",
+    isWorkday: true,
+    loading: true,
+  });
 
   useEffect(() => {
     setUser(getCurrentUser());
@@ -1480,15 +2227,17 @@ export default function AbsensiPage() {
   return (
     <div className="min-h-screen text-slate-900">
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-        <PageHeader
-          eyebrow="Monitoring"
-          title="Absensi Siswa"
+        <HeroHeader
           selectedDate={selectedDate}
           setSelectedDate={setSelectedDate}
           user={user}
           canExport={!loadingBase && !errorBase}
           onExport={() => setExportOpen(true)}
           onRefresh={loadBaseData}
+          persenLengkap={summary.persen}
+          lengkapText={summary.text}
+          isWorkday={summary.isWorkday}
+          loading={loadingBase || summary.loading}
         />
 
         {/* Error box — tetap merah */}
@@ -1500,7 +2249,7 @@ export default function AbsensiPage() {
 
         {loadingBase ? (
           <LoadingState label="Memuat data..." />
-        ) : (
+        ) : errorBase ? null : (
           <AbsensiContent
             selectedDate={selectedDate}
             kelasList={kelasList}
@@ -1509,6 +2258,7 @@ export default function AbsensiPage() {
             totalSiswa={totalSiswa}
             hariLiburList={hariLiburList}
             hariEfektif30={hariEfektif30}
+            onSummary={setSummary}
           />
         )}
 

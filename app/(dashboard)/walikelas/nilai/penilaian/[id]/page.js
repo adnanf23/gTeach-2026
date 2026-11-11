@@ -14,6 +14,7 @@ import {
   UjianTable,
   RaporTable,
 } from "@/components/organism/table/penilaian-tables";
+import TahfizhPanel from "@/components/organism/tahfizh/TahfizhPanel";
 
 // ================================================================
 // KONFIGURASI
@@ -2634,6 +2635,32 @@ export default function PenilaianMapelPage() {
           <Icon name="back" />
           Kembali
         </button>
+      </div>
+    );
+  }
+
+  if (
+    mapel?.kategori === "tahfizh" &&
+    /TAHFIZH/i.test(mapel?.nama_mapel || mapel?.nama || "")
+  ) {
+    const taId = Array.isArray(kelas.tahun_ajaran_id)
+      ? kelas.tahun_ajaran_id[0]
+      : kelas.tahun_ajaran_id;
+    return (
+      <div className="mx-auto max-w-5xl px-4 py-6">
+        <div className="mb-4">
+          <button onClick={() => router.back()} className={BTN_OUTLINE}>
+            <Icon name="back" />
+            Kembali
+          </button>
+        </div>
+        <TahfizhPanel
+          kelasId={kelas.id}
+          tahunAjaranId={taId}
+          mapelId={mapel.id}
+          mapelNama={mapel.nama_mapel || mapel.nama || "TAHFIZH"}
+          siswaList={siswaList}
+        />
       </div>
     );
   }

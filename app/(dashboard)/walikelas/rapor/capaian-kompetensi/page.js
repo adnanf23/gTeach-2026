@@ -14,6 +14,7 @@ import * as XLSX from "xlsx-js-style";
 function emptyForm() {
   return {
     id: null,
+    ujian_id: "",
     mapel_id: "",
     capaian_tinggi: "",
     capaian_rendah: "",
@@ -60,6 +61,25 @@ export default function CapaianKompetensiPage() {
   const fileInputRef = useRef(null);
 
   const isEditing = Boolean(form.id);
+
+  // Daftar ujian (dropdown) + default ujian yang sedang dibuka.
+  const [ujianOptions, setUjianOptions] = useState([]);
+  const [defaultUjianId, setDefaultUjianId] = useState("");
+  useEffect(() => {
+    (async () => {
+      try {
+        const rows = await db.getFullList("pengaturan_ujian", {
+          sort: "-created",
+          requestKey: null,
+        });
+        setUjianOptions(rows);
+        const buka = rows.find((u) => u.status_akses === "buka");
+        if (buka) setDefaultUjianId(buka.id);
+      } catch (err) {
+        console.warn("[capaian] gagal memuat daftar ujian:", err?.message);
+      }
+    })();
+  }, []);
 
   // ------------------------------------------------------------------
   // Fetch data
@@ -421,6 +441,7 @@ export default function CapaianKompetensiPage() {
 
         try {
           const created = await db.create("capaian_kompetensi", {
+            ujian_id: defaultUjianId || "",
             mapel_id: mapel.id,
             kelas_id: autoKelasId,
             capaian_tinggi: capTinggi,
@@ -472,7 +493,7 @@ export default function CapaianKompetensiPage() {
       );
       return;
     }
-    setForm(emptyForm());
+    setForm({ ...emptyForm(), ujian_id: defaultUjianId });
     setFormError("");
     setModalOpen(true);
   };
@@ -480,6 +501,7 @@ export default function CapaianKompetensiPage() {
   const openEdit = (c) => {
     setForm({
       id: c.id,
+      ujian_id: c.ujian_id || "",
       mapel_id: c.mapel_id || "",
       capaian_tinggi: c.capaian_tinggi || "",
       capaian_rendah: c.capaian_rendah || "",
@@ -524,6 +546,7 @@ export default function CapaianKompetensiPage() {
     setSaving(true);
     try {
       const payload = {
+        ujian_id: form.ujian_id || "",
         mapel_id: form.mapel_id,
         kelas_id: autoKelasId,
         capaian_tinggi: form.capaian_tinggi.trim(),
@@ -1146,6 +1169,24 @@ export default function CapaianKompetensiPage() {
                 <span>{formError}</span>
               </div>
             )}
+
+            <Field label="Ujian">
+              <select
+                value={form.ujian_id}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, ujian_id: e.target.value }))
+                }
+                className="w-full rounded-xl border border-neutral-200 bg-neutral-50/60 px-3.5 py-2.5 text-sm transition focus:border-blue-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-100"
+              >
+                <option value="">Pilih ujian</option>
+                {ujianOptions.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.nama_ujian}
+                    {u.status_akses === "buka" ? " — buka" : ""}
+                  </option>
+                ))}
+              </select>
+            </Field>
 
             {guruKelasList.length > 0 && (
               <div className="rounded-xl border border-blue-100 bg-blue-50/70 px-3.5 py-2.5 text-xs text-blue-800">

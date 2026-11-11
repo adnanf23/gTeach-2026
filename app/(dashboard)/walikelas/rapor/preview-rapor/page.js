@@ -28,6 +28,11 @@ import {
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { getCurrentUser } from "@/lib/pocketbase";
+import {
+  getRaporTahfizhContext,
+  getRaporTahfizhSiswa,
+} from "@/actions/tahfizh.action";
+import RaporTahfizhSheet from "@/components/organism/tahfizh/RaporTahfizhSheet";
 
 // ✅ TTD kepala sekolah dari folder assets (static import Next.js)
 import ttdKepsekAsset from "@/assets/TTD BUNDA AHDA_STAMPEL_BOLD.png";
@@ -220,7 +225,8 @@ const NilaiTable = ({ rows, startIndex = 0, rowH }) => (
 );
 
 /* ───────────── preview rapor ───────────── */
-const RaporPreview = ({ siswa, rapor, innerRef }) => {
+const RaporPreview = ({ siswa, rapor, innerRef, jenisUjian }) => {
+  const isAsas = String(jenisUjian || "").trim().toLowerCase() === "asas";
   const nilai = toArray(rapor.nilai);
   const ekskul = toArray(rapor.ekstrakurikuler);
   const ekskulRows = ekskul.length
@@ -324,48 +330,82 @@ const RaporPreview = ({ siswa, rapor, innerRef }) => {
           </tbody>
         </table>
 
-        <table className="rapor-table gap-top catatan-table">
-          <thead>
-            <tr>
-              <th>CATATAN</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td className="catatan">{rapor.catatan || "-"}</td>
-            </tr>
-          </tbody>
-        </table>
+        {!isAsas && (
+          <table className="rapor-table gap-top catatan-table">
+            <thead>
+              <tr>
+                <th>CATATAN</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td className="catatan">{rapor.catatan || "-"}</td>
+              </tr>
+            </tbody>
+          </table>
+        )}
 
-        <table className="rapor-table gap-top absen">
-          <colgroup>
-            <col style={{ width: "60%" }} />
-            <col style={{ width: "15%" }} />
-            <col style={{ width: "25%" }} />
-          </colgroup>
-          <thead>
-            <tr>
-              <th colSpan={3}>Ketidakhadiran</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr className="row-absen">
-              <td className="absen-label">Sakit</td>
-              <td className="absen-angka">{rapor.sakit ?? 0}</td>
-              <td className="absen-satuan">hari</td>
-            </tr>
-            <tr className="row-absen">
-              <td className="absen-label">Izin</td>
-              <td className="absen-angka">{rapor.izin ?? 0}</td>
-              <td className="absen-satuan">hari</td>
-            </tr>
-            <tr className="row-absen">
-              <td className="absen-label">Tanpa Keterangan</td>
-              <td className="absen-angka">{rapor.alpa ?? 0}</td>
-              <td className="absen-satuan">hari</td>
-            </tr>
-          </tbody>
-        </table>
+        {isAsas && (
+          <table className="rapor-table gap-top catatan-table">
+            <thead>
+              <tr>
+                <th>CATATAN KOKURIKULER</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td className="catatan">{rapor.kokurikuler || "-"}</td>
+              </tr>
+            </tbody>
+          </table>
+        )}
+
+        <div className={isAsas ? "absen-catatan-row" : ""}>
+          <table className="rapor-table gap-top absen">
+            <colgroup>
+              <col style={{ width: "60%" }} />
+              <col style={{ width: "15%" }} />
+              <col style={{ width: "25%" }} />
+            </colgroup>
+            <thead>
+              <tr>
+                <th colSpan={3}>Ketidakhadiran</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr className="row-absen">
+                <td className="absen-label">Sakit</td>
+                <td className="absen-angka">{rapor.sakit ?? 0}</td>
+                <td className="absen-satuan">hari</td>
+              </tr>
+              <tr className="row-absen">
+                <td className="absen-label">Izin</td>
+                <td className="absen-angka">{rapor.izin ?? 0}</td>
+                <td className="absen-satuan">hari</td>
+              </tr>
+              <tr className="row-absen">
+                <td className="absen-label">Tanpa Keterangan</td>
+                <td className="absen-angka">{rapor.alpa ?? 0}</td>
+                <td className="absen-satuan">hari</td>
+              </tr>
+            </tbody>
+          </table>
+
+          {isAsas && (
+            <table className="rapor-table gap-top catatan-table">
+              <thead>
+                <tr>
+                  <th>CATATAN</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td className="catatan">{rapor.catatan || "-"}</td>
+                </tr>
+              </tbody>
+            </table>
+          )}
+        </div>
 
         <div className="ttd">
           <div className="ttd-row">
@@ -388,7 +428,7 @@ const RaporPreview = ({ siswa, rapor, innerRef }) => {
               <br />
               <p className="text-center ttd-jabatan">Wali Kelas,</p>
               <div className="ttd-space ttd-space-wali">
-                {rapor.wali_kelas_ttd && (
+                {!isAsas && rapor.wali_kelas_ttd && (
                   <img
                     src={rapor.wali_kelas_ttd}
                     alt=""
@@ -404,7 +444,7 @@ const RaporPreview = ({ siswa, rapor, innerRef }) => {
             <p>Mengetahui,</p>
             <p>Kepala Sekolah</p>
             <div className="ttd-space">
-              {ttdKepsekSrc && (
+              {!isAsas && ttdKepsekSrc && (
                 <img
                   src={ttdKepsekSrc}
                   alt=""
@@ -706,6 +746,12 @@ export default function RaporWalikelasPage() {
 
   const sheetRef = useRef(null);
   const headRef = useRef(null);
+  const [tahfizhCtx, setTahfizhCtx] = useState(null);
+  const [tahfizhRapor, setTahfizhRapor] = useState(null);
+  // Tanggal rapor (pengaturan_rapor) -> batas nilai yang ikut dihitung.
+  const [baseTanggal, setBaseTanggal] = useState(null);
+  // Ujian terpilih -> filter capaian kompetensi per ujian.
+  const [baseUjianId, setBaseUjianId] = useState(null);
 
   /* ───── data dasar ───── */
   useEffect(() => {
@@ -714,7 +760,11 @@ export default function RaporWalikelasPage() {
       return;
     }
     (async () => {
-      const res = await getPreviewRaporBase({ userId });
+      const res = await getPreviewRaporBase({
+        userId,
+        tanggalMax: baseTanggal,
+        ujianId: baseUjianId,
+      });
 
       if (res.error) {
         console.error(res.error);
@@ -728,20 +778,51 @@ export default function RaporWalikelasPage() {
           nilaiAkhir: res.nilaiAkhir,
         });
         setUjianList(res.ujianList);
-        setUjianId(res.ujianList[0]?.id || "");
+        setUjianId((prev) => prev || res.ujianList[0]?.id || "");
+        // Nilai/capaian berubah (ganti ujian/tanggal) -> rapor disusun ulang.
+        cacheRef.current = {};
       } else {
         setKelas(null);
       }
 
       setLoading(false);
     })();
-  }, [userId]);
+  }, [userId, baseTanggal, baseUjianId]);
 
   const siswa = siswaList[index] || null;
   const ujian = useMemo(
     () => ujianList.find((u) => u.id === ujianId) || null,
     [ujianList, ujianId],
   );
+
+  /* ───── data rapor tahfizh (bila template_rapor = tahfiz/kombinasi) ───── */
+  useEffect(() => {
+    const perluTahfizh =
+      ujian?.template_rapor === "tahfiz" ||
+      ujian?.template_rapor === "kombinasi";
+    if (!perluTahfizh || !kelas?.id || !siswa?.id) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setTahfizhRapor(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const ctx = await getRaporTahfizhContext({ kelasId: kelas.id });
+      if (cancelled || ctx.error) return;
+      setTahfizhCtx(ctx);
+      const res = await getRaporTahfizhSiswa({
+        kelasId: kelas.id,
+        tahunAjaranId: ctx.tahunAjaranId,
+        mapelTahfizhId: ctx.mapelTahfizh?.id,
+        tahsinMapelId: ctx.tahsinMapel?.id,
+        siswaId: siswa.id,
+      });
+      if (!cancelled && !res.error) setTahfizhRapor(res);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [ujian, kelas, siswa]);
 
   /* ───── pengaturan_rapor ───── */
   useEffect(() => {
@@ -758,6 +839,17 @@ export default function RaporWalikelasPage() {
       cancelled = true;
     };
   }, [ujian]);
+
+  // Batas tanggal rapor + filter capaian per ujian.
+  const tanggalRaporKey = pengaturan?.data?.tanggal_rapor || null;
+  const ujianRaporKey = pengaturan?.ujianId || null;
+  useEffect(() => {
+    if (ujianRaporKey) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setBaseUjianId(ujianRaporKey);
+      setBaseTanggal(tanggalRaporKey);
+    }
+  }, [ujianRaporKey, tanggalRaporKey]);
 
   const pengaturanSiap = !!ujian && pengaturan?.ujianId === ujian.id;
 
@@ -781,7 +873,9 @@ export default function RaporWalikelasPage() {
         ujian,
         mapelList: nilaiAkhirData.mapelList,
         nilaiAkhirMap: nilaiAkhirData.nilaiAkhir,
-        capaianList,
+        capaianList: (capaianList || []).filter(
+          ([, c]) => c.ujian_id === ujian.id,
+        ),
         pengaturanRapor: pengaturan.data,
       })
         .then((res) => {
@@ -909,86 +1003,36 @@ export default function RaporWalikelasPage() {
 
   /* ───── unduh PDF ───── */
   const handleDownloadPdf = async () => {
-    if (!rapor || !siswa || !sheetRef.current) return;
+    if (!siswa) return;
     setDownloading(true);
     try {
-      const filename = `Rapor_${slug(siswa.nama_siswa)}_Semester_${rapor.semester}_${slug(
-        rapor.tahun_ajaran,
-      )}.pdf`;
-
-      const pages = Array.from(sheetRef.current.querySelectorAll(".page"));
-
-      const [{ toPng }, { jsPDF }] = await Promise.all([
-        import("html-to-image"),
-        import("jspdf"),
-      ]);
-
-      const stage = document.createElement("div");
-      stage.style.cssText =
-        "position:absolute;left:-10000px;top:0;width:215mm;background:#fff;";
-      const sheet = document.createElement("div");
-      sheet.className = "rapor-sheet";
-      sheet.style.gap = "0";
-      stage.appendChild(sheet);
-      document.body.appendChild(stage);
-
-      try {
-        const clones = pages.map((p) => {
-          const c = p.cloneNode(true);
-          c.style.boxShadow = "none";
-          c.style.borderRadius = "0";
-          sheet.appendChild(c);
-          return c;
-        });
-
-        const imgs = Array.from(sheet.querySelectorAll("img"));
-        await Promise.all(
-          imgs.map((img) =>
-            img.complete
-              ? Promise.resolve()
-              : new Promise((res) => {
-                  img.onload = img.onerror = () => res();
-                }),
-          ),
-        );
-
-        if (document.fonts?.ready) {
-          try {
-            await document.fonts.ready;
-          } catch {
-            /* ignore */
-          }
-        }
-
-        const dataUrls = [];
-        for (const c of clones) {
-          const url = await toPng(c, {
-            pixelRatio: 2,
-            backgroundColor: "#ffffff",
-            cacheBust: true,
-            skipFonts: false,
-          });
-          dataUrls.push(url);
-        }
-
-        const pdf = new jsPDF({
-          unit: "mm",
-          format: [215, 330],
-          orientation: "portrait",
-          compress: true,
-        });
-
-        dataUrls.forEach((url, i) => {
-          if (i > 0) pdf.addPage([215, 330], "portrait");
-          pdf.addImage(url, "PNG", 0, 0, 215, 330);
-        });
-        pdf.save(filename);
-      } finally {
-        stage.remove();
+      if (ujian?.template_rapor === "tahfiz") {
+        window.print();
+        return;
       }
+      if (!rapor || !sheetRef.current) return;
+      // Cetak lewat browser agar PDF berisi teks asli (bisa diseleksi).
+      const imgs = Array.from(sheetRef.current.querySelectorAll("img"));
+      await Promise.all(
+        imgs.map((img) =>
+          img.complete
+            ? Promise.resolve()
+            : new Promise((res) => {
+                img.onload = img.onerror = () => res();
+              }),
+        ),
+      );
+      if (document.fonts?.ready) {
+        try {
+          await document.fonts.ready;
+        } catch {
+          /* ignore */
+        }
+      }
+      window.print();
     } catch (e) {
       console.error(e);
-      setError("Gagal membuat PDF.");
+      setError("Gagal menyiapkan PDF.");
     } finally {
       setDownloading(false);
     }
@@ -1105,10 +1149,9 @@ export default function RaporWalikelasPage() {
 
       {tampilkanBar && (
         <div
-          className="no-print"
           style={{ paddingBottom: `calc(9.5rem + ${bottomInset}px)` }}
         >
-          <div ref={headRef} className="mb-2 scroll-mt-20 px-1">
+          <div ref={headRef} className="no-print mb-2 scroll-mt-20 px-1">
             <div className="flex items-center gap-2">
               <p className="min-w-0 truncate text-[13px] font-medium text-gray-800">
                 {siswa.nama_siswa}
@@ -1130,7 +1173,7 @@ export default function RaporWalikelasPage() {
             </p>
           </div>
 
-          {rapor && (
+          {(ujian?.template_rapor === "tahfiz" ? tahfizhRapor : rapor) && (
             <div
               ref={fit.outerRef}
               className="rapor-fit-outer bg-[#dfe3ec] py-2 sm:rounded-2xl sm:p-4"
@@ -1159,11 +1202,79 @@ export default function RaporWalikelasPage() {
                   <div
                     className={`rapor-paper ${zoom != null ? "zoomed" : ""}`}
                   >
-                    <RaporPreview
-                      siswa={siswa}
-                      rapor={rapor}
-                      innerRef={sheetRef}
-                    />
+                    {ujian?.template_rapor === "tahfiz" ? (
+                      tahfizhRapor && tahfizhCtx ? (
+                        <RaporTahfizhSheet
+                          kelas={tahfizhCtx.kelas}
+                          siswa={siswa}
+                          rapor={tahfizhRapor}
+                          tahsinNama={
+                            tahfizhCtx.tahsinMapel?.nama_mapel || "Tahsin"
+                          }
+                          jenisSemester={pengaturan?.data?.jenis_semester || ""}
+                          tanggalRapor={
+                            pengaturan?.data?.tanggal_rapor
+                              ? new Date(
+                                  pengaturan.data.tanggal_rapor,
+                                ).toLocaleDateString("id-ID", {
+                                  day: "numeric",
+                                  month: "long",
+                                  year: "numeric",
+                                })
+                              : ""
+                          }
+                          kepalaSekolah={
+                            pengaturan?.data?.kepala_sekolah ||
+                            SEKOLAH_DEFAULT.kepala_sekolah
+                          }
+                        />
+                      ) : (
+                        <div className="p-8 text-center text-sm text-slate-400">
+                          Memuat rapor tahfizh...
+                        </div>
+                      )
+                    ) : (
+                      <>
+                        {rapor && (
+                          <RaporPreview
+                            siswa={siswa}
+                            rapor={rapor}
+                            innerRef={sheetRef}
+                            jenisUjian={ujian?.jenis_ujian}
+                          />
+                        )}
+                        {ujian?.template_rapor === "kombinasi" &&
+                          tahfizhRapor &&
+                          tahfizhCtx && (
+                            <RaporTahfizhSheet
+                              kelas={tahfizhCtx.kelas}
+                              siswa={siswa}
+                              rapor={tahfizhRapor}
+                              tahsinNama={
+                                tahfizhCtx.tahsinMapel?.nama_mapel || "Tahsin"
+                              }
+                              jenisSemester={
+                                pengaturan?.data?.jenis_semester || ""
+                              }
+                              tanggalRapor={
+                                pengaturan?.data?.tanggal_rapor
+                                  ? new Date(
+                                      pengaturan.data.tanggal_rapor,
+                                    ).toLocaleDateString("id-ID", {
+                                      day: "numeric",
+                                      month: "long",
+                                      year: "numeric",
+                                    })
+                                  : ""
+                              }
+                              kepalaSekolah={
+                                pengaturan?.data?.kepala_sekolah ||
+                                SEKOLAH_DEFAULT.kepala_sekolah
+                              }
+                            />
+                          )}
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
@@ -1508,6 +1619,17 @@ const CSS = `
     }
 
     /* ── Tanda tangan ── */
+    /* ✅ Ketidakhadiran berdampingan dengan Catatan (rapor ASAS) */
+    .absen-catatan-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0 16px;
+      align-items: stretch;
+    }
+    .absen-catatan-row > .absen,
+    .absen-catatan-row > .catatan-table {
+      height: 100%;
+    }
     .ttd {
       margin-top: 24px;
       text-align: center;

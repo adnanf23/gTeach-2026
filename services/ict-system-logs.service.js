@@ -29,6 +29,22 @@ export async function getSystemLogs({ page, perPage, filter, sort }) {
 }
 
 // ---------------------------------------------------------------------------
+// Semua log (untuk export Excel).
+// ---------------------------------------------------------------------------
+export async function getAllSystemLogs({ filter, sort }) {
+  try {
+    const logs = await ictSystemLogsRepository.findAllLogs({
+      filter,
+      sort,
+      expand: "user_id",
+    });
+    return { logs, error: null };
+  } catch (error) {
+    return { logs: [], error: describeError(error) };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Statistik global per tipe (bukan hanya halaman yang sedang tampil)
 // ---------------------------------------------------------------------------
 export async function getSystemLogCounts() {

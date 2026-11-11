@@ -6,6 +6,10 @@ export async function getSystemLogs(params) {
   return ictSystemLogsService.getSystemLogs(params);
 }
 
+export async function getAllSystemLogs(params) {
+  return ictSystemLogsService.getAllSystemLogs(params);
+}
+
 export async function getSystemLogCounts() {
   return ictSystemLogsService.getSystemLogCounts();
 }

@@ -164,6 +164,12 @@ const NAV_GROUPS = [
         icon: "catatan",
       },
       {
+        key: "catatan_kokurikuler",
+        label: "Catatan Kokurikuler",
+        href: "/walikelas/rapor/catatan-kokurikuler",
+        icon: "catatan",
+      },
+      {
         key: "preview_rapor",
         label: "Preview Rapor",
         href: "/walikelas/rapor/preview-rapor",
@@ -204,10 +210,10 @@ const shortenName = (full) => {
 };
 
 const navClass = (isActive) =>
-  `w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-left text-[13px] transition-all ${
+  `w-full flex cursor-pointer items-center gap-3 px-3.5 py-2.5 rounded-xl text-left text-[13px] transition-all ${
     isActive
       ? "bg-[#3b6ef5] text-white font-medium shadow-[0_8px_18px_rgba(59,110,245,0.35)]"
-      : "text-gray-600 hover:bg-gray-50 hover:text-gray-800"
+      : "text-gray-600 hover:bg-gray-100 hover:text-gray-900 active:bg-gray-200"
   }`;
 
 const navIconClass = (isActive) =>

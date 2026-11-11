@@ -173,6 +173,8 @@ export async function getAbsensiRange({
       startStr: `${daysAgoStr(30)} 00:00:00`,
       endStr: `${todayStr()} 23:59:59`,
       sort: "-tanggal",
+      // Proyeksi field: agregasi cuma butuh 3 kolom ini — memperkecil payload.
+      fields: "id,kelas_id,siswa_id,status",
     });
 
     const statistikKelas = buildStatistikKelas({
@@ -239,6 +241,8 @@ export async function getAbsensiExport({ kelasId, startDate, endDate }) {
       kelasId: kelasId === "semua" ? null : kelasId,
       startStr: `${startDate} 00:00:00`,
       endStr: `${endDate} 23:59:59`,
+      // Export hanya butuh status per siswa — proyeksi field memperkecil payload.
+      fields: "id,kelas_id,siswa_id,status",
     });
 
     return { records, error: null };

@@ -29,6 +29,36 @@ import { createPortal, flushSync } from "react-dom";
 
 // ✅ TTD kepala sekolah dari folder assets (static import Next.js)
 import ttdKepsekAsset from "@/assets/TTD BUNDA AHDA_STAMPEL_BOLD.png";
+import RaporTahfizhSheet from "@/components/organism/tahfizh/RaporTahfizhSheet";
+
+// Pilih lembar rapor sesuai template ujian (akademik / tahfiz / kombinasi).
+const RaporSheet = ({ siswa, rapor, ujian }) => {
+  const t = rapor?.tahfizh || null;
+  const tgl = (
+    <RaporTahfizhSheet
+      kelas={t?.kelas}
+      siswa={siswa}
+      rapor={t?.data}
+      tahsinNama={t?.tahsinNama}
+      jenisSemester={t?.jenisSemester}
+      tanggalRapor={t?.tanggalRapor}
+      kepalaSekolah={t?.kepalaSekolah}
+    />
+  );
+  if (ujian?.template_rapor === "tahfiz") return t ? tgl : null;
+  return (
+    <>
+      {rapor ? (
+        <RaporPreview
+          siswa={siswa}
+          rapor={rapor}
+          jenisUjian={ujian?.jenis_ujian}
+        />
+      ) : null}
+      {ujian?.template_rapor === "kombinasi" && t ? tgl : null}
+    </>
+  );
+};
 
 /* ───────────── konfigurasi ───────────── */
 const SEKOLAH_DEFAULT = {
@@ -243,7 +273,8 @@ const NilaiTable = ({ rows, startIndex = 0, rowH }) => (
 );
 
 /* ───────────── preview rapor ───────────── */
-const RaporPreview = ({ siswa, rapor }) => {
+const RaporPreview = ({ siswa, rapor, jenisUjian }) => {
+  const isAsas = String(jenisUjian || "").trim().toLowerCase() === "asas";
   const nilai = toArray(rapor.nilai);
   const ekskul = toArray(rapor.ekstrakurikuler);
   const ekskulRows = ekskul.length
@@ -347,48 +378,82 @@ const RaporPreview = ({ siswa, rapor }) => {
           </tbody>
         </table>
 
-        <table className="rapor-table gap-top catatan-table">
-          <thead>
-            <tr>
-              <th>CATATAN</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td className="catatan">{rapor.catatan || "-"}</td>
-            </tr>
-          </tbody>
-        </table>
+        {!isAsas && (
+          <table className="rapor-table gap-top catatan-table">
+            <thead>
+              <tr>
+                <th>CATATAN</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td className="catatan">{rapor.catatan || "-"}</td>
+              </tr>
+            </tbody>
+          </table>
+        )}
 
-        <table className="rapor-table gap-top absen">
-          <colgroup>
-            <col style={{ width: "60%" }} />
-            <col style={{ width: "15%" }} />
-            <col style={{ width: "25%" }} />
-          </colgroup>
-          <thead>
-            <tr>
-              <th colSpan={3}>Ketidakhadiran</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr className="row-absen">
-              <td className="absen-label">Sakit</td>
-              <td className="absen-angka">{rapor.sakit ?? 0}</td>
-              <td className="absen-satuan">hari</td>
-            </tr>
-            <tr className="row-absen">
-              <td className="absen-label">Izin</td>
-              <td className="absen-angka">{rapor.izin ?? 0}</td>
-              <td className="absen-satuan">hari</td>
-            </tr>
-            <tr className="row-absen">
-              <td className="absen-label">Tanpa Keterangan</td>
-              <td className="absen-angka">{rapor.alpa ?? 0}</td>
-              <td className="absen-satuan">hari</td>
-            </tr>
-          </tbody>
-        </table>
+        {isAsas && (
+          <table className="rapor-table gap-top catatan-table">
+            <thead>
+              <tr>
+                <th>CATATAN KOKURIKULER</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td className="catatan">{rapor.kokurikuler || "-"}</td>
+              </tr>
+            </tbody>
+          </table>
+        )}
+
+        <div className={isAsas ? "absen-catatan-row" : ""}>
+          <table className="rapor-table gap-top absen">
+            <colgroup>
+              <col style={{ width: "60%" }} />
+              <col style={{ width: "15%" }} />
+              <col style={{ width: "25%" }} />
+            </colgroup>
+            <thead>
+              <tr>
+                <th colSpan={3}>Ketidakhadiran</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr className="row-absen">
+                <td className="absen-label">Sakit</td>
+                <td className="absen-angka">{rapor.sakit ?? 0}</td>
+                <td className="absen-satuan">hari</td>
+              </tr>
+              <tr className="row-absen">
+                <td className="absen-label">Izin</td>
+                <td className="absen-angka">{rapor.izin ?? 0}</td>
+                <td className="absen-satuan">hari</td>
+              </tr>
+              <tr className="row-absen">
+                <td className="absen-label">Tanpa Keterangan</td>
+                <td className="absen-angka">{rapor.alpa ?? 0}</td>
+                <td className="absen-satuan">hari</td>
+              </tr>
+            </tbody>
+          </table>
+
+          {isAsas && (
+            <table className="rapor-table gap-top catatan-table">
+              <thead>
+                <tr>
+                  <th>CATATAN</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td className="catatan">{rapor.catatan || "-"}</td>
+                </tr>
+              </tbody>
+            </table>
+          )}
+        </div>
 
         <div className="ttd">
           <div className="ttd-row">
@@ -411,7 +476,7 @@ const RaporPreview = ({ siswa, rapor }) => {
               <br />
               <p className="text-center ttd-jabatan">Wali Kelas,</p>
               <div className="ttd-space ttd-space-wali">
-                {rapor.wali_kelas_ttd && (
+                {!isAsas && rapor.wali_kelas_ttd && (
                   <img
                     src={rapor.wali_kelas_ttd}
                     alt=""
@@ -427,7 +492,7 @@ const RaporPreview = ({ siswa, rapor }) => {
             <p>Mengetahui,</p>
             <p>Kepala Sekolah</p>
             <div className="ttd-space">
-              {ttdKepsekSrc && (
+              {!isAsas && ttdKepsekSrc && (
                 <img
                   src={ttdKepsekSrc}
                   alt=""
@@ -784,6 +849,10 @@ export default function AdminRaporPage() {
   });
   const [loadedKelasId, setLoadedKelasId] = useState("");
   const [pengaturan, setPengaturan] = useState(null);
+  // Tanggal rapor (pengaturan_rapor) -> batas nilai yang dihitung.
+  const [baseTanggal, setBaseTanggal] = useState(null);
+  // Ujian terpilih -> filter capaian kompetensi per ujian.
+  const [baseUjianId, setBaseUjianId] = useState(null);
 
   // alur: "pilih" → "cek" → "ringkasan"
   const [phase, setPhase] = useState("pilih");
@@ -859,7 +928,11 @@ export default function AdminRaporPage() {
       setLoadingKelas(true);
       setError("");
       try {
-        const res = await getRaporPrintKelasData({ kelas });
+        const res = await getRaporPrintKelasData({
+          kelas,
+          tanggalMax: baseTanggal,
+          ujianId: baseUjianId,
+        });
         if (cancelled) return;
         if (res.error) {
           setError(res.error);
@@ -885,7 +958,7 @@ export default function AdminRaporPage() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kelasId, kelasList]);
+  }, [kelasId, kelasList, baseTanggal, baseUjianId]);
 
   /* ───── pengaturan_rapor per periode ───── */
   useEffect(() => {
@@ -902,6 +975,17 @@ export default function AdminRaporPage() {
       cancelled = true;
     };
   }, [ujian]);
+
+  // Batas tanggal rapor + filter capaian per ujian.
+  const tanggalRaporKey = pengaturan?.data?.tanggal_rapor || null;
+  const ujianRaporKey = pengaturan?.ujianId || null;
+  useEffect(() => {
+    if (ujianRaporKey) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setBaseUjianId(ujianRaporKey);
+      setBaseTanggal(tanggalRaporKey);
+    }
+  }, [ujianRaporKey, tanggalRaporKey]);
 
   const pengaturanSiap = !!ujian && pengaturan?.ujianId === ujian.id;
   const siap =
@@ -920,17 +1004,19 @@ export default function AdminRaporPage() {
     const k = keyOf(s);
     if (cacheRef.current[k]) return Promise.resolve(cacheRef.current[k]);
     if (!inflightRef.current[k]) {
-      inflightRef.current[k] = buildRapor(s, {
+      inflightRef.current[k] = getRaporPrintSiswa({
+        siswa: s,
         kelas,
         ujian,
         mapelList: nilaiAkhirData.mapelList,
         nilaiAkhirMap: nilaiAkhirData.nilaiAkhir,
-        capaianMap,
+        capaianList: Array.from(capaianMap.entries()),
         pengaturanRapor: pengaturan?.data ?? null,
       })
-        .then((d) => {
-          cacheRef.current[k] = d;
-          return d;
+        .then((res) => {
+          if (res?.error) throw new Error(res.error);
+          cacheRef.current[k] = res.rapor;
+          return res.rapor;
         })
         .finally(() => {
           delete inflightRef.current[k];
@@ -1064,65 +1150,31 @@ export default function AdminRaporPage() {
   const handleDownloadFull = async () => {
     if (!siap || proses) return;
     setError("");
-    setProses({ jenis: "pdf", done: 0, total });
+    setProses({ jenis: "print", done: 0, total });
     try {
-      const [{ toJpeg }, { jsPDF }] = await Promise.all([
-        import("html-to-image"),
-        import("jspdf"),
-      ]);
-
-      const pdf = new jsPDF({
-        unit: "mm",
-        format: [215, 330],
-        orientation: "portrait",
-        compress: true,
-      });
-
-      let halamanPertama = true;
-      let meta = null;
-
+      // Cetak lewat browser agar PDF berisi teks asli (bisa diseleksi).
+      const items = [];
       for (let i = 0; i < siswaList.length; i++) {
         const s = siswaList[i];
         const data = await bangun(s);
-        meta = meta || data;
-
-        // render satu siswa di stage tersembunyi, lalu tangkap tiap halaman
-        flushSync(() => setStage({ siswa: s, rapor: data }));
-        await tungguFrame();
-        await tungguGambar(stageRef.current);
-        if (document.fonts?.ready) {
-          try {
-            await document.fonts.ready;
-          } catch {
-            /* ignore */
-          }
-        }
-
-        const pages = Array.from(stageRef.current.querySelectorAll(".page"));
-        for (const p of pages) {
-          const url = await toJpeg(p, {
-            pixelRatio: 2,
-            quality: 0.95,
-            backgroundColor: "#ffffff",
-            cacheBust: true,
-          });
-          if (!halamanPertama) pdf.addPage([215, 330], "portrait");
-          halamanPertama = false;
-          pdf.addImage(url, "JPEG", 0, 0, 215, 330);
-        }
-        setProses({ jenis: "pdf", done: i + 1, total });
+        items.push({ siswa: s, rapor: data });
+        setProses({ jenis: "print", done: i + 1, total });
       }
-
-      pdf.save(
-        `Rapor_${slug(kelas?.nama_kelas)}_Semester_${meta?.semester ?? ""}_${slug(
-          meta?.tahun_ajaran,
-        )}.pdf`,
-      );
+      flushSync(() => setPrintItems(items));
+      await tungguFrame();
+      await tungguGambar(printRef.current);
+      if (document.fonts?.ready) {
+        try {
+          await document.fonts.ready;
+        } catch {
+          /* ignore */
+        }
+      }
+      window.print();
     } catch (e) {
       console.error(e);
-      setError("Gagal membuat PDF.");
+      setError("Gagal menyiapkan cetak.");
     } finally {
-      setStage(null);
       setProses(null);
     }
   };
@@ -1199,7 +1251,7 @@ export default function AdminRaporPage() {
       {stage &&
         createPortal(
           <div ref={stageRef} className="rapor-stage">
-            <RaporPreview siswa={stage.siswa} rapor={stage.rapor} />
+            <RaporSheet siswa={stage.siswa} rapor={stage.rapor} ujian={ujian} />
           </div>,
           document.body,
         )}
@@ -1478,7 +1530,7 @@ export default function AdminRaporPage() {
                   style={{ transform: `scale(${fit.scale})` }}
                 >
                   <div className="rapor-paper">
-                    <RaporPreview siswa={siswa} rapor={rapor} />
+                    <RaporSheet siswa={siswa} rapor={rapor} ujian={ujian} />
                   </div>
                 </div>
               </div>
@@ -1904,6 +1956,17 @@ const CSS = `
     }
 
     /* ── Tanda tangan ── */
+    /* ✅ Ketidakhadiran berdampingan dengan Catatan (rapor ASAS) */
+    .absen-catatan-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0 16px;
+      align-items: stretch;
+    }
+    .absen-catatan-row > .absen,
+    .absen-catatan-row > .catatan-table {
+      height: 100%;
+    }
     .ttd {
       margin-top: 24px;
       text-align: center;

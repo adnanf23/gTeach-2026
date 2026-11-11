@@ -1,5 +1,6 @@
 import { describeError } from "@/lib/app-error";
 import * as onboardingRepository from "@/repositories/onboarding.repository";
+import { writeLog } from "@/services/systemLog.service";
 
 const firstOf = (v) => (Array.isArray(v) ? v[0] : v);
 const toArray = (v) => (Array.isArray(v) ? v : v ? [v] : []);
@@ -318,6 +319,13 @@ export async function deleteNilaiAgendaAbsensi() {
     for (const c of DATA_COLLECTIONS) {
       await onboardingRepository.truncateCollection(c);
     }
+    await writeLog({
+      type: "warning",
+      msg: "Menghapus seluruh data nilai, agenda, dan absensi.",
+      endpoint: "-",
+      statusCode: 200,
+      payload: { aksi: "truncate", collections: DATA_COLLECTIONS },
+    });
     return { error: null };
   } catch (error) {
     console.error("[deleteNilaiAgendaAbsensi]", error);
@@ -339,6 +347,13 @@ export async function resetSemester({ tahun, semester, mulai, akhir }) {
       Mulai: mulai,
       Akhir: akhir,
       is_aktif: true,
+    });
+    await writeLog({
+      type: "info",
+      msg: `Reset semester: ${tahun} semester ${semester}.`,
+      endpoint: "-",
+      statusCode: 200,
+      payload: { aksi: "reset_semester", tahun, semester, id: created.id },
     });
     return { id: created.id, error: null };
   } catch (error) {
@@ -397,6 +412,13 @@ export async function importSiswa(rows) {
       }
     }
 
+    await writeLog({
+      type: "info",
+      msg: `Import siswa: update ${updated}, tambah ${created}, hapus ${deleted}.`,
+      endpoint: "-",
+      statusCode: 200,
+      payload: { aksi: "import_siswa", updated, created, deleted },
+    });
     return { updated, created, deleted, error: null };
   } catch (error) {
     console.error("[importSiswa]", error);
@@ -455,6 +477,13 @@ export async function importGuru(rows) {
       }
     }
 
+    await writeLog({
+      type: "info",
+      msg: `Import guru: update ${updated}, dilewati ${skipped}, nonaktif ${nonaktif}.`,
+      endpoint: "-",
+      statusCode: 200,
+      payload: { aksi: "import_guru", updated, skipped, nonaktif },
+    });
     return { updated, skipped, nonaktif, error: null };
   } catch (error) {
     console.error("[importGuru]", error);

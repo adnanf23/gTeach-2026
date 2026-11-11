@@ -39,3 +39,15 @@ body {
 .no-scroll {
   overflow: hidden;
 }
+
+/* Pastikan elemen interaktif menampilkan cursor pointer (Tailwind v4 default-nya default) */
+button:not(:disabled),
+[role="button"]:not(:disabled),
+select:not(:disabled),
+summary {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
