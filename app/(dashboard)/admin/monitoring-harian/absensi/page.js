@@ -63,7 +63,7 @@ function countEffectiveDays(startStr, endStr, hariLiburList) {
 const STATUS_CONFIG = {
   hadir: {
     label: "Hadir",
-    hex: "#1d4ed8", // blue-700
+    hex: "#1d4ed8",
     dot: "bg-blue-700",
     text: "text-blue-800",
     bg: "bg-blue-50",
@@ -71,7 +71,7 @@ const STATUS_CONFIG = {
   },
   sakit: {
     label: "Sakit",
-    hex: "#60a5fa", // blue-400
+    hex: "#60a5fa",
     dot: "bg-blue-400",
     text: "text-blue-700",
     bg: "bg-blue-50",
@@ -79,13 +79,12 @@ const STATUS_CONFIG = {
   },
   izin: {
     label: "Izin",
-    hex: "#93c5fd", // blue-300
+    hex: "#93c5fd",
     dot: "bg-blue-300",
     text: "text-blue-600",
     bg: "bg-blue-50",
     ring: "ring-blue-100",
   },
-  // WARNING — tetap merah
   alpha: {
     label: "Alpha",
     hex: "#f43f5e",
@@ -370,7 +369,7 @@ const ICONS = {
 function Icon({ name, className = "h-4 w-4" }) {
   return (
     <svg
-      className={className}
+      className={`shrink-0 ${className}`}
       fill="none"
       viewBox="0 0 24 24"
       stroke="currentColor"
@@ -383,7 +382,6 @@ function Icon({ name, className = "h-4 w-4" }) {
   );
 }
 
-// TONES — aksen biru, rose untuk warning
 const TONES = {
   indigo: {
     soft: "bg-blue-50",
@@ -401,7 +399,6 @@ const TONES = {
     bar: "bg-blue-500",
     border: "border-blue-200",
   },
-  // WARNING — tetap merah
   rose: {
     soft: "bg-rose-50",
     text: "text-rose-700",
@@ -430,7 +427,7 @@ const TONES = {
 
 const CARD = "rounded-2xl bg-white ring-1 ring-slate-200/70";
 const INPUT =
-  "w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10";
+  "w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-800 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10";
 
 // Angka naik halus
 function useCountUp(target, duration = 600) {
@@ -461,7 +458,7 @@ function AnimatedNumber({ value }) {
 }
 
 // ------------------------------------------------------------------
-// Donut chart (SVG)
+// Donut chart (SVG) — ukuran fluid: mengecil otomatis di layar sempit
 // ------------------------------------------------------------------
 function DonutChart({
   segments,
@@ -488,8 +485,15 @@ function DonutChart({
   let acc = 0;
 
   return (
-    <div className="relative shrink-0" style={{ width: size, height: size }}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+    <div
+      className="relative shrink-0"
+      style={{ width: size, maxWidth: "100%", aspectRatio: "1 / 1" }}
+    >
+      <svg
+        className="h-full w-full"
+        viewBox={`0 0 ${size} ${size}`}
+        role="img"
+      >
         <circle
           cx={c}
           cy={c}
@@ -540,7 +544,7 @@ function DonutChart({
 }
 
 // ------------------------------------------------------------------
-// Hero header (biru tua)
+// Hero header — 3 baris: judul+user · kontrol tanggal · progress
 // ------------------------------------------------------------------
 function HeroHeader({
   selectedDate,
@@ -562,26 +566,38 @@ function HeroHeader({
   const isToday = selectedDate === todayStr();
 
   const ctrl =
-    "flex h-9 items-center justify-center rounded-xl bg-white/10 text-white transition hover:bg-white/20 active:scale-95";
+    "flex h-10 shrink-0 items-center justify-center rounded-xl bg-white/10 text-white transition hover:bg-white/20 active:scale-95";
 
   return (
-    <header className="mb-6 overflow-hidden rounded-3xl bg-blue-700 p-5 text-white sm:p-7">
-      <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+    <header className="mb-6 overflow-hidden rounded-3xl bg-blue-700 p-5 text-white sm:mb-8 sm:p-7">
+      {/* Baris 1: judul + user */}
+      <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <p className="text-xs font-medium text-white/60">Monitoring</p>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
             Absensi Siswa
           </h1>
-          <p className="mt-1 text-sm text-white/70">
+          <p className="mt-1.5 text-sm leading-snug text-white/70">
             {formatTanggalID(selectedDate)}
           </p>
         </div>
+        <div className="flex h-10 shrink-0 items-center gap-2 rounded-xl bg-white/15 p-1 sm:pr-3">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white text-xs font-semibold text-blue-700">
+            {initials(user?.nama_lengkap || "G")}
+          </div>
+          <span className="hidden max-w-[140px] truncate text-xs font-medium sm:inline">
+            {user?.nama_lengkap || "Guru"}
+          </span>
+        </div>
+      </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+      {/* Baris 2: kontrol */}
+      <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-2">
           <button
             onClick={() => shift(-1)}
             title="Hari sebelumnya"
-            className={`${ctrl} w-9`}
+            className={`${ctrl} w-10`}
           >
             <Icon name="left" />
           </button>
@@ -589,55 +605,51 @@ function HeroHeader({
             type="date"
             value={selectedDate}
             onChange={(e) => e.target.value && setSelectedDate(e.target.value)}
-            className="h-9 rounded-xl bg-white/15 px-3 text-sm text-white outline-none transition [color-scheme:dark] hover:bg-white/25 focus:ring-2 focus:ring-white/50"
+            className="h-10 min-w-0 flex-1 rounded-xl bg-white/15 px-3 text-sm text-white outline-none transition [color-scheme:dark] hover:bg-white/25 focus:ring-2 focus:ring-white/50 sm:flex-none"
           />
           <button
             onClick={() => shift(1)}
             title="Hari berikutnya"
-            className={`${ctrl} w-9`}
+            className={`${ctrl} w-10`}
           >
             <Icon name="right" />
           </button>
+        </div>
+
+        <div className="flex items-center gap-2">
           <button
             onClick={() => setSelectedDate(todayStr())}
             disabled={isToday}
-            className={`${ctrl} px-3 text-sm font-medium disabled:opacity-40`}
+            className={`${ctrl} flex-1 px-4 text-sm font-medium disabled:opacity-40 sm:flex-none`}
           >
             Hari ini
           </button>
           <button
             onClick={onRefresh}
             title="Segarkan"
-            className={`${ctrl} w-9`}
+            className={`${ctrl} w-10`}
           >
             <Icon name="refresh" />
           </button>
           {canExport && (
             <button
               onClick={onExport}
-              className="flex h-9 items-center gap-2 rounded-xl bg-white px-4 text-sm font-medium text-blue-700 transition hover:bg-blue-50 active:scale-95"
+              className="flex h-10 shrink-0 items-center gap-2 rounded-xl bg-white px-4 text-sm font-medium text-blue-700 transition hover:bg-blue-50 active:scale-95"
             >
               <Icon name="download" />
               Export
             </button>
           )}
-          <div className="flex h-9 items-center gap-2 rounded-xl bg-white/15 pl-1 pr-3">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-white text-[11px] font-semibold text-blue-700">
-              {initials(user?.nama_lengkap || "G")}
-            </div>
-            <span className="max-w-[110px] truncate text-xs font-medium">
-              {user?.nama_lengkap || "Guru"}
-            </span>
-          </div>
         </div>
       </div>
 
+      {/* Baris 3: progress */}
       <div className="mt-6">
         <div className="mb-2 flex items-end justify-between gap-3 text-sm">
           <span className="text-white/70">
             {isWorkday ? "Kelengkapan input absensi" : "Bukan hari kerja"}
           </span>
-          <span className="font-semibold">
+          <span className="whitespace-nowrap font-semibold">
             {loading ? "…" : isWorkday ? lengkapText : "—"}
           </span>
         </div>
@@ -656,25 +668,46 @@ function Banner({ tone, icon, title, children }) {
   const t = TONES[tone];
   return (
     <div
-      className={`flex items-start gap-2.5 rounded-2xl border ${t.border} ${t.soft} p-3 sm:gap-3 sm:p-4`}
+      className={`flex items-start gap-3 rounded-2xl border ${t.border} ${t.soft} p-4`}
     >
       <span
-        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white sm:h-8 sm:w-8 sm:rounded-xl ${t.text} ring-1 ${t.ring}`}
+        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white ${t.text} ring-1 ${t.ring}`}
       >
-        <Icon name={icon} className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+        <Icon name={icon} />
       </span>
       <div className="min-w-0 flex-1">
-        <p
-          className={`text-[13px] font-semibold leading-snug sm:text-sm ${t.text}`}
-        >
-          {title}
-        </p>
+        <p className={`text-sm font-semibold leading-snug ${t.text}`}>{title}</p>
         {children && (
-          <div
-            className={`mt-1.5 break-words text-xs leading-relaxed ${t.text}`}
-          >
+          <div className={`mt-2 break-words text-xs leading-relaxed ${t.text}`}>
             {children}
           </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Chip daftar kelas: scroll horizontal di mobile, wrap di sm+
+function KelasChips({ kelasArr, onPick, onMore, max = 20 }) {
+  return (
+    <div className="-mx-1 max-w-full overflow-x-auto px-1 pb-1 [contain:inline-size] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="flex w-max gap-2 sm:w-auto sm:flex-wrap">
+        {kelasArr.slice(0, max).map((k) => (
+          <button
+            key={k.id}
+            onClick={() => onPick(k.id)}
+            className="whitespace-nowrap rounded-full bg-white px-3 py-1.5 text-xs font-medium ring-1 ring-rose-200 transition hover:bg-rose-100 active:scale-95"
+          >
+            {k.nama_kelas}
+          </button>
+        ))}
+        {kelasArr.length > max && (
+          <button
+            onClick={onMore}
+            className="whitespace-nowrap rounded-full bg-white px-3 py-1.5 text-xs font-medium underline ring-1 ring-rose-200 transition hover:bg-rose-100 active:scale-95"
+          >
+            +{kelasArr.length - max} kelas lain
+          </button>
         )}
       </div>
     </div>
@@ -705,16 +738,18 @@ function StatCard({
   return (
     <Tag
       onClick={onClick}
-      className={`${CARD} p-4 text-left sm:p-5 ${
+      className={`${CARD} min-w-0 p-4 text-left sm:p-5 ${
         onClick
           ? "transition hover:-translate-y-0.5 hover:ring-blue-600/40 hover:shadow-md active:translate-y-0"
           : ""
       }`}
     >
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-medium text-slate-500">{label}</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="min-w-0 truncate text-xs font-medium text-slate-500">
+          {label}
+        </p>
         <span
-          className={`flex h-8 w-8 items-center justify-center rounded-xl ${t.soft} ${t.text}`}
+          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${t.soft} ${t.text}`}
         >
           <Icon name={icon} />
         </span>
@@ -731,7 +766,9 @@ function StatCard({
           />
         </div>
       )}
-      {sub && <p className="mt-2 text-xs text-slate-400">{sub}</p>}
+      {sub && (
+        <p className="mt-2 text-xs leading-snug text-slate-400">{sub}</p>
+      )}
     </Tag>
   );
 }
@@ -747,27 +784,29 @@ function StatusListCard({
 }) {
   const t = TONES[tone];
   return (
-    <section className={`${CARD} p-4 sm:p-5`}>
-      <header className="mb-3 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className={`h-2 w-2 rounded-full ${t.dot}`} />
-          <h3 className="text-sm font-semibold text-slate-800">{title}</h3>
+    <section className={`${CARD} min-w-0 p-5 sm:p-6`}>
+      <header className="mb-4 flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className={`h-2 w-2 shrink-0 rounded-full ${t.dot}`} />
+          <h3 className="truncate text-sm font-semibold text-slate-800">
+            {title}
+          </h3>
           <span
-            className={`rounded-full px-2 py-0.5 text-xs font-semibold ${t.soft} ${t.text}`}
+            className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${t.soft} ${t.text}`}
           >
             {kelasArr.length}
           </span>
         </div>
         <button
           onClick={onLihatSemua}
-          className="text-xs font-medium text-blue-600 hover:underline"
+          className="shrink-0 text-xs font-medium text-blue-600 hover:underline"
         >
           Lihat semua
         </button>
       </header>
 
       {kelasArr.length === 0 ? (
-        <p className="rounded-xl bg-slate-50 px-3 py-5 text-center text-sm text-slate-400">
+        <p className="rounded-xl bg-slate-50 px-3 py-6 text-center text-sm text-slate-400">
           {emptyText}
         </p>
       ) : (
@@ -776,11 +815,11 @@ function StatusListCard({
             <li key={k.id}>
               <button
                 onClick={() => onLihatDetail(k.id)}
-                className="group flex w-full items-center justify-between gap-3 rounded-lg px-1 py-2.5 text-left transition hover:bg-slate-50"
+                className="group flex w-full items-center justify-between gap-3 rounded-lg px-1 py-3 text-left transition hover:bg-slate-50"
               >
                 <div className="flex min-w-0 items-center gap-3">
                   <span
-                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[11px] font-semibold ${t.soft} ${t.text}`}
+                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[11px] font-semibold ${t.soft} ${t.text}`}
                   >
                     {k.nama_kelas?.slice(0, 2).toUpperCase()}
                   </span>
@@ -795,13 +834,13 @@ function StatusListCard({
                 </div>
                 <Icon
                   name="right"
-                  className="h-4 w-4 shrink-0 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-blue-600"
+                  className="h-4 w-4 text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-blue-600"
                 />
               </button>
             </li>
           ))}
           {kelasArr.length > 4 && (
-            <li className="pt-2.5 text-center">
+            <li className="pt-3 text-center">
               <button
                 onClick={onLihatSemua}
                 className="text-xs text-slate-400 hover:text-slate-600"
@@ -826,17 +865,17 @@ function RankingCard({ data, avg, onPick, loading }) {
   const textClass = tab === "terbaik" ? "text-blue-700" : "text-rose-700";
 
   return (
-    <section className={`${CARD} p-4 sm:p-5`}>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+    <section className={`${CARD} p-5 sm:p-6`}>
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h3 className="text-sm font-semibold text-slate-800">
             Ranking Kehadiran
           </h3>
-          <p className="text-xs text-slate-400">
+          <p className="mt-0.5 text-xs text-slate-400">
             30 hari terakhir · rata-rata {avg.toFixed(1)}%
           </p>
         </div>
-        <div className="flex gap-1 rounded-xl bg-slate-100 p-1">
+        <div className="flex gap-1 rounded-xl bg-slate-100 p-1 sm:w-auto">
           {[
             ["terbaik", "Terbaik"],
             ["terendah", "Terendah"],
@@ -844,7 +883,7 @@ function RankingCard({ data, avg, onPick, loading }) {
             <button
               key={k}
               onClick={() => setTab(k)}
-              className={`rounded-lg px-3 py-1 text-xs font-medium transition ${
+              className={`flex-1 rounded-lg px-4 py-1.5 text-xs font-medium transition sm:flex-none ${
                 tab === k
                   ? "bg-blue-600 text-white shadow-sm"
                   : "text-slate-500 hover:text-slate-800"
@@ -863,15 +902,15 @@ function RankingCard({ data, avg, onPick, loading }) {
           Belum ada data.
         </p>
       ) : (
-        <ul className="space-y-1">
+        <ul className="space-y-1.5">
           {rows.map(({ kelas, rate, display }, i) => (
             <li key={kelas.id}>
               <button
                 onClick={() => onPick(kelas.id)}
-                className="group w-full rounded-xl px-2 py-2 text-left transition hover:bg-slate-50"
+                className="group w-full rounded-xl px-2 py-2.5 text-left transition hover:bg-slate-50"
               >
-                <div className="mb-1.5 flex items-center justify-between gap-2 text-xs">
-                  <span className="flex min-w-0 items-center gap-2 font-medium text-slate-700">
+                <div className="mb-2 flex items-center justify-between gap-3 text-xs">
+                  <span className="flex min-w-0 items-center gap-2.5 font-medium text-slate-700">
                     <span
                       className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[10px] font-bold ${
                         i < 3
@@ -902,7 +941,7 @@ function RankingCard({ data, avg, onPick, loading }) {
       {sorted.length > 5 && (
         <button
           onClick={() => setShowAll((v) => !v)}
-          className="mt-3 w-full rounded-xl py-2 text-xs font-medium text-slate-500 transition hover:bg-slate-50 hover:text-blue-600"
+          className="mt-4 w-full rounded-xl py-2.5 text-xs font-medium text-slate-500 transition hover:bg-slate-50 hover:text-blue-600"
         >
           {showAll
             ? "Tampilkan 5 teratas"
@@ -913,6 +952,7 @@ function RankingCard({ data, avg, onPick, loading }) {
   );
 }
 
+// Modal: bottom-sheet di mobile, dialog di sm+
 function Modal({ children, onClose }) {
   useEffect(() => {
     const onKey = (e) => e.key === "Escape" && onClose();
@@ -921,12 +961,12 @@ function Modal({ children, onClose }) {
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4">
       <div
         className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
         onClick={onClose}
       />
-      <div className="relative w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl ring-1 ring-slate-200">
+      <div className="relative max-h-[92vh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-white p-5 shadow-2xl ring-1 ring-slate-200 sm:rounded-3xl sm:p-6">
         {children}
       </div>
     </div>
@@ -995,17 +1035,17 @@ function ExportModal({
     <Modal onClose={() => !exporting && onClose()}>
       <div className="space-y-5">
         <div className="flex items-start justify-between gap-3">
-          <div>
+          <div className="min-w-0">
             <h3 className="text-lg font-semibold text-slate-900">
               Export Absensi
             </h3>
-            <p className="mt-0.5 text-xs text-slate-400">
+            <p className="mt-1 text-xs leading-relaxed text-slate-400">
               Rekap kehadiran siswa per kelas dalam rentang tanggal tertentu.
             </p>
           </div>
           <button
             onClick={() => !exporting && onClose()}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
           >
             <Icon name="x" />
           </button>
@@ -1032,7 +1072,7 @@ function ExportModal({
           </select>
         </Field>
 
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Tanggal mulai">
             <input
               type="date"
@@ -1051,20 +1091,20 @@ function ExportModal({
           </Field>
         </div>
 
-        <div className="flex items-start gap-2 rounded-xl bg-blue-50 px-3.5 py-2.5 text-xs text-blue-800">
-          <Icon name="info" className="mt-0.5 h-4 w-4 shrink-0" />
+        <div className="flex items-start gap-2.5 rounded-xl bg-blue-50 px-3.5 py-3 text-xs leading-relaxed text-blue-800">
+          <Icon name="info" className="mt-0.5 h-4 w-4" />
           <p>
             File diunduh sebagai <b>.xlsx</b> dengan header dan formatting
             sesuai template.
           </p>
         </div>
 
-        <div className="flex items-center justify-end gap-2">
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <button
             type="button"
             onClick={onClose}
             disabled={exporting}
-            className="rounded-xl px-4 py-2 text-sm font-medium text-slate-500 transition hover:bg-slate-100 disabled:opacity-50"
+            className="rounded-xl px-4 py-2.5 text-sm font-medium text-slate-500 transition hover:bg-slate-100 disabled:opacity-50"
           >
             Batal
           </button>
@@ -1072,7 +1112,7 @@ function ExportModal({
             type="button"
             onClick={handleExport}
             disabled={exporting}
-            className="flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:opacity-50"
+            className="flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-blue-700 disabled:opacity-50"
           >
             {exporting && (
               <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
@@ -1137,14 +1177,14 @@ function StatusDonutCard({
       : "Hadir";
 
   return (
-    <section className={`${CARD} p-4 sm:p-5 lg:col-span-2`}>
-      <div className="mb-4 flex items-start justify-between gap-3">
-        <div>
+    <section className={`${CARD} min-w-0 p-5 sm:p-6 lg:col-span-2`}>
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
           <h3 className="text-sm font-semibold text-slate-800">
             Kehadiran Siswa
           </h3>
-          <p className="text-xs text-slate-400">
-            Klik bagian donut atau legenda untuk memfilter daftar siswa.
+          <p className="mt-0.5 text-xs leading-relaxed text-slate-400">
+            Ketuk donut atau legenda untuk memfilter daftar siswa.
           </p>
         </div>
         {activeStatus && (
@@ -1162,7 +1202,7 @@ function StatusDonutCard({
         <div className={loading ? "animate-pulse" : ""}>
           <DonutChart
             segments={isWorkday && !loading ? segments : []}
-            size={210}
+            size={200}
             thickness={26}
             activeKey={focusKey}
             onHover={setHover}
@@ -1172,16 +1212,18 @@ function StatusDonutCard({
                 : undefined
             }
           >
-            <div>
+            <div className="px-6">
               <p className="text-3xl font-semibold tracking-tight text-slate-900">
                 {centerBig}
               </p>
-              <p className="mt-0.5 text-xs text-slate-500">{centerSmall}</p>
+              <p className="mt-0.5 text-xs leading-snug text-slate-500">
+                {centerSmall}
+              </p>
             </div>
           </DonutChart>
         </div>
 
-        <ul className="w-full flex-1 space-y-1.5">
+        <ul className="w-full min-w-0 flex-1 space-y-1.5">
           {segments.map((s) => {
             const active = activeStatus === s.key;
             return (
@@ -1191,25 +1233,25 @@ function StatusDonutCard({
                   onClick={() => onSelect(active ? null : s.key)}
                   onMouseEnter={() => setHover(s.key)}
                   onMouseLeave={() => setHover(null)}
-                  className={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm transition disabled:opacity-50 ${
+                  className={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition disabled:opacity-50 ${
                     active
                       ? "bg-blue-600 text-white"
                       : "text-slate-700 hover:bg-slate-50"
                   }`}
                 >
-                  <span className="flex items-center gap-2.5">
+                  <span className="flex min-w-0 items-center gap-2.5">
                     <span
-                      className="h-2.5 w-2.5 rounded-full ring-1 ring-black/10"
+                      className="h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-black/10"
                       style={{ background: s.color }}
                     />
-                    {s.label}
+                    <span className="truncate">{s.label}</span>
                   </span>
-                  <span className="flex items-baseline gap-2">
+                  <span className="flex shrink-0 items-baseline gap-2">
                     <span className="font-semibold tabular-nums">
                       {isWorkday ? s.value : 0}
                     </span>
                     <span
-                      className={`w-9 text-right text-xs tabular-nums ${
+                      className={`w-10 text-right text-xs tabular-nums ${
                         active ? "text-white/60" : "text-slate-400"
                       }`}
                     >
@@ -1220,7 +1262,7 @@ function StatusDonutCard({
               </li>
             );
           })}
-          <li className="px-3 pt-2 text-xs text-slate-400">
+          <li className="px-3 pt-2 text-xs leading-relaxed text-slate-400">
             {isWorkday
               ? `${tercatat} dari ${totalSiswa} siswa sudah tercatat`
               : "Tidak ada absensi pada hari ini."}
@@ -1252,17 +1294,19 @@ function KelengkapanDonutCard({
   const pct = total ? Math.round((sudah / total) * 100) : 0;
 
   return (
-    <section className={`${CARD} flex flex-col p-4 sm:p-5`}>
+    <section className={`${CARD} flex min-w-0 flex-col p-5 sm:p-6`}>
       <h3 className="text-sm font-semibold text-slate-800">
         Kelengkapan Input
       </h3>
-      <p className="mb-4 text-xs text-slate-400">Jumlah kelas hari ini</p>
+      <p className="mb-5 mt-0.5 text-xs text-slate-400">
+        Jumlah kelas hari ini
+      </p>
 
-      <div className="flex flex-1 flex-col items-center justify-center gap-4">
+      <div className="flex flex-1 flex-col items-center justify-center gap-5">
         <div className={loading ? "animate-pulse" : ""}>
           <DonutChart
             segments={isWorkday && !loading ? segments : []}
-            size={150}
+            size={160}
             thickness={20}
             activeKey={focusKey}
             onHover={setHover}
@@ -1281,7 +1325,7 @@ function KelengkapanDonutCard({
           </DonutChart>
         </div>
 
-        <div className="flex w-full gap-2">
+        <div className="grid w-full grid-cols-2 gap-2.5">
           {segments.map((s) => (
             <button
               key={s.key}
@@ -1289,20 +1333,20 @@ function KelengkapanDonutCard({
               onClick={() => onSelect(activeFilter === s.key ? "semua" : s.key)}
               onMouseEnter={() => setHover(s.key)}
               onMouseLeave={() => setHover(null)}
-              className={`flex-1 rounded-xl px-3 py-2 text-left transition disabled:opacity-50 ${
+              className={`min-w-0 rounded-xl px-3 py-2.5 text-left transition disabled:opacity-50 ${
                 activeFilter === s.key
                   ? "bg-blue-600 text-white"
                   : "bg-slate-50 text-slate-700 hover:bg-slate-100"
               }`}
             >
-              <span className="flex items-center gap-1.5 text-[11px]">
+              <span className="flex min-w-0 items-center gap-1.5 text-[11px]">
                 <span
-                  className="h-2 w-2 rounded-full"
+                  className="h-2 w-2 shrink-0 rounded-full"
                   style={{ background: s.color }}
                 />
-                {s.label}
+                <span className="truncate">{s.label}</span>
               </span>
-              <span className="mt-0.5 block text-lg font-semibold tabular-nums">
+              <span className="mt-1 block truncate text-lg font-semibold tabular-nums">
                 {isWorkday ? s.value : 0}
               </span>
             </button>
@@ -1335,9 +1379,9 @@ function Toolbar({
   disabledStatus,
 }) {
   const segments = [
-    { key: "semua", label: "Semua" },
-    { key: "sudah", label: "Lengkap" },
-    { key: "belum", label: "Belum lengkap" },
+    { key: "semua", label: "Semua", short: "Semua" },
+    { key: "sudah", label: "Lengkap", short: "Lengkap" },
+    { key: "belum", label: "Belum lengkap", short: "Belum" },
   ];
   const chips = [
     { key: "semua", label: "Semua status" },
@@ -1346,58 +1390,63 @@ function Toolbar({
   ];
 
   return (
-    <div className={`${CARD} space-y-3 p-3 sm:p-4`}>
+    <div className={`${CARD} space-y-4 p-4 sm:p-5`}>
+      {/* Judul + pencarian + kelas */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
         <h2 className="text-base font-semibold text-slate-900 lg:mr-auto">
           {title}
         </h2>
 
-        <div className="relative lg:w-72">
-          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
-            <Icon name="search" />
-          </span>
-          <input
-            value={searchValue}
-            onChange={(e) => setSearchValue(e.target.value)}
-            placeholder={searchPlaceholder}
-            className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-9 text-sm outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10"
-          />
-          {searchValue && (
-            <button
-              onClick={() => setSearchValue("")}
-              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
-            >
-              <Icon name="x" className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:flex">
+          <div className="relative lg:w-72">
+            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+              <Icon name="search" />
+            </span>
+            <input
+              value={searchValue}
+              onChange={(e) => setSearchValue(e.target.value)}
+              placeholder={searchPlaceholder}
+              className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-9 text-sm outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10"
+            />
+            {searchValue && (
+              <button
+                onClick={() => setSearchValue("")}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+              >
+                <Icon name="x" className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
 
-        <select
-          value={filterKelas}
-          onChange={(e) => setFilterKelas(e.target.value)}
-          className="rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm text-slate-700 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10 lg:w-48"
-        >
-          <option value="semua">Semua kelas</option>
-          {kelasList.map((k) => (
-            <option key={k.id} value={k.id}>
-              {k.nama_kelas}
-            </option>
-          ))}
-        </select>
+          <select
+            value={filterKelas}
+            onChange={(e) => setFilterKelas(e.target.value)}
+            className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-700 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10 lg:w-48"
+          >
+            <option value="semua">Semua kelas</option>
+            {kelasList.map((k) => (
+              <option key={k.id} value={k.id}>
+                {k.nama_kelas}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
+      {/* Segmented: kelengkapan */}
       <div className="flex gap-1 rounded-xl bg-slate-100 p-1">
         {segments.map((s) => (
           <button
             key={s.key}
             onClick={() => setFilterStatus(s.key)}
-            className={`flex-1 rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+            className={`min-w-0 flex-1 truncate rounded-lg px-2 py-2 text-xs font-medium transition sm:px-3 ${
               filterStatus === s.key
                 ? "bg-blue-600 text-white shadow-sm"
                 : "text-slate-500 hover:text-slate-800"
             }`}
           >
-            {s.label}{" "}
+            <span className="hidden sm:inline">{s.label}</span>
+            <span className="sm:hidden">{s.short}</span>{" "}
             <span
               className={
                 filterStatus === s.key ? "text-white/60" : "text-slate-400"
@@ -1409,45 +1458,50 @@ function Toolbar({
         ))}
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5">
-        {chips.map((c) => {
-          const active = siswaStatus === c.key;
-          return (
-            <button
-              key={c.key}
-              disabled={disabledStatus}
-              onClick={() => setSiswaStatus(c.key)}
-              className={`rounded-full px-3 py-1 text-xs font-medium ring-1 transition disabled:opacity-40 ${
-                active
-                  ? "bg-blue-600 text-white ring-blue-600"
-                  : "bg-white text-slate-600 ring-slate-200 hover:ring-blue-600/40"
-              }`}
-            >
-              {c.label}
-              {c.key !== "semua" && (
-                <span
-                  className={`ml-1.5 ${active ? "text-white/60" : "text-slate-400"}`}
-                >
-                  {siswaStatusCounts[c.key] ?? 0}
-                </span>
-              )}
-            </button>
-          );
-        })}
-        <span className="ml-auto flex gap-1">
-          <button
-            onClick={onExpandAll}
-            className="rounded-lg px-2.5 py-1 text-xs font-medium text-slate-500 transition hover:bg-slate-100 hover:text-blue-600"
-          >
-            Buka semua
-          </button>
-          <button
-            onClick={onCollapseAll}
-            className="rounded-lg px-2.5 py-1 text-xs font-medium text-slate-500 transition hover:bg-slate-100 hover:text-blue-600"
-          >
-            Tutup semua
-          </button>
-        </span>
+      {/* Chip status siswa: scroll horizontal di mobile */}
+      <div className="-mx-4 max-w-full overflow-x-auto px-4 pb-1 [contain:inline-size] [scrollbar-width:none] sm:mx-0 sm:overflow-visible sm:px-0 sm:pb-0 [&::-webkit-scrollbar]:hidden">
+        <div className="flex w-max gap-2 sm:w-auto sm:flex-wrap">
+          {chips.map((c) => {
+            const active = siswaStatus === c.key;
+            return (
+              <button
+                key={c.key}
+                disabled={disabledStatus}
+                onClick={() => setSiswaStatus(c.key)}
+                className={`whitespace-nowrap rounded-full px-3.5 py-1.5 text-xs font-medium ring-1 transition disabled:opacity-40 ${
+                  active
+                    ? "bg-blue-600 text-white ring-blue-600"
+                    : "bg-white text-slate-600 ring-slate-200 hover:ring-blue-600/40"
+                }`}
+              >
+                {c.label}
+                {c.key !== "semua" && (
+                  <span
+                    className={`ml-1.5 ${active ? "text-white/60" : "text-slate-400"}`}
+                  >
+                    {siswaStatusCounts[c.key] ?? 0}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Buka / tutup semua */}
+      <div className="flex justify-end gap-1 border-t border-slate-100 pt-3">
+        <button
+          onClick={onExpandAll}
+          className="rounded-lg px-3 py-1.5 text-xs font-medium text-slate-500 transition hover:bg-slate-100 hover:text-blue-600"
+        >
+          Buka semua
+        </button>
+        <button
+          onClick={onCollapseAll}
+          className="rounded-lg px-3 py-1.5 text-xs font-medium text-slate-500 transition hover:bg-slate-100 hover:text-blue-600"
+        >
+          Tutup semua
+        </button>
       </div>
     </div>
   );
@@ -1530,7 +1584,6 @@ function AbsensiContent({
     loadTanggal(selectedDate);
   }, [selectedDate, loadTanggal]);
 
-  // Begitu kedua fetch pertama selesai → tandai siap
   useEffect(() => {
     if (initialReady) return;
     if (!loadingRange && !loadingTanggal) {
@@ -1570,7 +1623,6 @@ function AbsensiContent({
     return kelasList.filter((k) => !kelasLengkapIds.has(k.id));
   }, [kelasList, kelasLengkapIds, selectedIsWorkday]);
 
-  // Ranking kehadiran (hari efektif × jumlah siswa)
   const statistikKelas = useMemo(() => {
     if (hariEfektif30 === 0) return [];
     const map = new Map();
@@ -1616,7 +1668,6 @@ function AbsensiContent({
     return map;
   }, [absensiTanggal]);
 
-  // Map status per siswa per kelas
   const statusMapPerKelas = useMemo(() => {
     const out = {};
     for (const a of absensiTanggal) {
@@ -1765,67 +1816,21 @@ function AbsensiContent({
   }
 
   return (
-    <div className="space-y-5 sm:space-y-6">
-      {/* Banner status hari */}
-      {!selectedIsWorkday ? (
+    <div className="w-full min-w-0 max-w-full space-y-6 sm:space-y-8">
+      {/* Banner — hanya tampil di hari kerja (hari libur sudah dijelaskan kartu lain) */}
+      {selectedIsWorkday && kelasBelum.length > 0 ? (
         <Banner
           tone="rose"
           icon="alert"
           title={`${kelasBelum.length} kelas belum lengkap isi absensi pada ${formatTanggalID(selectedDate)}`}
         >
-          {/* Mobile: baris horizontal scroll · sm+: wrap */}
-          <div className="-mx-1 -mb-1 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            <div className="flex w-max gap-1.5 sm:w-auto sm:flex-wrap">
-              {kelasBelum.slice(0, 20).map((k) => (
-                <button
-                  key={k.id}
-                  onClick={() => goToDetail(k.id, null)}
-                  className="whitespace-nowrap rounded-full bg-white px-2.5 py-1 text-xs font-medium ring-1 ring-rose-200 transition hover:bg-rose-100 active:scale-95 sm:py-0.5"
-                >
-                  {k.nama_kelas}
-                </button>
-              ))}
-              {kelasBelum.length > 20 && (
-                <button
-                  onClick={() => goToDetail(null, "belum")}
-                  className="whitespace-nowrap rounded-full bg-white px-2.5 py-1 text-xs font-medium underline ring-1 ring-rose-200 transition hover:bg-rose-100 active:scale-95 sm:py-0.5"
-                >
-                  +{kelasBelum.length - 20} kelas lain
-                </button>
-              )}
-            </div>
-          </div>
+          <KelasChips
+            kelasArr={kelasBelum}
+            onPick={(id) => goToDetail(id, null)}
+            onMore={() => goToDetail(null, "belum")}
+          />
         </Banner>
-      ) : kelasBelum.length > 0 ? (
-        <Banner
-          tone="rose"
-          icon="alert"
-          title={`${kelasBelum.length} kelas belum lengkap isi absensi pada ${formatTanggalID(selectedDate)}`}
-        >
-          {/* Mobile: baris horizontal scroll · sm+: wrap */}
-          <div className="-mx-1 -mb-1 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            <div className="flex w-max gap-1.5 sm:w-auto sm:flex-wrap">
-              {kelasBelum.slice(0, 20).map((k) => (
-                <button
-                  key={k.id}
-                  onClick={() => goToDetail(k.id, null)}
-                  className="whitespace-nowrap rounded-full bg-white px-2.5 py-1 text-xs font-medium ring-1 ring-rose-200 transition hover:bg-rose-100 active:scale-95 sm:py-0.5"
-                >
-                  {k.nama_kelas}
-                </button>
-              ))}
-              {kelasBelum.length > 20 && (
-                <button
-                  onClick={() => goToDetail(null, "belum")}
-                  className="whitespace-nowrap rounded-full bg-white px-2.5 py-1 text-xs font-medium underline ring-1 ring-rose-200 transition hover:bg-rose-100 active:scale-95 sm:py-0.5"
-                >
-                  +{kelasBelum.length - 20} kelas lain
-                </button>
-              )}
-            </div>
-          </div>
-        </Banner>
-      ) : kelasList.length > 0 ? (
+      ) : selectedIsWorkday && kelasList.length > 0 ? (
         <Banner
           tone="emerald"
           icon="check"
@@ -1834,7 +1839,7 @@ function AbsensiContent({
       ) : null}
 
       {/* Statistik */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <StatCard
           label="Total Kelas"
           value={kelasList.length}
@@ -1892,7 +1897,7 @@ function AbsensiContent({
       </div>
 
       {/* Donut charts */}
-      <div className="grid gap-3 sm:gap-4 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-3">
         <StatusDonutCard
           totals={totalsHari}
           belum={belumTercatatHari}
@@ -1918,7 +1923,7 @@ function AbsensiContent({
       </div>
 
       {/* Status kelas */}
-      <div className="grid gap-3 sm:gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:gap-5 lg:grid-cols-2">
         {selectedIsWorkday ? (
           <>
             <StatusListCard
@@ -1941,14 +1946,14 @@ function AbsensiContent({
             />
           </>
         ) : (
-          <section className={`${CARD} p-4 sm:p-5 lg:col-span-2`}>
+          <section className={`${CARD} p-5 sm:p-6 lg:col-span-2`}>
             <div className="flex items-center gap-2">
               <span className="h-2 w-2 rounded-full bg-slate-400" />
               <h3 className="text-sm font-semibold text-slate-800">
                 {selectedIsWeekend ? "Akhir Pekan" : "Hari Libur"}
               </h3>
             </div>
-            <p className="mt-2 text-sm text-slate-500">
+            <p className="mt-2 text-sm leading-relaxed text-slate-500">
               Tanggal <b>{formatTanggalID(selectedDate)}</b> bukan hari kerja
               efektif, jadi tidak ada absensi yang perlu dilengkapi.
             </p>
@@ -1964,7 +1969,7 @@ function AbsensiContent({
       />
 
       {/* Daftar kelas */}
-      <div id="absensi-list-section" className="scroll-mt-6 space-y-3">
+      <div id="absensi-list-section" className="scroll-mt-6 space-y-4">
         <Toolbar
           title="Absensi per Kelas"
           searchValue={searchSiswa}
@@ -1995,7 +2000,7 @@ function AbsensiContent({
             </p>
           </div>
         ) : (
-          <div className="space-y-2.5">
+          <div className="space-y-3">
             {kelasUntukDitampilkan.map((k) => (
               <KelasAbsensiCard
                 key={k.id}
@@ -2083,6 +2088,10 @@ function KelasAbsensiCard({
       return siswaStatus === "belum" ? !st : st === siswaStatus;
     });
 
+  // Grid baris siswa: # | nama(+NIS di mobile) | NIS (sm+) | status
+  const ROW_GRID =
+    "grid grid-cols-[1.75rem_minmax(0,1fr)_auto] items-center gap-x-3 sm:grid-cols-[2rem_minmax(0,1fr)_8rem_auto]";
+
   return (
     <div
       className={`${CARD} overflow-hidden transition hover:shadow-md ${
@@ -2091,59 +2100,60 @@ function KelasAbsensiCard({
     >
       <button
         onClick={onToggle}
-        className="flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left transition hover:bg-slate-50/70 sm:px-5"
+        className="flex w-full items-center gap-3 px-4 py-4 text-left transition hover:bg-slate-50/70 sm:gap-4 sm:px-5"
       >
-        <div className="flex min-w-0 flex-1 items-center gap-3.5">
-          <DonutChart
-            segments={selectedIsWorkday ? miniSegments : []}
-            size={44}
-            thickness={6}
-          >
-            <span className={`text-[11px] font-semibold ${t.text}`}>
-              {kelas.nama_kelas?.slice(0, 2).toUpperCase()}
-            </span>
-          </DonutChart>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold text-slate-900">
+        <DonutChart
+          segments={selectedIsWorkday ? miniSegments : []}
+          size={46}
+          thickness={6}
+        >
+          <span className={`text-[11px] font-semibold ${t.text}`}>
+            {kelas.nama_kelas?.slice(0, 2).toUpperCase()}
+          </span>
+        </DonutChart>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <p className="min-w-0 truncate text-sm font-semibold text-slate-900">
               {kelas.nama_kelas}
             </p>
-            <div className="mt-1 flex items-center gap-2">
-              <div className="h-1 w-24 overflow-hidden rounded-full bg-slate-100">
-                <div
-                  className={`h-full rounded-full ${t.bar} transition-all duration-500`}
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
-              <p className="text-xs text-slate-400">
-                {records.length}/{siswaKelas.length} siswa tercatat
-              </p>
+            <span
+              className={`shrink-0 whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ${t.soft} ${t.text} ${t.ring}`}
+            >
+              {statusLabel}
+            </span>
+          </div>
+          <div className="mt-2 flex items-center gap-2.5">
+            <div className="h-1.5 w-full max-w-[8rem] flex-1 overflow-hidden rounded-full bg-slate-100">
+              <div
+                className={`h-full rounded-full ${t.bar} transition-all duration-500`}
+                style={{ width: `${progress}%` }}
+              />
             </div>
+            <p className="whitespace-nowrap text-xs text-slate-400">
+              {records.length}/{siswaKelas.length}
+              <span className="hidden sm:inline"> siswa tercatat</span>
+            </p>
           </div>
         </div>
 
-        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-          <div className="hidden gap-1.5 md:flex">
-            {STATUS_ORDER.map((s) =>
-              counts[s] > 0 ? (
-                <span
-                  key={s}
-                  className={`rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${STATUS_CONFIG[s].bg} ${STATUS_CONFIG[s].text} ${STATUS_CONFIG[s].ring}`}
-                >
-                  {STATUS_CONFIG[s].label} {counts[s]}
-                </span>
-              ) : null,
-            )}
-          </div>
-          <span
-            className={`whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${t.soft} ${t.text} ${t.ring}`}
-          >
-            {statusLabel}
-          </span>
-          <Icon
-            name="chevron"
-            className={`h-4 w-4 text-slate-400 transition-transform ${expanded ? "rotate-180" : ""}`}
-          />
+        <div className="hidden shrink-0 gap-1.5 lg:flex">
+          {STATUS_ORDER.map((s) =>
+            counts[s] > 0 ? (
+              <span
+                key={s}
+                className={`rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${STATUS_CONFIG[s].bg} ${STATUS_CONFIG[s].text} ${STATUS_CONFIG[s].ring}`}
+              >
+                {STATUS_CONFIG[s].label} {counts[s]}
+              </span>
+            ) : null,
+          )}
         </div>
+
+        <Icon
+          name="chevron"
+          className={`h-4 w-4 text-slate-400 transition-transform ${expanded ? "rotate-180" : ""}`}
+        />
       </button>
 
       {expanded && (
@@ -2153,80 +2163,92 @@ function KelasAbsensiCard({
               Belum ada data siswa di kelas ini.
             </p>
           ) : !selectedIsWorkday ? (
-            <div className="rounded-xl bg-white px-3 py-4 text-center text-sm text-slate-500 ring-1 ring-slate-200/70">
+            <div className="rounded-xl bg-white px-4 py-5 text-center text-sm text-slate-500 ring-1 ring-slate-200/70">
               Tanggal ini bukan hari kerja efektif. Tidak ada absensi untuk
               dicatat.
             </div>
           ) : (
-            <>
+            <div className="space-y-3">
+              {/* Ringkasan status — tampil di mobile (chip header disembunyikan) */}
+              <div className="flex flex-wrap gap-1.5 lg:hidden">
+                {STATUS_ORDER.map((s) =>
+                  counts[s] > 0 ? (
+                    <span
+                      key={s}
+                      className={`rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${STATUS_CONFIG[s].bg} ${STATUS_CONFIG[s].text} ${STATUS_CONFIG[s].ring}`}
+                    >
+                      {STATUS_CONFIG[s].label} {counts[s]}
+                    </span>
+                  ) : null,
+                )}
+              </div>
+
               {belumTercatat > 0 && (
-                <div className="mb-3 flex items-center gap-2 rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700 ring-1 ring-rose-200">
-                  <Icon name="alert" className="h-4 w-4 shrink-0" />
+                <div className="flex items-center gap-2 rounded-xl bg-rose-50 px-3.5 py-2.5 text-xs text-rose-700 ring-1 ring-rose-200">
+                  <Icon name="alert" className="h-4 w-4" />
                   {belumTercatat} siswa belum tercatat pada tanggal ini.
                 </div>
               )}
-              <div className="overflow-x-auto rounded-xl bg-white ring-1 ring-slate-200/70">
-                <table className="w-full text-left text-sm">
-                  <thead>
-                    <tr className="border-b border-slate-100 bg-slate-50 text-[11px] uppercase tracking-wide text-slate-400">
-                      <th className="w-10 px-4 py-2.5 font-medium">#</th>
-                      <th className="px-4 py-2.5 font-medium">Nama siswa</th>
-                      <th className="px-4 py-2.5 font-medium">NIS</th>
-                      <th className="px-4 py-2.5 font-medium">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {rows.length === 0 ? (
-                      <tr>
-                        <td
-                          colSpan={4}
-                          className="px-4 py-6 text-center text-sm text-slate-400"
+
+              <div className="overflow-hidden rounded-xl bg-white ring-1 ring-slate-200/70">
+                <div
+                  className={`${ROW_GRID} border-b border-slate-100 bg-slate-50 px-4 py-2.5 text-[11px] font-medium text-slate-400`}
+                >
+                  <span>#</span>
+                  <span>Nama siswa</span>
+                  <span className="hidden sm:block">NIS</span>
+                  <span>Status</span>
+                </div>
+
+                {rows.length === 0 ? (
+                  <p className="px-4 py-8 text-center text-sm text-slate-400">
+                    Tidak ada siswa yang cocok dengan filter.
+                  </p>
+                ) : (
+                  <ul className="divide-y divide-slate-100">
+                    {rows.map((s, idx) => {
+                      const status = statusBySiswaId.get(s.id);
+                      const cfg = status ? STATUS_CONFIG[status] : null;
+                      return (
+                        <li
+                          key={s.id}
+                          className={`${ROW_GRID} px-4 py-3 transition hover:bg-slate-50`}
                         >
-                          Tidak ada siswa yang cocok dengan filter.
-                        </td>
-                      </tr>
-                    ) : (
-                      rows.map((s, idx) => {
-                        const status = statusBySiswaId.get(s.id);
-                        const cfg = status ? STATUS_CONFIG[status] : null;
-                        return (
-                          <tr
-                            key={s.id}
-                            className="transition hover:bg-slate-50"
-                          >
-                            <td className="px-4 py-2.5 text-xs text-slate-400">
-                              {idx + 1}
-                            </td>
-                            <td className="max-w-[180px] truncate px-4 py-2.5 font-medium text-slate-800 sm:max-w-none">
+                          <span className="text-xs text-slate-400">
+                            {idx + 1}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium text-slate-800">
                               {s.nama_siswa}
-                            </td>
-                            <td className="px-4 py-2.5 text-slate-500">
-                              {s.nis}
-                            </td>
-                            <td className="px-4 py-2.5">
-                              {cfg ? (
-                                <span
-                                  className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ${cfg.bg} ${cfg.text} ${cfg.ring}`}
-                                >
-                                  <span
-                                    className={`h-1.5 w-1.5 rounded-full ${cfg.dot}`}
-                                  />
-                                  {cfg.label}
-                                </span>
-                              ) : (
-                                <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs text-slate-400">
-                                  Belum
-                                </span>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
+                            </p>
+                            <p className="mt-0.5 truncate text-xs text-slate-400 sm:hidden">
+                              {s.nis || "-"}
+                            </p>
+                          </div>
+                          <span className="hidden truncate text-sm text-slate-500 sm:block">
+                            {s.nis || "-"}
+                          </span>
+                          {cfg ? (
+                            <span
+                              className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${cfg.bg} ${cfg.text} ${cfg.ring}`}
+                            >
+                              <span
+                                className={`h-1.5 w-1.5 rounded-full ${cfg.dot}`}
+                              />
+                              {cfg.label}
+                            </span>
+                          ) : (
+                            <span className="whitespace-nowrap rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-400">
+                              Belum
+                            </span>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
               </div>
-            </>
+            </div>
           )}
         </div>
       )}
@@ -2306,8 +2328,8 @@ export default function AbsensiPage() {
   const totalSiswa = siswaList.length;
 
   return (
-    <div className="min-h-screen text-slate-900">
-      <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+    <div className="min-h-screen w-full min-w-0 max-w-full overflow-x-hidden text-slate-900">
+      <div className="mx-auto w-full min-w-0 max-w-7xl px-4 py-5 sm:px-6 sm:py-6 lg:px-8 lg:py-8">
         <HeroHeader
           selectedDate={selectedDate}
           setSelectedDate={setSelectedDate}
@@ -2322,7 +2344,7 @@ export default function AbsensiPage() {
         />
 
         {errorBase && (
-          <div className="mb-5 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">
+          <div className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">
             {errorBase}
           </div>
         )}

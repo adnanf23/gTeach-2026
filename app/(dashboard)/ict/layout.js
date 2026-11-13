@@ -70,6 +70,13 @@ const NAV_SECTIONS = [
         icon: "overview",
       },
       {
+        type: "item",
+        key: "ai-analisis",
+        label: "AI Analisis",
+        href: "/ict/ai-analisis",
+        icon: "monitoring",
+      },
+      {
         type: "group",
         key: "data-utama",
         label: "Data Utama",

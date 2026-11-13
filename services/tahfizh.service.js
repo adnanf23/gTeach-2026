@@ -1,5 +1,6 @@
 import { describeError } from "@/lib/app-error";
 import * as tahfizhRepository from "@/repositories/tahfizh.repository";
+import { writeLog } from "@/services/systemLog.service";
 
 const firstOf = (v) => (Array.isArray(v) ? v[0] : v);
 
@@ -63,6 +64,13 @@ export async function addKomponen({
       mapel_id: mapelId,
       kategori,
     });
+    await writeLog({
+      type: "info",
+      msg: `Menambah komponen tahfizh '${komponen.trim()}' (kategori ${kategori}, tingkat ${kelas?.tingkat ?? "-"}).`,
+      endpoint: "-",
+      statusCode: 200,
+      payload: { aksi: "create", collection: "tahfizh_komponen", id: created?.id },
+    }).catch(() => {});
     return { record: created, error: null };
   } catch (error) {
     return { error: describeError(error) };
@@ -72,6 +80,13 @@ export async function addKomponen({
 export async function removeKomponen(id) {
   try {
     await tahfizhRepository.deleteKomponen(id);
+    await writeLog({
+      type: "warning",
+      msg: `Menghapus komponen tahfizh [${id}].`,
+      endpoint: "-",
+      statusCode: 200,
+      payload: { aksi: "delete", collection: "tahfizh_komponen", id },
+    }).catch(() => {});
     return { error: null };
   } catch (error) {
     return { error: describeError(error) };
@@ -101,6 +116,13 @@ export async function setPredikat({
       data,
       existingId,
     );
+    await writeLog({
+      type: "info",
+      msg: `Menyimpan predikat ${kategori} siswa [${siswaId}]${predikat ? ` = ${predikat}` : " (kosong)"}.`,
+      endpoint: "-",
+      statusCode: 200,
+      payload: { aksi: existingId ? "update" : "create", collection: `tahfizh_${kategori}` },
+    }).catch(() => {});
     return { record: saved, error: null };
   } catch (error) {
     return { error: describeError(error) };
@@ -158,6 +180,13 @@ export async function setNilaiTahsin({
       nilai: nilai === "" || nilai === null ? null : Number(nilai),
     };
     const saved = await tahfizhRepository.saveNilaiTahsin(data, existingId);
+    await writeLog({
+      type: "info",
+      msg: `Menyimpan nilai tahsin siswa [${siswaId}] = ${data.nilai ?? "-"}.`,
+      endpoint: "-",
+      statusCode: 200,
+      payload: { aksi: existingId ? "update" : "create", collection: "tahfizh_nilai_tahsin" },
+    }).catch(() => {});
     return { record: saved, error: null };
   } catch (error) {
     return { error: describeError(error) };
@@ -179,6 +208,13 @@ export async function setCatatanTahsin({
       catatan: catatan || "",
     };
     const saved = await tahfizhRepository.saveTahsinCatatan(data, existingId);
+    await writeLog({
+      type: "info",
+      msg: `Menyimpan catatan tahsin siswa [${siswaId}].`,
+      endpoint: "-",
+      statusCode: 200,
+      payload: { aksi: existingId ? "update" : "create", collection: "tahfizh_tahsin_catatan" },
+    }).catch(() => {});
     return { record: saved, error: null };
   } catch (error) {
     return { error: describeError(error) };
@@ -214,6 +250,13 @@ export async function setCatatanTahfizh({
       catatan: catatan || "",
     };
     const saved = await tahfizhRepository.saveTahfizhCatatan(data, existingId);
+    await writeLog({
+      type: "info",
+      msg: `Menyimpan catatan tahfizh siswa [${siswaId}].`,
+      endpoint: "-",
+      statusCode: 200,
+      payload: { aksi: existingId ? "update" : "create", collection: "tahfizh_catatan" },
+    }).catch(() => {});
     return { record: saved, error: null };
   } catch (error) {
     return { error: describeError(error) };
@@ -370,6 +413,13 @@ export async function addKomponenTingkat({
       mapel_id: mapelId,
       kategori,
     });
+    await writeLog({
+      type: "info",
+      msg: `Menambah komponen tahfizh '${komponen.trim()}' (kategori ${kategori}, tingkat ${tingkat}).`,
+      endpoint: "-",
+      statusCode: 200,
+      payload: { aksi: "create", collection: "tahfizh_komponen", tingkat, kategori },
+    }).catch(() => {});
     return { error: null };
   } catch (error) {
     return { error: describeError(error) };
@@ -401,6 +451,13 @@ export async function removeKomponenTingkat({
         String(r.komponen).trim().toLowerCase() === nama,
     );
     await Promise.all(target.map((r) => tahfizhRepository.deleteKomponen(r.id)));
+    await writeLog({
+      type: "warning",
+      msg: `Menghapus komponen tahfizh '${komponen}' (kategori ${kategori}, tingkat ${tingkat}).`,
+      endpoint: "-",
+      statusCode: 200,
+      payload: { aksi: "delete", collection: "tahfizh_komponen", tingkat, kategori, jumlah: target.length },
+    }).catch(() => {});
     return { error: null };
   } catch (error) {
     return { error: describeError(error) };

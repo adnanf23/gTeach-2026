@@ -53,13 +53,20 @@ export async function findSiswaRingkas() {
 // ---------------------------------------------------------------------------
 // Absensi & agenda
 // ---------------------------------------------------------------------------
+import { cached, bolehCacheSampai, upperTanggalDariFilter } from "@/lib/cache";
+
 export async function findAbsensiByFilter({ filter, fields }) {
-  const pb = await getServerPb();
-  return pb.collection("absensi").getFullList({
-    filter,
-    ...(fields ? { fields } : {}),
-    requestKey: null,
-  });
+  const load = async () => {
+    const pb = await getServerPb();
+    return pb.collection("absensi").getFullList({
+      filter,
+      ...(fields ? { fields } : {}),
+      requestKey: null,
+    });
+  };
+  // Bulan ini/today = live; hanya bulan lalu ke belakang yang di-cache.
+  if (!bolehCacheSampai(upperTanggalDariFilter(filter))) return load();
+  return cached(`absensi:${filter}|${fields || ""}`, 600000, load);
 }
 
 export async function findAgendaByFilter({ filter }) {

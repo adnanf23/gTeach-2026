@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Shell(pnpm:*)",
+      "Shell(grep:*)",
+      "Shell(npx eslint components/organism/tahfizh/TahfizhPanel.js components/organism/tahfizh/TahsinPanel.js app/(dashboard)/walikelas/nilai/penilaian/[id]/page.js 2 >& 1)",
+      "Shell(npx eslint components/organism/tahfizh/TahfizhPanel.js app/(dashboard)/walikelas/nilai/penilaian/[id]/page.js 2 >& 1)"
+    ],
+    "deny": [],
+    "defaultMode": "default"
+  }
+}

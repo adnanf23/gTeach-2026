@@ -34,26 +34,40 @@ export async function findHariLibur() {
 // Rentang tanggal untuk mode monitoring (30 hari, sort -tanggal) dan export.
 // `kelasId` opsional ("semua" ditangani pemanggil dengan mengirim null).
 // `fields` opsional untuk proyeksi kolom (hemat payload pada agregasi).
+import { cached, bolehCacheSampai } from "@/lib/cache";
+
 export async function findAbsensiByRange({ kelasId, startStr, endStr, sort, fields }) {
-  const pb = await getServerPb();
+  const load = async () => {
+    const pb = await getServerPb();
 
-  let filter = `tanggal >= "${startStr}" && tanggal <= "${endStr}"`;
-  if (kelasId) filter += ` && kelas_id = "${kelasId}"`;
+    let filter = `tanggal >= "${startStr}" && tanggal <= "${endStr}"`;
+    if (kelasId) filter += ` && kelas_id = "${kelasId}"`;
 
-  const options = { filter, requestKey: null };
-  if (sort) options.sort = sort;
-  if (fields) options.fields = fields;
+    const options = { filter, requestKey: null };
+    if (sort) options.sort = sort;
+    if (fields) options.fields = fields;
 
-  return pb.collection("absensi").getFullList(options);
+    return pb.collection("absensi").getFullList(options);
+  };
+  if (!bolehCacheSampai(endStr)) return load();
+  return cached(
+    `absensi:${kelasId || ""}|${startStr}|${endStr}|${sort || ""}|${fields || ""}`,
+    600000,
+    load,
+  );
 }
 
 // Absensi satu hari, dikelompokkan per kelas_id di service.
 // Tanpa expand: nama siswa/kelas sudah dikirim ke client lewat getBaseData,
 // join di server hanya memperbesar payload & memperlambat query.
 export async function findAbsensiByDate({ dateStr }) {
-  const pb = await getServerPb();
-  return pb.collection("absensi").getFullList({
-    filter: `tanggal >= "${dateStr} 00:00:00" && tanggal <= "${dateStr} 23:59:59"`,
-    requestKey: null,
-  });
+  const load = async () => {
+    const pb = await getServerPb();
+    return pb.collection("absensi").getFullList({
+      filter: `tanggal >= "${dateStr} 00:00:00" && tanggal <= "${dateStr} 23:59:59"`,
+      requestKey: null,
+    });
+  };
+  if (!bolehCacheSampai(dateStr)) return load();
+  return cached(`absensi:date:${dateStr}`, 600000, load);
 }

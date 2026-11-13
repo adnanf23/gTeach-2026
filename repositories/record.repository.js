@@ -1,6 +1,7 @@
 import "server-only";
 
 import { getServerPb, assertAllowedCollection } from "@/lib/pocketbase.server";
+import { invalidate, cached, bolehCacheSampai, upperTanggalDariFilter } from "@/lib/cache";
 
 // Opsi khusus browser (requestKey) tidak relevan di server.
 export function sanitizeOptions(options) {
@@ -11,8 +12,19 @@ export function sanitizeOptions(options) {
 
 export async function findFullList(collection, options) {
   assertAllowedCollection(collection);
+  const clean = sanitizeOptions(options);
+  // Absensi: hanya bulan lalu ke belakang yang di-cache (bulan ini/today = live).
+  if (
+    collection === "absensi" &&
+    bolehCacheSampai(upperTanggalDariFilter(clean.filter))
+  ) {
+    return cached(`absensi:full:${JSON.stringify(clean)}`, 600000, async () => {
+      const pb = await getServerPb();
+      return pb.collection(collection).getFullList(clean);
+    });
+  }
   const pb = await getServerPb();
-  return pb.collection(collection).getFullList(sanitizeOptions(options));
+  return pb.collection(collection).getFullList(clean);
 }
 
 export async function findList(collection, page, perPage, options) {
@@ -40,17 +52,25 @@ export async function findFirst(collection, filter, options) {
 export async function insert(collection, data, options) {
   assertAllowedCollection(collection);
   const pb = await getServerPb();
-  return pb.collection(collection).create(data, sanitizeOptions(options));
+  const res = await pb.collection(collection).create(data, sanitizeOptions(options));
+  if (collection === "absensi") invalidate("absensi:");
+  return res;
 }
 
 export async function modify(collection, id, data, options) {
   assertAllowedCollection(collection);
   const pb = await getServerPb();
-  return pb.collection(collection).update(id, data, sanitizeOptions(options));
+  const res = await pb
+    .collection(collection)
+    .update(id, data, sanitizeOptions(options));
+  if (collection === "absensi") invalidate("absensi:");
+  return res;
 }
 
 export async function remove(collection, id) {
   assertAllowedCollection(collection);
   const pb = await getServerPb();
-  return pb.collection(collection).delete(id);
+  const res = await pb.collection(collection).delete(id);
+  if (collection === "absensi") invalidate("absensi:");
+  return res;
 }

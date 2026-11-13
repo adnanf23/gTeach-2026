@@ -47,6 +47,7 @@ const icons = {
   shield:
     "M8 1.5l5 2v4c0 3-2 5.5-5 7-3-1.5-5-4-5-7v-4l5-2zM6 8l1.5 1.5L10.5 6.5",
   chevron: "M6 4l4 4-4 4",
+  monitoring: "M2 12l3-4 3 2 3-5 3 3",
 };
 
 // ── Struktur navigasi admin: array of groups ──
@@ -196,6 +197,13 @@ const NAV_GROUPS = [
     label: "Catatan Kasus",
     href: "/admin/catatan-kasus",
     icon: "catatan",
+    standalone: true,
+  },
+  {
+    key: "ai-analisis",
+    label: "AI Analisis",
+    href: "/admin/ai-analisis",
+    icon: "monitoring",
     standalone: true,
   },
 ];

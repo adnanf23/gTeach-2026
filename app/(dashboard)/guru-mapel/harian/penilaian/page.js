@@ -1038,12 +1038,15 @@ export default function PenilaianGuruMapelPage() {
     if (!selectedNoTp || !selectedMapelId || !selectedKelas) return;
     try {
       setSavingTp(true);
-      const created = await db.create("tujuan_pembelajaran", {
+      const created = await db.create(
+        "tujuan_pembelajaran",
+        {
           no_tp: selectedNoTp,
           mapel_id: selectedMapelId,
           kelas_id: selectedKelas.id,
         },
-        { requestKey: null },);
+        { requestKey: null },
+      );
       setTpList((prev) =>
         [...prev, created].sort((a, b) => tpNumber(a) - tpNumber(b)),
       );
@@ -1129,7 +1132,12 @@ export default function PenilaianGuruMapelPage() {
           k4: existing.k4 ?? -1,
         };
         currentValues[kField] = nilaiValue;
-        saved = await db.update("nilai_formatif", existing.recordId, currentValues, { requestKey: null });
+        saved = await db.update(
+          "nilai_formatif",
+          existing.recordId,
+          currentValues,
+          { requestKey: null },
+        );
       } else {
         const data = {
           tp_id: tpId,
@@ -1177,13 +1185,16 @@ export default function PenilaianGuruMapelPage() {
     if (!namaLp.trim() || !selectedMapelId || !selectedKelas) return;
     try {
       setSavingLp(true);
-      const created = await db.create("lingkup_materi", {
+      const created = await db.create(
+        "lingkup_materi",
+        {
           nama: namaLp.trim(),
           mapel_id: selectedMapelId,
           kelas_id: selectedKelas.id,
           guru_id: user?.id,
         },
-        { requestKey: null },);
+        { requestKey: null },
+      );
       setLpList((prev) => [...prev, created]);
       setNamaLp("");
       setShowAddLp(false);
@@ -1260,17 +1271,23 @@ export default function PenilaianGuruMapelPage() {
     try {
       let saved;
       if (existing?.recordId) {
-        saved = await db.update("nilai_sumatif", existing.recordId,
-            { nilai: nilaiValue },
-            { requestKey: null },);
+        saved = await db.update(
+          "nilai_sumatif",
+          existing.recordId,
+          { nilai: nilaiValue },
+          { requestKey: null },
+        );
       } else {
-        saved = await db.create("nilai_sumatif", {
+        saved = await db.create(
+          "nilai_sumatif",
+          {
             lm_id: lpId,
             siswa_id: siswaId,
             kelas_id: selectedKelas.id,
             nilai: nilaiValue,
           },
-          { requestKey: null },);
+          { requestKey: null },
+        );
       }
       setNilaiSumatif((prev) => ({
         ...prev,
@@ -1324,18 +1341,24 @@ export default function PenilaianGuruMapelPage() {
     try {
       let saved;
       if (existing?.recordId) {
-        saved = await db.update("nilai_ujian", existing.recordId,
-            { nilai: nilaiValue },
-            { requestKey: null },);
+        saved = await db.update(
+          "nilai_ujian",
+          existing.recordId,
+          { nilai: nilaiValue },
+          { requestKey: null },
+        );
       } else {
-        saved = await db.create("nilai_ujian", {
+        saved = await db.create(
+          "nilai_ujian",
+          {
             siswa_id: siswaId,
             ploting_guru_id: selectedPloting.id,
             pengaturan_ujian_id: ujianId,
             mapel_id: selectedMapelId,
             nilai: nilaiValue,
           },
-          { requestKey: null },);
+          { requestKey: null },
+        );
       }
 
       setNilaiUjian((prev) => ({
@@ -1664,12 +1687,15 @@ export default function PenilaianGuruMapelPage() {
       let tp = tpList.find((t) => t.no_tp === scanDetectedTp);
       if (!tp) {
         try {
-          tp = await db.create("tujuan_pembelajaran", {
+          tp = await db.create(
+            "tujuan_pembelajaran",
+            {
               no_tp: scanDetectedTp,
               mapel_id: selectedMapelId,
               kelas_id: selectedKelas.id,
             },
-            { requestKey: null },);
+            { requestKey: null },
+          );
           setTpList((prev) =>
             [...prev, tp].sort((a, b) => tpNumber(a) - tpNumber(b)),
           );
@@ -1723,7 +1749,12 @@ export default function PenilaianGuruMapelPage() {
               k4: existingRec.k4 ?? -1,
             };
             for (const [kf, v] of Object.entries(toSave)) payload[kf] = v;
-            const saved = await db.update("nilai_formatif", existingRec.recordId, payload, { requestKey: null });
+            const saved = await db.update(
+              "nilai_formatif",
+              existingRec.recordId,
+              payload,
+              { requestKey: null },
+            );
             existingRec = { recordId: saved.id, ...payload };
             nilaiMap[siswaId][tpId] = existingRec;
           } else {
@@ -1737,7 +1768,9 @@ export default function PenilaianGuruMapelPage() {
               k4: -1,
             };
             for (const [kf, v] of Object.entries(toSave)) payload[kf] = v;
-            const saved = await db.create("nilai_formatif", payload, { requestKey: null });
+            const saved = await db.create("nilai_formatif", payload, {
+              requestKey: null,
+            });
             existingRec = {
               recordId: saved.id,
               k1: payload.k1,
@@ -2085,12 +2118,15 @@ export default function PenilaianGuruMapelPage() {
           let tp = tpMap.get(tpNo);
           if (!tp) {
             try {
-              const created = await db.create("tujuan_pembelajaran", {
+              const created = await db.create(
+                "tujuan_pembelajaran",
+                {
                   no_tp: tpNo,
                   mapel_id: selectedMapelId,
                   kelas_id: selectedKelas.id,
                 },
-                { requestKey: null },);
+                { requestKey: null },
+              );
               tp = created;
               tpMap.set(tpNo, tp);
               createdTpCount++;
@@ -2126,7 +2162,12 @@ export default function PenilaianGuruMapelPage() {
                 k4: existingRec.k4 ?? -1,
               };
               for (const [k, v] of Object.entries(toSave)) payload[k] = v;
-              const saved = await db.update("nilai_formatif", existingRec.recordId, payload, { requestKey: null });
+              const saved = await db.update(
+                "nilai_formatif",
+                existingRec.recordId,
+                payload,
+                { requestKey: null },
+              );
               existingRec = { recordId: saved.id, ...payload };
               nilaiMap[siswa.id][tp.id] = existingRec;
             } else {
@@ -2140,7 +2181,9 @@ export default function PenilaianGuruMapelPage() {
                 k4: -1,
               };
               for (const [k, v] of Object.entries(toSave)) payload[k] = v;
-              const saved = await db.create("nilai_formatif", payload, { requestKey: null });
+              const saved = await db.create("nilai_formatif", payload, {
+                requestKey: null,
+              });
               existingRec = {
                 recordId: saved.id,
                 k1: payload.k1,
@@ -2807,12 +2850,15 @@ export default function PenilaianGuruMapelPage() {
     for (const no of tpNeeded) {
       if (tpByNo.has(no.toUpperCase())) continue;
       try {
-        const created = await db.create("tujuan_pembelajaran", {
+        const created = await db.create(
+          "tujuan_pembelajaran",
+          {
             no_tp: no,
             mapel_id: targetMapel.id,
             kelas_id: targetKelas.id,
           },
-          { requestKey: null },);
+          { requestKey: null },
+        );
         tpByNo.set(no.toUpperCase(), created);
         result.formatif.created++;
       } catch (err) {
@@ -2828,13 +2874,16 @@ export default function PenilaianGuruMapelPage() {
       let lm = lmByName.get(key);
       if (!lm) {
         try {
-          lm = await db.create("lingkup_materi", {
+          lm = await db.create(
+            "lingkup_materi",
+            {
               nama: String(sc.lmName).trim(),
               mapel_id: targetMapel.id,
               kelas_id: targetKelas.id,
               guru_id: user?.id,
             },
-            { requestKey: null },);
+            { requestKey: null },
+          );
           lmByName.set(key, lm);
           result.sumatif.created++;
         } catch (err) {
@@ -2932,15 +2981,23 @@ export default function PenilaianGuruMapelPage() {
           try {
             let saved;
             if (existing?.recordId) {
-              saved = await db.update("nilai_formatif", existing.recordId, payload, { requestKey: null });
+              saved = await db.update(
+                "nilai_formatif",
+                existing.recordId,
+                payload,
+                { requestKey: null },
+              );
             } else {
-              saved = await db.create("nilai_formatif", {
+              saved = await db.create(
+                "nilai_formatif",
+                {
                   tp_id: tp.id,
                   siswa_id: siswa.id,
                   kelas_id: targetKelas.id,
                   ...payload,
                 },
-                { requestKey: null },);
+                { requestKey: null },
+              );
             }
             if (!nfMap[siswa.id]) nfMap[siswa.id] = {};
             nfMap[siswa.id][tp.id] = { recordId: saved.id, ...payload };
@@ -2971,17 +3028,23 @@ export default function PenilaianGuruMapelPage() {
             try {
               let saved;
               if (existing?.recordId) {
-                saved = await db.update("nilai_sumatif", existing.recordId,
-                    { nilai: raw },
-                    { requestKey: null },);
+                saved = await db.update(
+                  "nilai_sumatif",
+                  existing.recordId,
+                  { nilai: raw },
+                  { requestKey: null },
+                );
               } else {
-                saved = await db.create("nilai_sumatif", {
+                saved = await db.create(
+                  "nilai_sumatif",
+                  {
                     lm_id: lm.id,
                     siswa_id: siswa.id,
                     kelas_id: targetKelas.id,
                     nilai: raw,
                   },
-                  { requestKey: null },);
+                  { requestKey: null },
+                );
               }
               if (!nsMap[siswa.id]) nsMap[siswa.id] = {};
               nsMap[siswa.id][lm.id] = { recordId: saved.id, nilai: raw };
@@ -2996,9 +3059,12 @@ export default function PenilaianGuruMapelPage() {
           if (curFilled && existing?.recordId) {
             tasks.push(async () => {
               try {
-                await db.update("nilai_sumatif", existing.recordId,
-                    { nilai: -1 },
-                    { requestKey: null },);
+                await db.update(
+                  "nilai_sumatif",
+                  existing.recordId,
+                  { nilai: -1 },
+                  { requestKey: null },
+                );
                 nsMap[siswa.id][lm.id] = {
                   recordId: existing.recordId,
                   nilai: -1,
@@ -3032,17 +3098,23 @@ export default function PenilaianGuruMapelPage() {
             try {
               let saved;
               if (existing?.recordId) {
-                saved = await db.update("nilai_ujian", existing.recordId,
-                    { nilai: raw },
-                    { requestKey: null },);
+                saved = await db.update(
+                  "nilai_ujian",
+                  existing.recordId,
+                  { nilai: raw },
+                  { requestKey: null },
+                );
               } else {
-                saved = await db.create("nilai_ujian", {
+                saved = await db.create(
+                  "nilai_ujian",
+                  {
                     siswa_id: siswa.id,
                     pengaturan_ujian_id: ujian.id,
                     mapel_id: targetMapel.id,
                     nilai: raw,
                   },
-                  { requestKey: null },);
+                  { requestKey: null },
+                );
               }
               if (!nuMap[ujian.id]) nuMap[ujian.id] = {};
               nuMap[ujian.id][siswa.id] = { recordId: saved.id, nilai: raw };
@@ -3057,9 +3129,12 @@ export default function PenilaianGuruMapelPage() {
           if (curFilled && existing?.recordId) {
             tasks.push(async () => {
               try {
-                await db.update("nilai_ujian", existing.recordId,
-                    { nilai: -1 },
-                    { requestKey: null },);
+                await db.update(
+                  "nilai_ujian",
+                  existing.recordId,
+                  { nilai: -1 },
+                  { requestKey: null },
+                );
                 nuMap[ujian.id][siswa.id] = {
                   recordId: existing.recordId,
                   nilai: -1,
@@ -3808,231 +3883,257 @@ export default function PenilaianGuruMapelPage() {
               <Icon name="back" />
               Kembali
             </button>
-
-            <div className="relative z-40 rounded-2xl bg-blue-600 p-3 text-white shadow-sm min-[360px]:p-4 sm:px-7 sm:py-6">
-              <div className="flex flex-col gap-3 min-[360px]:gap-4 lg:flex-row lg:items-end lg:justify-between">
-                <div className="min-w-0">
-                  <p className="text-[13px] text-blue-100 min-[360px]:text-sm">
-                    {selectedKelas.nama_kelas}, tingkat {selectedKelas.tingkat}
-                  </p>
-                  <h1 className="mt-0.5 break-words text-xl font-bold min-[360px]:text-2xl sm:text-3xl">
-                    {mapel?.nama_mapel || "Mata Pelajaran"}
-                  </h1>
-                </div>
-
-                <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-                  <div className="grid grid-cols-3 gap-1.5 min-[360px]:gap-2 sm:flex">
-                    {[
-                      ["Siswa", siswaList.length],
-                      ["TP", tpList.length],
-                      ["LP", lpList.length],
-                    ].map(([label, n]) => (
-                      <div
-                        key={label}
-                        className="flex h-10 items-baseline justify-center gap-1 rounded-xl bg-white/15 px-1.5 pt-2 min-[360px]:gap-1.5 min-[360px]:px-3 sm:min-w-[84px]"
-                      >
-                        <span className="text-base font-bold tabular-nums">
-                          {n}
-                        </span>
-                        <span className="text-xs text-blue-100">{label}</span>
-                      </div>
-                    ))}
+            {!isTahsin && (
+              <div className="relative z-40 rounded-2xl bg-blue-600 p-3 text-white shadow-sm min-[360px]:p-4 sm:px-7 sm:py-6">
+                <div className="flex flex-col gap-3 min-[360px]:gap-4 lg:flex-row lg:items-end lg:justify-between">
+                  <div className="min-w-0">
+                    <p className="text-[13px] text-blue-100 min-[360px]:text-sm">
+                      {selectedKelas.nama_kelas}, tingkat{" "}
+                      {selectedKelas.tingkat}
+                    </p>
+                    <h1 className="mt-0.5 break-words text-xl font-bold min-[360px]:text-2xl sm:text-3xl">
+                      {mapel?.nama_mapel || "Mata Pelajaran"}
+                    </h1>
                   </div>
 
-                  {kelasOptions.length > 1 && (
-                    <div
-                      className="relative flex min-w-0 items-center gap-1.5 min-[360px]:gap-2"
-                      ref={quickRef}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => setQuickOpen((v) => !v)}
-                        aria-haspopup="listbox"
-                        aria-expanded={quickOpen}
-                        className="inline-flex h-10 min-w-0 flex-1 items-center justify-between gap-2 rounded-xl border border-white/20 bg-white/10 px-2.5 text-xs font-bold text-white transition hover:bg-white/20 min-[360px]:px-3 sm:flex-none sm:justify-start"
-                      >
-                        <span className="inline-flex min-w-0 items-center gap-2">
-                          <Icon
-                            name="swap"
-                            className="hidden h-4 w-4 min-[360px]:block"
-                          />
-                          <span className="truncate">
-                            <span className="hidden min-[360px]:inline">
-                              Pindah kelas
-                            </span>
-                            <span className="min-[360px]:hidden">Kelas</span>
-                          </span>
-                        </span>
-                        <span className="inline-flex shrink-0 items-center gap-1.5">
-                          {currentIndex >= 0 && (
-                            <span className="rounded-md bg-white/20 px-1.5 py-0.5 font-mono text-[10px]">
-                              {currentIndex + 1}/{kelasOptions.length}
-                            </span>
-                          )}
-                          <Icon
-                            name="chevron"
-                            className={`h-3 w-3 transition-transform ${
-                              quickOpen ? "rotate-180" : ""
-                            }`}
-                          />
-                        </span>
-                      </button>
-
-                      {(prevKelas || nextKelas) && (
-                        <div className="inline-flex shrink-0 divide-x divide-white/20 overflow-hidden rounded-xl border border-white/20 bg-white/10">
-                          <button
-                            type="button"
-                            onClick={() =>
-                              prevKelas && pindahKeKelas(prevKelas)
-                            }
-                            disabled={!prevKelas}
-                            title={
-                              prevKelas
-                                ? `Sebelumnya: ${prevKelas.kelas.nama_kelas}`
-                                : "Tidak ada kelas sebelumnya"
-                            }
-                            aria-label="Kelas sebelumnya"
-                            className="inline-flex h-10 w-9 items-center justify-center text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-40 min-[360px]:w-10"
-                          >
-                            <svg
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2.5"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              className="h-4 w-4"
-                              aria-hidden="true"
-                            >
-                              <path d="m15 18-6-6 6-6" />
-                            </svg>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              nextKelas && pindahKeKelas(nextKelas)
-                            }
-                            disabled={!nextKelas}
-                            title={
-                              nextKelas
-                                ? `Selanjutnya: ${nextKelas.kelas.nama_kelas}`
-                                : "Tidak ada kelas selanjutnya"
-                            }
-                            aria-label="Kelas selanjutnya"
-                            className="inline-flex h-10 w-9 items-center justify-center text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-40 min-[360px]:w-10"
-                          >
-                            <svg
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="2.5"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              className="h-4 w-4"
-                              aria-hidden="true"
-                            >
-                              <path d="m9 18 6-6-6-6" />
-                            </svg>
-                          </button>
-                        </div>
-                      )}
-
-                      {quickOpen && (
+                  <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+                    <div className="grid grid-cols-3 gap-1.5 min-[360px]:gap-2 sm:flex">
+                      {[
+                        ["Siswa", siswaList.length],
+                        ["TP", tpList.length],
+                        ["LP", lpList.length],
+                      ].map(([label, n]) => (
                         <div
-                          role="listbox"
-                          className="absolute left-0 right-0 top-full z-50 mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white text-slate-800 shadow-2xl sm:left-auto sm:w-80"
+                          key={label}
+                          className="flex h-10 items-baseline justify-center gap-1 rounded-xl bg-white/15 px-1.5 pt-2 min-[360px]:gap-1.5 min-[360px]:px-3 sm:min-w-[84px]"
                         >
-                          <div className="border-b border-slate-100 p-2">
-                            <input
-                              ref={quickInputRef}
-                              type="text"
-                              value={quickSearch}
-                              onChange={(e) => setQuickSearch(e.target.value)}
-                              placeholder="Cari kelas..."
-                              className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400"
-                            />
-                          </div>
+                          <span className="text-base font-bold tabular-nums">
+                            {n}
+                          </span>
+                          <span className="text-xs text-blue-100">{label}</span>
+                        </div>
+                      ))}
+                    </div>
 
-                          <div className="max-h-[min(18rem,50vh)] overflow-y-auto py-1">
-                            {quickList.length === 0 ? (
-                              <div className="px-4 py-6 text-center text-xs text-slate-400">
-                                Tidak ada kelas yang cocok.
-                              </div>
-                            ) : (
-                              quickList.map((opt) => {
-                                const idx = kelasOptions.findIndex(
-                                  (x) => x.kelas.id === opt.kelas.id,
-                                );
-                                const isCurrent =
-                                  opt.kelas.id === selectedKelasId;
-                                return (
-                                  <button
-                                    key={opt.kelas.id}
-                                    type="button"
-                                    role="option"
-                                    aria-selected={isCurrent}
-                                    disabled={isCurrent}
-                                    onClick={() => pindahKeKelas(opt)}
-                                    className={`flex w-full items-center gap-2.5 px-2.5 py-2 text-left transition-colors min-[360px]:gap-3 min-[360px]:px-3 ${
-                                      isCurrent
-                                        ? "cursor-default bg-blue-600 text-white"
-                                        : "hover:bg-blue-50 focus:bg-blue-50 focus:outline-none"
-                                    }`}
-                                  >
-                                    <span
-                                      className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[10px] font-bold tabular-nums min-[360px]:h-8 min-[360px]:w-8 ${
+                    {kelasOptions.length > 1 && (
+                      <div
+                        className="relative flex min-w-0 items-center gap-1.5 min-[360px]:gap-2"
+                        ref={quickRef}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setQuickOpen((v) => !v)}
+                          aria-haspopup="listbox"
+                          aria-expanded={quickOpen}
+                          className="inline-flex h-10 min-w-0 flex-1 items-center justify-between gap-2 rounded-xl border border-white/20 bg-white/10 px-2.5 text-xs font-bold text-white transition hover:bg-white/20 min-[360px]:px-3 sm:flex-none sm:justify-start"
+                        >
+                          <span className="inline-flex min-w-0 items-center gap-2">
+                            <Icon
+                              name="swap"
+                              className="hidden h-4 w-4 min-[360px]:block"
+                            />
+                            <span className="truncate">
+                              <span className="hidden min-[360px]:inline">
+                                Pindah kelas
+                              </span>
+                              <span className="min-[360px]:hidden">Kelas</span>
+                            </span>
+                          </span>
+                          <span className="inline-flex shrink-0 items-center gap-1.5">
+                            {currentIndex >= 0 && (
+                              <span className="rounded-md bg-white/20 px-1.5 py-0.5 font-mono text-[10px]">
+                                {currentIndex + 1}/{kelasOptions.length}
+                              </span>
+                            )}
+                            <Icon
+                              name="chevron"
+                              className={`h-3 w-3 transition-transform ${
+                                quickOpen ? "rotate-180" : ""
+                              }`}
+                            />
+                          </span>
+                        </button>
+
+                        {(prevKelas || nextKelas) && (
+                          <div className="inline-flex shrink-0 divide-x divide-white/20 overflow-hidden rounded-xl border border-white/20 bg-white/10">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                prevKelas && pindahKeKelas(prevKelas)
+                              }
+                              disabled={!prevKelas}
+                              title={
+                                prevKelas
+                                  ? `Sebelumnya: ${prevKelas.kelas.nama_kelas}`
+                                  : "Tidak ada kelas sebelumnya"
+                              }
+                              aria-label="Kelas sebelumnya"
+                              className="inline-flex h-10 w-9 items-center justify-center text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-40 min-[360px]:w-10"
+                            >
+                              <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2.5"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                className="h-4 w-4"
+                                aria-hidden="true"
+                              >
+                                <path d="m15 18-6-6 6-6" />
+                              </svg>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                nextKelas && pindahKeKelas(nextKelas)
+                              }
+                              disabled={!nextKelas}
+                              title={
+                                nextKelas
+                                  ? `Selanjutnya: ${nextKelas.kelas.nama_kelas}`
+                                  : "Tidak ada kelas selanjutnya"
+                              }
+                              aria-label="Kelas selanjutnya"
+                              className="inline-flex h-10 w-9 items-center justify-center text-white transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-40 min-[360px]:w-10"
+                            >
+                              <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2.5"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                className="h-4 w-4"
+                                aria-hidden="true"
+                              >
+                                <path d="m9 18 6-6-6-6" />
+                              </svg>
+                            </button>
+                          </div>
+                        )}
+
+                        {quickOpen && (
+                          <div
+                            role="listbox"
+                            className="absolute left-0 right-0 top-full z-50 mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white text-slate-800 shadow-2xl sm:left-auto sm:w-80"
+                          >
+                            <div className="border-b border-slate-100 p-2">
+                              <input
+                                ref={quickInputRef}
+                                type="text"
+                                value={quickSearch}
+                                onChange={(e) => setQuickSearch(e.target.value)}
+                                placeholder="Cari kelas..."
+                                className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                              />
+                            </div>
+
+                            <div className="max-h-[min(18rem,50vh)] overflow-y-auto py-1">
+                              {quickList.length === 0 ? (
+                                <div className="px-4 py-6 text-center text-xs text-slate-400">
+                                  Tidak ada kelas yang cocok.
+                                </div>
+                              ) : (
+                                quickList.map((opt) => {
+                                  const idx = kelasOptions.findIndex(
+                                    (x) => x.kelas.id === opt.kelas.id,
+                                  );
+                                  const isCurrent =
+                                    opt.kelas.id === selectedKelasId;
+                                  return (
+                                    <button
+                                      key={opt.kelas.id}
+                                      type="button"
+                                      role="option"
+                                      aria-selected={isCurrent}
+                                      disabled={isCurrent}
+                                      onClick={() => pindahKeKelas(opt)}
+                                      className={`flex w-full items-center gap-2.5 px-2.5 py-2 text-left transition-colors min-[360px]:gap-3 min-[360px]:px-3 ${
                                         isCurrent
-                                          ? "bg-white/20 text-white"
-                                          : "bg-blue-100 text-blue-700"
+                                          ? "cursor-default bg-blue-600 text-white"
+                                          : "hover:bg-blue-50 focus:bg-blue-50 focus:outline-none"
                                       }`}
                                     >
-                                      {idx + 1}
-                                    </span>
-                                    <span className="min-w-0 flex-1">
                                       <span
-                                        className={`block truncate text-[13px] font-semibold min-[360px]:text-sm ${
+                                        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[10px] font-bold tabular-nums min-[360px]:h-8 min-[360px]:w-8 ${
                                           isCurrent
-                                            ? "text-white"
-                                            : "text-slate-800"
+                                            ? "bg-white/20 text-white"
+                                            : "bg-blue-100 text-blue-700"
                                         }`}
                                       >
-                                        {opt.kelas.nama_kelas || "-"}
+                                        {idx + 1}
                                       </span>
-                                      <span
-                                        className={`block truncate text-[11px] ${
-                                          isCurrent
-                                            ? "text-blue-100"
-                                            : "text-slate-500"
-                                        }`}
-                                      >
-                                        Tingkat {opt.kelas.tingkat} ·{" "}
-                                        {opt.siswaCount} siswa
+                                      <span className="min-w-0 flex-1">
+                                        <span
+                                          className={`block truncate text-[13px] font-semibold min-[360px]:text-sm ${
+                                            isCurrent
+                                              ? "text-white"
+                                              : "text-slate-800"
+                                          }`}
+                                        >
+                                          {opt.kelas.nama_kelas || "-"}
+                                        </span>
+                                        <span
+                                          className={`block truncate text-[11px] ${
+                                            isCurrent
+                                              ? "text-blue-100"
+                                              : "text-slate-500"
+                                          }`}
+                                        >
+                                          Tingkat {opt.kelas.tingkat} ·{" "}
+                                          {opt.siswaCount} siswa
+                                        </span>
                                       </span>
-                                    </span>
-                                    {isCurrent && (
-                                      <span className="shrink-0 text-[10px] font-bold">
-                                        Aktif
-                                      </span>
-                                    )}
-                                  </button>
-                                );
-                              })
-                            )}
-                          </div>
+                                      {isCurrent && (
+                                        <span className="shrink-0 text-[10px] font-bold">
+                                          Aktif
+                                        </span>
+                                      )}
+                                    </button>
+                                  );
+                                })
+                              )}
+                            </div>
 
-                          <div className="border-t border-slate-100 bg-slate-50 px-3 py-2 text-[10px] text-slate-400">
-                            Urut tingkat, lalu nama kelas
-                            <span className="hidden sm:inline">
-                              {" "}
-                              · Tekan <b>Esc</b> untuk menutup
-                            </span>
+                            <div className="border-t border-slate-100 bg-slate-50 px-3 py-2 text-[10px] text-slate-400">
+                              Urut tingkat, lalu nama kelas
+                              <span className="hidden sm:inline">
+                                {" "}
+                                · Tekan <b>Esc</b> untuk menutup
+                              </span>
+                            </div>
                           </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
+            )}
+          </div>
+
+          <div className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div
+              role="tablist"
+              className="inline-flex min-w-full gap-1 rounded-xl bg-slate-100 p-1 sm:min-w-0"
+            >
+              {tabsForMapel.map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTab === tab.key}
+                  onClick={() => setActiveTab(tab.key)}
+                  className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
+                    activeTab === tab.key
+                      ? "bg-white text-blue-700 shadow-sm"
+                      : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
             </div>
           </div>
 
@@ -4060,30 +4161,6 @@ export default function PenilaianGuruMapelPage() {
                 </option>
               ))}
             </select>
-          </div>
-
-          <div className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            <div
-              role="tablist"
-              className="inline-flex min-w-full gap-1 rounded-xl bg-slate-100 p-1 sm:min-w-0"
-            >
-              {tabsForMapel.map((tab) => (
-                <button
-                  key={tab.key}
-                  type="button"
-                  role="tab"
-                  aria-selected={activeTab === tab.key}
-                  onClick={() => setActiveTab(tab.key)}
-                  className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
-                    activeTab === tab.key
-                      ? "bg-white text-blue-700 shadow-sm"
-                      : "text-slate-500 hover:text-slate-700"
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
           </div>
 
           {isTahsin ? (
