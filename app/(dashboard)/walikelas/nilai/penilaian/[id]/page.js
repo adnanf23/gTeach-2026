@@ -404,6 +404,7 @@ export default function PenilaianMapelPage() {
   const [mapel, setMapel] = useState(null);
   const [siswaList, setSiswaList] = useState([]);
   const [activeTab, setActiveTab] = useState("formatif");
+  const [tahsinTab, setTahsinTab] = useState("tahsin_nilai");
 
   // FILTER SEMESTER (TAHUN AJARAN)
   const [semesterList, setSemesterList] = useState([]);
@@ -2655,12 +2656,35 @@ export default function PenilaianMapelPage() {
             Kembali
           </button>
         </div>
+        <div className="mb-4 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="inline-flex min-w-full gap-1 rounded-xl bg-slate-100 p-1 sm:min-w-0">
+            {[
+              { key: "tahsin_nilai", label: "Penilaian" },
+              { key: "tahsin_catatan", label: "Catatan Tahsin" },
+            ].map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                role="tab"
+                aria-selected={tahsinTab === t.key}
+                onClick={() => setTahsinTab(t.key)}
+                className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
+                  tahsinTab === t.key
+                    ? "bg-white text-blue-700 shadow-sm"
+                    : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
         <TahsinPanel
           kelasId={kelas.id}
           kelasNama={kelas.nama_kelas}
           tahunAjaranId={taId || selectedSemesterId}
           siswaList={siswaList}
-          activeTab="tahsin_nilai"
+          activeTab={tahsinTab}
         />
       </div>
     );
@@ -2683,6 +2707,7 @@ export default function PenilaianMapelPage() {
         </div>
         <TahfizhPanel
           kelasId={kelas.id}
+          kelasNama={kelas.nama_kelas}
           tahunAjaranId={taId || selectedSemesterId}
           mapelId={mapel.id}
           mapelNama={mapel.nama_mapel || mapel.nama || "TAHFIZH"}

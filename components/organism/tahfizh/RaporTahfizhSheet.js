@@ -21,6 +21,11 @@ function semesterLabel(semester) {
 function PredikatTable({ info, komponen, predikat }) {
   return (
     <table className="rt-table">
+      <colgroup>
+        <col style={{ width: "6%" }} />
+        <col />
+        <col style={{ width: "36%" }} />
+      </colgroup>
       <thead>
         <tr>
           <th colSpan={3} className="rt-cat">
@@ -28,13 +33,9 @@ function PredikatTable({ info, komponen, predikat }) {
           </th>
         </tr>
         <tr>
-          <th className="rt-green" style={{ width: "10%" }}>
-            NO
-          </th>
+          <th className="rt-green rt-no">NO</th>
           <th className="rt-green">{info.item}</th>
-          <th className="rt-green" style={{ width: "36%" }}>
-            PREDIKAT
-          </th>
+          <th className="rt-green">PREDIKAT</th>
         </tr>
       </thead>
       <tbody>
@@ -47,7 +48,7 @@ function PredikatTable({ info, komponen, predikat }) {
         ) : (
           komponen.map((k, i) => (
             <tr key={k.id}>
-              <td className="rt-center">{i + 1}</td>
+              <td className="rt-center rt-no">{i + 1}</td>
               <td>{k.komponen}</td>
               <td className="rt-center">{predikat?.[k.id] || "-"}</td>
             </tr>
@@ -161,6 +162,11 @@ export default function RaporTahfizhSheet({
           line-height: 1.1;
           background: transparent;
         }
+        /* Kolom NO diperkecil */
+        .rt-table th.rt-no,
+        .rt-table td.rt-no {
+          padding: 0 2px;
+        }
         .rt-table .rt-cat {
           text-align: left;
           font-weight: 700;
@@ -210,6 +216,11 @@ export default function RaporTahfizhSheet({
           padding: 2px 8px;
           text-align: center;
           vertical-align: middle;
+        }
+        .rt-tahsin th.rt-no,
+        .rt-tahsin td.rt-no {
+          padding-left: 2px;
+          padding-right: 2px;
         }
         .rt-tahsin td.catatan {
           text-align: justify;
@@ -355,7 +366,9 @@ export default function RaporTahfizhSheet({
           <table className="rt-tahsin">
             <thead>
               <tr>
-                <th style={{ width: "9%" }}>NO</th>
+                <th className="rt-no" style={{ width: "5%" }}>
+                  NO
+                </th>
                 <th style={{ width: "18%" }}>MATA PELAJARAN</th>
                 <th style={{ width: "14%" }}>NILAI</th>
                 <th>CATATAN</th>
@@ -363,10 +376,8 @@ export default function RaporTahfizhSheet({
             </thead>
             <tbody>
               <tr>
-                <td>1</td>
-                <td style={{ textAlign: "left", paddingLeft: 14 }}>
-                  {tahsinNama}
-                </td>
+                <td className="rt-no">1</td>
+                <td style={{ textAlign: "left", paddingLeft: 14 }}>TAHSIN</td>
                 <td>{rapor?.tahsinNilai ?? "-"}</td>
                 <td className="catatan">{rapor?.catatanTahsin || "-"}</td>
               </tr>

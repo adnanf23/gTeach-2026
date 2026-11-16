@@ -3,11 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
+import { jsPDF } from "jspdf";
 import {
   getTahfizhData,
   addTahfizhKomponen,
   removeTahfizhKomponen,
   setTahfizhPredikat,
+  getTahfizhCatatan,
+  setCatatanTahfizh,
 } from "@/actions/tahfizh.action";
 
 const KATEGORI = [
@@ -53,6 +56,10 @@ const norm = (s) =>
     .trim();
 
 const normNis = (v) => String(v ?? "").replace(/\D/g, "");
+
+const firstOf = (v) => (Array.isArray(v) ? v[0] : v);
+
+const isFilled = (v) => String(v ?? "").trim().length > 0;
 
 function readCellString(cell) {
   const v = cell?.value;
@@ -171,6 +178,10 @@ const ICONS = {
   ],
   chart: ["M3 3v18h18", "m7 14 4-4 4 4 5-6"],
   plus: ["M5 12h14", "M12 5v14"],
+  file: [
+    "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z",
+    "M14 2v6h6",
+  ],
 };
 
 function Icon({ name, className = "h-4 w-4" }) {
@@ -325,6 +336,7 @@ function SaveState({ status }) {
 // ================================================================
 export default function TahfizhPanel({
   kelasId,
+  kelasNama = "Kelas",
   tahunAjaranId,
   mapelId,
   mapelNama,
@@ -339,13 +351,18 @@ export default function TahfizhPanel({
   const [busy, setBusy] = useState(false);
   const [cellStatus, setCellStatus] = useState({});
   const [search, setSearch] = useState("");
+  const [activeTab, setActiveTab] = useState("penilaian");
+  const [catatanMap, setCatatanMap] = useState({});
+  const [catatanStatus, setCatatanStatus] = useState({});
 
   const [toast, setToast] = useState(null);
   const toastTimerRef = useRef(null);
+  const catatanTimers = useRef({});
   const fileInputRef = useRef(null);
 
   const [importing, setImporting] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const [importResult, setImportResult] = useState(null);
 
   function show(msg, type = "success") {
@@ -355,26 +372,38 @@ export default function TahfizhPanel({
   }
 
   useEffect(() => {
+    const timers = catatanTimers.current;
     return () => {
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      Object.values(timers).forEach(clearTimeout);
     };
   }, []);
 
   const load = useCallback(async () => {
-    if (!kelasId || !tahunAjaranId || !mapelId) {
+    if (!kelasId || !tahunAjaranId) {
       setLoading(false);
       return;
     }
     setLoading(true);
     setError("");
     try {
-      const res = await getTahfizhData({ kelasId, tahunAjaranId, mapelId });
+      const [res, catatanRes] = await Promise.all([
+        mapelId
+          ? getTahfizhData({ kelasId, tahunAjaranId, mapelId })
+          : Promise.resolve({ komponen: [], predikat: {} }),
+        getTahfizhCatatan({ kelasId, tahunAjaranId }),
+      ]);
       if (res.error) {
         setError(res.error);
         return;
       }
       setKomponen(res.komponen || []);
       setPredikat(res.predikat || {});
+      const cMap = {};
+      (catatanRes?.rows || []).forEach((r) => {
+        cMap[firstOf(r.siswa_id)] = { id: r.id, catatan: r.catatan };
+      });
+      setCatatanMap(cMap);
     } catch (e) {
       setError(e?.message || "Gagal memuat data tahfizh.");
     } finally {
@@ -436,6 +465,20 @@ export default function TahfizhPanel({
       pct: totalCells ? Math.round((filled / totalCells) * 100) : 0,
     };
   }, [siswaList, komponenKategori, predikat, activeKategori]);
+
+  const isCatatan = activeTab === "catatan";
+
+  const catatanStat = useMemo(() => {
+    const total = siswaList.length;
+    const filled = siswaList.filter((s) =>
+      isFilled(catatanMap[s.id]?.catatan),
+    ).length;
+    return {
+      total,
+      filled,
+      pct: total ? Math.round((filled / total) * 100) : 0,
+    };
+  }, [siswaList, catatanMap]);
 
   async function handleAddKomponen(e) {
     e.preventDefault();
@@ -519,8 +562,57 @@ export default function TahfizhPanel({
     }
   }
 
+  async function saveCatatan(siswaId, text) {
+    setCatatanStatus((prev) => ({ ...prev, [siswaId]: "saving" }));
+    try {
+      const res = await setCatatanTahfizh({
+        siswaId,
+        kelasId,
+        tahunAjaranId,
+        catatan: text,
+        existingId: catatanMap[siswaId]?.id,
+      });
+      if (res.error) {
+        setError(res.error);
+        setCatatanStatus((prev) => ({ ...prev, [siswaId]: "error" }));
+        return;
+      }
+      setError("");
+      setCatatanMap((prev) => ({
+        ...prev,
+        [siswaId]: { id: res.record.id, catatan: res.record.catatan },
+      }));
+      setCatatanStatus((prev) => ({ ...prev, [siswaId]: "success" }));
+      setTimeout(
+        () =>
+          setCatatanStatus((prev) => ({ ...prev, [siswaId]: undefined })),
+        1500,
+      );
+    } catch (e) {
+      setError(e?.message || "Gagal menyimpan catatan.");
+      setCatatanStatus((prev) => ({ ...prev, [siswaId]: "error" }));
+    }
+  }
+
+  function scheduleSaveCatatan(siswaId, text) {
+    if (catatanTimers.current[siswaId])
+      clearTimeout(catatanTimers.current[siswaId]);
+    catatanTimers.current[siswaId] = setTimeout(() => {
+      saveCatatan(siswaId, text);
+      delete catatanTimers.current[siswaId];
+    }, 800);
+  }
+
+  function handleCatatanChange(siswaId, value) {
+    setCatatanMap((prev) => ({
+      ...prev,
+      [siswaId]: { ...prev[siswaId], catatan: value },
+    }));
+    scheduleSaveCatatan(siswaId, value);
+  }
+
   // ================= TEMPLATE & EKSPOR =================
-  async function buildWorkbookFile({ withData }) {
+  async function buildWorkbookFile({ title = "DATA" } = {}) {
     const GREEN = "FFD9EAD3";
     const CYAN = "FFE0FFFF";
     const YELLOW = "FFFFFF00";
@@ -541,101 +633,137 @@ export default function TahfizhPanel({
       fgColor: { argb },
     });
 
-    const ws = workbook.addWorksheet(safeSheetName(kategoriInfo?.label));
-    const cols = 3 + komponenKategori.length;
+    function createSheet(sheetName, titleText, headers, textCols) {
+      const ws = workbook.addWorksheet(safeSheetName(sheetName));
+      const cols = headers.length;
 
-    ws.mergeCells(1, 1, 1, cols);
-    const title = ws.getCell(1, 1);
-    title.value = `${withData ? "NILAI" : "TEMPLATE"} TAHFIZH - ${mapelNama || "TAHFIZH"} - ${kategoriInfo?.label || ""}  |  Predikat: A, B, C, *`;
-    title.font = { bold: true, size: 13 };
-    title.alignment = { horizontal: "center", vertical: "middle" };
-    ws.getRow(1).height = 26;
+      ws.mergeCells(1, 1, 1, cols);
+      const title = ws.getCell(1, 1);
+      title.value = titleText;
+      title.font = { bold: true, size: 13 };
+      title.alignment = { horizontal: "center", vertical: "middle" };
+      ws.getRow(1).height = 26;
 
-    const headers = [
-      "NO",
-      "NAMA SISWA",
-      "NIS",
-      ...komponenKategori.map((k) => k.komponen),
-    ];
-    const hr = ws.getRow(2);
-    headers.forEach((h, i) => {
-      const cell = hr.getCell(i + 1);
-      cell.value = h;
-      cell.fill = fill(GREEN);
-      cell.font = { bold: true, size: 11 };
-      cell.alignment = {
-        horizontal: i === 1 ? "left" : "center",
-        vertical: "middle",
-        wrapText: true,
-      };
-      cell.border = border;
-    });
-    hr.height = 30;
-
-    siswaList.forEach((s, idx) => {
-      const r = ws.getRow(3 + idx);
-      r.getCell(1).value = idx + 1;
-      r.getCell(2).value = s.nama_siswa;
-      r.getCell(3).value = s.nis || "";
-
-      komponenKategori.forEach((k, i) => {
-        const cell = r.getCell(4 + i);
-        const value = predikat[activeKategori]?.[k.id]?.[s.id]?.predikat;
-
-        if (withData && value) {
-          cell.value = value;
-          cell.fill = fill(YELLOW);
-          cell.font = { bold: true };
-        } else {
-          cell.value = null;
-          cell.fill = fill(CYAN);
-        }
-        cell.dataValidation = {
-          type: "list",
-          allowBlank: true,
-          formulae: ['"A,B,C,*"'],
-          showErrorMessage: true,
-          errorTitle: "Predikat tidak valid",
-          error: "Isi dengan A, B, C, atau *",
+      const hr = ws.getRow(2);
+      headers.forEach((h, i) => {
+        const cell = hr.getCell(i + 1);
+        cell.value = h;
+        cell.fill = fill(GREEN);
+        cell.font = { bold: true, size: 11 };
+        cell.alignment = {
+          horizontal: i === 1 ? "left" : "center",
+          vertical: "middle",
+          wrapText: true,
         };
+        cell.border = border;
+      });
+      hr.height = 30;
+
+      siswaList.forEach((s, idx) => {
+        const r = ws.getRow(3 + idx);
+        r.getCell(1).value = idx + 1;
+        r.getCell(2).value = s.nama_siswa;
+        r.getCell(3).value = s.nis || "";
+        for (let c = 1; c <= cols; c++) {
+          const cell = r.getCell(c);
+          cell.border = border;
+          cell.alignment = {
+            horizontal: textCols.has(c) ? "left" : "center",
+            vertical: textCols.has(c) ? "top" : "middle",
+            wrapText: textCols.has(c),
+          };
+        }
       });
 
-      for (let c = 1; c <= cols; c++) {
-        const cell = r.getCell(c);
-        cell.border = border;
-        cell.alignment = {
-          horizontal: c === 2 ? "left" : "center",
-          vertical: "middle",
-        };
+      ws.getColumn(1).width = 6;
+      ws.getColumn(2).width = 32;
+      ws.getColumn(3).width = 14;
+      for (let c = 4; c <= cols; c++) ws.getColumn(c).width = 20;
+      ws.views = [{ state: "frozen", xSplit: 3, ySplit: 2 }];
+      return ws;
+    }
+
+    KATEGORI.forEach((kat) => {
+      const list = komponen.filter((k) => (k.kategori || "") === kat.key);
+      const headers = [
+        "NO",
+        "NAMA SISWA",
+        "NIS",
+        ...list.map((k) => k.komponen),
+      ];
+      const ws = createSheet(
+        kat.label,
+        `${title} TAHFIZH - ${mapelNama || "TAHFIZH"} - ${kat.label}  |  Predikat: A, B, C, *`,
+        headers,
+        new Set([2]),
+      );
+
+      siswaList.forEach((s, idx) => {
+        const r = ws.getRow(3 + idx);
+        list.forEach((k, i) => {
+          const cell = r.getCell(4 + i);
+          const value = predikat[kat.key]?.[k.id]?.[s.id]?.predikat;
+
+          if (value) {
+            cell.value = value;
+            cell.fill = fill(YELLOW);
+            cell.font = { bold: true };
+          } else {
+            cell.value = null;
+            cell.fill = fill(CYAN);
+          }
+          cell.dataValidation = {
+            type: "list",
+            allowBlank: true,
+            formulae: ['"A,B,C,*"'],
+            showErrorMessage: true,
+            errorTitle: "Predikat tidak valid",
+            error: "Isi dengan A, B, C, atau *",
+          };
+        });
+      });
+    });
+
+    const wsCatatan = createSheet(
+      "Catatan",
+      `${title} CATATAN TAHFIZH - ${mapelNama || "TAHFIZH"}`,
+      ["NO", "NAMA SISWA", "NIS", "CATATAN"],
+      new Set([2, 4]),
+    );
+    wsCatatan.getColumn(4).width = 60;
+    siswaList.forEach((s, idx) => {
+      const cell = wsCatatan.getRow(3 + idx).getCell(4);
+      const value = catatanMap[s.id]?.catatan;
+      if (isFilled(value)) {
+        cell.value = String(value);
+        cell.fill = fill(YELLOW);
+      } else {
+        cell.value = null;
+        cell.fill = fill(CYAN);
       }
     });
 
-    ws.getColumn(1).width = 6;
-    ws.getColumn(2).width = 32;
-    ws.getColumn(3).width = 14;
-    for (let c = 4; c <= cols; c++) ws.getColumn(c).width = 20;
-    ws.views = [{ state: "frozen", xSplit: 3, ySplit: 2 }];
+    return workbook;
+  }
 
+  async function saveWorkbook(workbook, fileNameSuffix) {
     const buffer = await workbook.xlsx.writeBuffer();
     saveAs(
       new Blob([buffer], {
         type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       }),
-      makeFileName(mapelNama, kategoriInfo?.label),
+      makeFileName(mapelNama, fileNameSuffix),
     );
   }
 
   async function handleDownloadTemplate() {
-    if (komponenKategori.length === 0) {
-      show("Tambahkan komponen dulu untuk kategori ini.", "error");
-      return;
-    }
     if (siswaList.length === 0) {
       show("Belum ada siswa di kelas ini.", "error");
       return;
     }
     try {
-      await buildWorkbookFile({ withData: false });
+      const workbook = await buildWorkbookFile({ title: "TEMPLATE" });
+      await saveWorkbook(workbook, "Template");
       show("Template diunduh", "success");
     } catch (e) {
       console.error("Gagal unduh template:", e);
@@ -643,19 +771,105 @@ export default function TahfizhPanel({
     }
   }
 
-  async function handleExport() {
-    if (komponenKategori.length === 0) {
-      show("Tambahkan komponen dulu untuk kategori ini.", "error");
-      return;
-    }
+  function exportCatatanPdf() {
+    const doc = new jsPDF({ unit: "mm", format: "a4" });
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const marginX = 15;
+    const bottom = pageH - 15;
+    const colNo = marginX;
+    const colNama = marginX + 12;
+    const colCatatan = marginX + 62;
+    const widthNo = 12;
+    const widthNama = 50;
+    const widthCatatan = pageW - marginX - colCatatan;
+
+    let y = 0;
+
+    const drawTitle = () => {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(14);
+      doc.text(`Catatan Tahfizh Kelas ${kelasNama || "-"}`, marginX, 18);
+      if (mapelNama) {
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(10);
+        doc.text(mapelNama, marginX, 24);
+      }
+      y = mapelNama ? 30 : 26;
+    };
+
+    const drawTableHead = () => {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(10);
+      doc.text("NO", colNo + 3, y + 5);
+      doc.text("NAMA", colNama + 3, y + 5);
+      doc.text("CATATAN", colCatatan + 3, y + 5);
+      doc.setLineWidth(0.2);
+      doc.rect(colNo, y, widthNo, 8);
+      doc.rect(colNama, y, widthNama, 8);
+      doc.rect(colCatatan, y, widthCatatan, 8);
+      y += 8;
+      doc.setFont("helvetica", "normal");
+    };
+
+    drawTitle();
+    drawTableHead();
+
+    const LINE_H = 5;
+
+    siswaList.forEach((s, idx) => {
+      doc.setFontSize(10);
+      const catatan = String(catatanMap[s.id]?.catatan || "-");
+      const namaLines = doc.splitTextToSize(
+        String(s.nama_siswa || "-"),
+        widthNama - 6,
+      );
+      const lines = doc.splitTextToSize(catatan, widthCatatan - 6);
+      const rowH = Math.max(8, Math.max(namaLines.length, lines.length) * LINE_H + 4);
+
+      if (y + rowH > bottom) {
+        doc.addPage();
+        y = 15;
+        drawTableHead();
+        doc.setFontSize(10);
+      }
+
+      doc.text(String(idx + 1), colNo + 3, y + 5.5);
+      doc.text(namaLines, colNama + 3, y + 5.5);
+      doc.text(lines, colCatatan + 3, y + 5.5);
+
+      doc.rect(colNo, y, widthNo, rowH);
+      doc.rect(colNama, y, widthNama, rowH);
+      doc.rect(colCatatan, y, widthCatatan, rowH);
+      y += rowH;
+    });
+
+    const clean = (v) =>
+      String(v || "")
+        .trim()
+        .replace(/[\\/:*?"<>|]/g, "")
+        .replace(/\s+/g, "_");
+    doc.save(
+      `Catatan_Tahfizh_${clean(kelasNama || "Kelas")}_${clean(mapelNama || "Mapel")}_${todayStr()}.pdf`,
+    );
+  }
+
+  async function handleExport(mode) {
     if (siswaList.length === 0) {
       show("Belum ada siswa di kelas ini.", "error");
       return;
     }
+    setExportOpen(false);
     try {
       setExporting(true);
-      await buildWorkbookFile({ withData: true });
-      show("Data berhasil diekspor", "success");
+      if (mode === "catatan") {
+        exportCatatanPdf();
+        show("Catatan diekspor ke PDF", "success");
+      } else {
+        const workbook = await buildWorkbookFile({ title: "NILAI" });
+        await saveWorkbook(workbook, "Nilai");
+        show("Nilai diekspor ke Excel", "success");
+      }
     } catch (e) {
       console.error("Gagal ekspor:", e);
       show("Gagal mengekspor data", "error");
@@ -667,10 +881,6 @@ export default function TahfizhPanel({
   // ================= IMPOR =================
   async function handleImportFile(file) {
     if (!file) return;
-    if (komponenKategori.length === 0) {
-      show("Tambahkan komponen dulu untuk kategori ini.", "error");
-      return;
-    }
     try {
       setImporting(true);
       setError("");
@@ -678,37 +888,7 @@ export default function TahfizhPanel({
 
       const workbook = new ExcelJS.Workbook();
       await workbook.xlsx.load(await file.arrayBuffer());
-      const ws =
-        workbook.worksheets.find(
-          (w) =>
-            norm(w.name) === norm(kategoriInfo?.label) ||
-            norm(w.name) === norm(kategoriInfo?.key),
-        ) || workbook.worksheets[0];
-      if (!ws) throw new Error("File kosong.");
-
-      const headerRow = findHeaderRow(ws);
-      if (headerRow === -1)
-        throw new Error("Header kolom NIS tidak ditemukan.");
-
-      let nisCol = -1;
-      let namaCol = -1;
-      const colByKomponen = {};
-      ws.getRow(headerRow).eachCell({ includeEmpty: false }, (cell, col) => {
-        const t = norm(readCellString(cell));
-        if (t === "nis" && nisCol === -1) nisCol = col;
-        else if ((t === "nama" || t.startsWith("nama ")) && namaCol === -1)
-          namaCol = col;
-        else {
-          const match = komponenKategori.find((k) => norm(k.komponen) === t);
-          if (match && !colByKomponen[match.id]) colByKomponen[match.id] = col;
-        }
-      });
-      if (nisCol === -1) nisCol = 3;
-      if (namaCol === -1) namaCol = 2;
-      if (Object.keys(colByKomponen).length === 0)
-        throw new Error(
-          `Tidak ada kolom komponen yang cocok untuk kategori ${kategoriInfo?.label || ""}.`,
-        );
+      if (workbook.worksheets.length === 0) throw new Error("File kosong.");
 
       const byNis = new Map();
       const byNama = new Map();
@@ -719,73 +899,159 @@ export default function TahfizhPanel({
         if (nm && !byNama.has(nm)) byNama.set(nm, s);
       });
 
-      const result = { saved: 0, skipped: 0, errors: [] };
-      const newPredikat = JSON.parse(
-        JSON.stringify(predikat[activeKategori] || {}),
-      );
+      const result = { saved: 0, skipped: 0, catatan: 0, errors: [] };
       const tasks = [];
+      const newPredikat = JSON.parse(JSON.stringify(predikat));
+      const newCatatan = { ...catatanMap };
 
-      for (let rowNum = headerRow + 1; rowNum <= ws.rowCount; rowNum++) {
-        const row = ws.getRow(rowNum);
-        const nama = readCellString(row.getCell(namaCol));
-        const nis = readCellString(row.getCell(nisCol));
-        if (!nama && !nis) continue;
+      for (const ws of workbook.worksheets) {
+        const headerRow = findHeaderRow(ws);
+        if (headerRow === -1) continue;
 
-        const n = normNis(nis);
-        const s = (n && byNis.get(n)) || byNama.get(norm(nama));
-        if (!s) {
+        const sheetName = norm(ws.name);
+        const isCatatanSheet = sheetName === "catatan";
+        const kategori = isCatatanSheet
+          ? null
+          : KATEGORI.find(
+              (k) =>
+                norm(k.label) === sheetName || norm(k.key) === sheetName,
+            );
+        if (!isCatatanSheet && !kategori) continue;
+
+        const list = isCatatanSheet
+          ? []
+          : komponen.filter((k) => (k.kategori || "") === kategori.key);
+
+        let nisCol = -1;
+        let namaCol = -1;
+        let catatanCol = -1;
+        const colByKomponen = {};
+        ws.getRow(headerRow).eachCell({ includeEmpty: false }, (cell, col) => {
+          const t = norm(readCellString(cell));
+          if (t === "nis" && nisCol === -1) nisCol = col;
+          else if ((t === "nama" || t.startsWith("nama ")) && namaCol === -1)
+            namaCol = col;
+          else if (isCatatanSheet && t === "catatan" && catatanCol === -1)
+            catatanCol = col;
+          else if (!isCatatanSheet) {
+            const match = list.find((k) => norm(k.komponen) === t);
+            if (match && !colByKomponen[match.id])
+              colByKomponen[match.id] = col;
+          }
+        });
+        if (nisCol === -1) nisCol = 3;
+        if (namaCol === -1) namaCol = 2;
+
+        if (isCatatanSheet) {
+          if (catatanCol === -1) {
+            result.errors.push(
+              `Sheet "${ws.name}": kolom CATATAN tidak ditemukan.`,
+            );
+            continue;
+          }
+        } else if (Object.keys(colByKomponen).length === 0) {
           result.errors.push(
-            `Baris ${rowNum}: siswa "${nama || nis}" tidak ditemukan.`,
+            `Sheet "${ws.name}": tidak ada kolom komponen yang cocok untuk kategori ${kategori.label}.`,
           );
           continue;
         }
 
-        Object.entries(colByKomponen).forEach(([komponenId, col]) => {
-          const raw = readCellString(row.getCell(col)).toUpperCase();
-          if (!raw) return;
-          if (!PREDIKAT.includes(raw)) {
+        for (let rowNum = headerRow + 1; rowNum <= ws.rowCount; rowNum++) {
+          const row = ws.getRow(rowNum);
+          const nama = readCellString(row.getCell(namaCol));
+          const nis = readCellString(row.getCell(nisCol));
+          if (!nama && !nis) continue;
+
+          const n = normNis(nis);
+          const s = (n && byNis.get(n)) || byNama.get(norm(nama));
+          if (!s) {
             result.errors.push(
-              `Baris ${rowNum} (${s.nama_siswa}): predikat "${raw}" tidak valid (A/B/C/*).`,
+              `Sheet "${ws.name}" baris ${rowNum}: siswa "${nama || nis}" tidak ditemukan.`,
             );
-            return;
-          }
-          const existing = newPredikat[komponenId]?.[s.id];
-          if ((existing?.predikat || "") === raw) {
-            result.skipped++;
-            return;
+            continue;
           }
 
-          tasks.push(async () => {
-            try {
-              const res = await setTahfizhPredikat({
-                kategori: activeKategori,
-                siswaId: s.id,
-                komponenId,
-                tahunAjaranId,
-                predikat: raw,
-                existingId: existing?.id,
-              });
-              if (res.error) throw new Error(res.error);
-              if (!newPredikat[komponenId]) newPredikat[komponenId] = {};
-              newPredikat[komponenId][s.id] = {
-                id: res.record.id,
-                predikat: res.record.predikat,
-              };
-              result.saved++;
-            } catch (err) {
-              result.errors.push(
-                `Baris ${rowNum} (${s.nama_siswa}): ${err?.message || "gagal"}`,
-              );
+          if (isCatatanSheet) {
+            const raw = readCellString(row.getCell(catatanCol));
+            if (raw === (newCatatan[s.id]?.catatan || "")) {
+              result.skipped++;
+              continue;
             }
+            const existingId = newCatatan[s.id]?.id;
+            tasks.push(async () => {
+              try {
+                const res = await setCatatanTahfizh({
+                  siswaId: s.id,
+                  kelasId,
+                  tahunAjaranId,
+                  catatan: raw,
+                  existingId,
+                });
+                if (res.error) throw new Error(res.error);
+                newCatatan[s.id] = {
+                  id: res.record.id,
+                  catatan: res.record.catatan,
+                };
+                result.catatan++;
+              } catch (err) {
+                result.errors.push(
+                  `Sheet "${ws.name}" baris ${rowNum} (${s.nama_siswa}): ${err?.message || "gagal"}`,
+                );
+              }
+            });
+            continue;
+          }
+
+          Object.entries(colByKomponen).forEach(([komponenId, col]) => {
+            const raw = readCellString(row.getCell(col)).toUpperCase();
+            if (!raw) return;
+            if (!PREDIKAT.includes(raw)) {
+              result.errors.push(
+                `Sheet "${ws.name}" baris ${rowNum} (${s.nama_siswa}): predikat "${raw}" tidak valid (A/B/C/*).`,
+              );
+              return;
+            }
+            const existing = newPredikat[kategori.key]?.[komponenId]?.[s.id];
+            if ((existing?.predikat || "") === raw) {
+              result.skipped++;
+              return;
+            }
+
+            tasks.push(async () => {
+              try {
+                const res = await setTahfizhPredikat({
+                  kategori: kategori.key,
+                  siswaId: s.id,
+                  komponenId,
+                  tahunAjaranId,
+                  predikat: raw,
+                  existingId: existing?.id,
+                });
+                if (res.error) throw new Error(res.error);
+                if (!newPredikat[kategori.key]) newPredikat[kategori.key] = {};
+                if (!newPredikat[kategori.key][komponenId])
+                  newPredikat[kategori.key][komponenId] = {};
+                newPredikat[kategori.key][komponenId][s.id] = {
+                  id: res.record.id,
+                  predikat: res.record.predikat,
+                };
+                result.saved++;
+              } catch (err) {
+                result.errors.push(
+                  `Sheet "${ws.name}" baris ${rowNum} (${s.nama_siswa}): ${err?.message || "gagal"}`,
+                );
+              }
+            });
           });
-        });
+        }
       }
 
       await runPool(tasks, 4);
-      setPredikat((prev) => ({ ...prev, [activeKategori]: newPredikat }));
+      setPredikat(newPredikat);
+      setCatatanMap(newCatatan);
       setImportResult(result);
       show(
-        `${result.saved} predikat diimpor`,
+        `${result.saved} predikat & ${result.catatan} catatan diimpor`,
         result.errors.length ? "info" : "success",
       );
     } catch (e) {
@@ -840,14 +1106,15 @@ export default function TahfizhPanel({
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div className="min-w-0">
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-blue-100/80">
-                Penilaian Tahfizh
+                {isCatatan ? "Catatan Tahfizh" : "Penilaian Tahfizh"}
               </p>
               <h2 className="mt-0.5 break-words text-xl font-bold leading-tight sm:text-2xl">
                 {mapelNama || "TAHFIZH"}
               </h2>
               <p className="mt-1.5 max-w-xl text-xs leading-relaxed text-blue-50/90">
-                Kelola komponen dan isi predikat per siswa untuk kategori{" "}
-                {kategoriInfo?.label}. Tersimpan otomatis saat predikat dipilih.
+                {isCatatan
+                  ? "Catatan per siswa akan muncul di rapor tahfizh bagian Catatan Tahfizh. Tersimpan otomatis."
+                  : `Kelola komponen dan isi predikat per siswa untuk kategori ${kategoriInfo?.label}. Tersimpan otomatis saat predikat dipilih.`}
               </p>
             </div>
 
@@ -856,7 +1123,7 @@ export default function TahfizhPanel({
                 type="button"
                 onClick={handleDownloadTemplate}
                 className={BTN_GLASS}
-                title="Unduh template Excel kategori aktif"
+                title="Unduh template Excel semua kategori + catatan"
               >
                 <Icon name="sheet" />
                 <span>Template</span>
@@ -866,31 +1133,81 @@ export default function TahfizhPanel({
                 onClick={() => fileInputRef.current?.click()}
                 disabled={importing}
                 className={BTN_GLASS}
-                title="Impor dari Excel kategori aktif"
+                title="Impor dari Excel semua kategori + catatan"
               >
                 {importing ? <Spinner /> : <Icon name="upload" />}
                 <span>{importing ? "Proses" : "Impor"}</span>
               </button>
-              <button
-                type="button"
-                onClick={handleExport}
-                disabled={exporting}
-                className={BTN_LIGHT}
-                title="Ekspor ke Excel kategori aktif"
-              >
-                {exporting ? <Spinner /> : <Icon name="download" />}
-                <span>{exporting ? "Proses" : "Ekspor"}</span>
-              </button>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setExportOpen((v) => !v)}
+                  disabled={exporting}
+                  className={`${BTN_LIGHT} w-full`}
+                  title="Pilih format ekspor"
+                  aria-haspopup="menu"
+                  aria-expanded={exportOpen}
+                >
+                  {exporting ? <Spinner /> : <Icon name="download" />}
+                  <span>{exporting ? "Proses" : "Ekspor"}</span>
+                </button>
+                {exportOpen && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-40"
+                      onClick={() => setExportOpen(false)}
+                    />
+                    <div
+                      role="menu"
+                      className="absolute right-0 z-50 mt-2 w-56 overflow-hidden rounded-2xl border border-stone-200 bg-white p-1.5 shadow-xl"
+                    >
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => handleExport("nilai")}
+                        className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-[13px] font-semibold text-stone-700 transition hover:bg-stone-100"
+                      >
+                        <Icon name="sheet" className="h-4 w-4 text-emerald-600" />
+                        Ekspor Nilai (Excel)
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => handleExport("catatan")}
+                        className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-[13px] font-semibold text-stone-700 transition hover:bg-stone-100"
+                      >
+                        <Icon name="file" className="h-4 w-4 text-rose-600" />
+                        Ekspor Catatan (PDF)
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {[
-              ["users", stat.total, "Siswa"],
-              ["book", stat.komponenCount, "Komponen"],
-              ["check", `${stat.filled}/${stat.totalCells}`, "Predikat terisi"],
-              ["chart", `${stat.pct}%`, "Kelengkapan"],
-            ].map(([icon, value, label]) => (
+            {(isCatatan
+              ? [
+                  ["users", stat.total, "Siswa"],
+                  [
+                    "check",
+                    `${catatanStat.filled}/${catatanStat.total}`,
+                    "Catatan terisi",
+                  ],
+                  ["chart", `${catatanStat.pct}%`, "Kelengkapan"],
+                ]
+              : [
+                  ["users", stat.total, "Siswa"],
+                  ["book", stat.komponenCount, "Komponen"],
+                  [
+                    "check",
+                    `${stat.filled}/${stat.totalCells}`,
+                    "Predikat terisi",
+                  ],
+                  ["chart", `${stat.pct}%`, "Kelengkapan"],
+                ]
+            ).map(([icon, value, label]) => (
               <div
                 key={label}
                 className="flex items-center gap-2.5 rounded-2xl bg-white/12 px-3 py-2.5 ring-1 ring-white/15 backdrop-blur"
@@ -927,8 +1244,35 @@ export default function TahfizhPanel({
         </div>
       )}
 
-      {/* ===== KATEGORI TABS ===== */}
+      {/* ===== TAB UTAMA ===== */}
       <div className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="inline-flex min-w-full gap-1 rounded-xl bg-stone-100 p-1 sm:min-w-0">
+          {[
+            { key: "penilaian", label: "Penilaian" },
+            { key: "catatan", label: "Catatan Tahfizh" },
+          ].map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === t.key}
+              onClick={() => setActiveTab(t.key)}
+              className={`whitespace-nowrap rounded-lg px-4 py-2 text-[13px] font-semibold transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 ${
+                activeTab === t.key
+                  ? "bg-white text-blue-700 shadow-sm"
+                  : "text-stone-500 hover:text-stone-700"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* ===== KATEGORI TABS ===== */}
+      <div
+        className={`overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${isCatatan ? "hidden" : ""}`}
+      >
         <div className="inline-flex min-w-full gap-1 rounded-xl bg-stone-100 p-1 sm:min-w-0">
           {KATEGORI.map((k) => (
             <button
@@ -952,7 +1296,7 @@ export default function TahfizhPanel({
       {/* ===== TAMBAH KOMPONEN ===== */}
       <form
         onSubmit={handleAddKomponen}
-        className={`${SURFACE} flex flex-col gap-2 p-4 sm:flex-row sm:items-end`}
+        className={`${SURFACE} ${isCatatan ? "hidden" : "flex"} flex-col gap-2 p-4 sm:flex-row sm:items-end`}
       >
         <label className="flex-1">
           <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-stone-400">
@@ -981,17 +1325,19 @@ export default function TahfizhPanel({
           <div className="flex items-end justify-between gap-3">
             <div className="min-w-0">
               <h3 className="truncate text-lg font-bold text-stone-900">
-                Daftar siswa
+                {isCatatan ? "Catatan Tahfizh" : "Daftar siswa"}
               </h3>
               <p className="mt-0.5 text-xs text-stone-500">
-                {stat.filled} dari {stat.totalCells} predikat sudah terisi
+                {isCatatan
+                  ? `${catatanStat.filled} dari ${catatanStat.total} siswa sudah diberi catatan`
+                  : `${stat.filled} dari ${stat.totalCells} predikat sudah terisi`}
               </p>
             </div>
             <span className="shrink-0 rounded-full bg-blue-50 px-3 py-1 text-sm font-bold tabular-nums text-blue-700">
-              {stat.pct}%
+              {isCatatan ? catatanStat.pct : stat.pct}%
             </span>
           </div>
-          <Bar value={stat.pct} />
+          <Bar value={isCatatan ? catatanStat.pct : stat.pct} />
 
           <div className="relative">
             <Icon
@@ -1023,6 +1369,78 @@ export default function TahfizhPanel({
         ) : filteredSiswa.length === 0 ? (
           <div className="px-4 py-14 text-center text-sm text-stone-400">
             Siswa tidak ditemukan.
+          </div>
+        ) : isCatatan ? (
+          <div className="max-h-[72vh] overflow-auto overscroll-contain">
+            <table className="w-full min-w-max border-separate border-spacing-0 text-sm">
+              <thead>
+                <tr>
+                  <th
+                    className={`${TH} sticky left-0 top-0 z-30 h-11 w-12 min-w-[48px] border-r px-2 text-center`}
+                  >
+                    No
+                  </th>
+                  <th
+                    className={`${TH} sticky left-12 top-0 z-30 h-11 min-w-[220px] border-r px-4 text-left ${SHADOW_L}`}
+                  >
+                    Siswa
+                  </th>
+                  <th
+                    className={`${TH} sticky top-0 z-20 h-11 min-w-[420px] px-3 text-left`}
+                  >
+                    Catatan Tahfizh
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredSiswa.map((s, idx) => {
+                  const bg = idx % 2 === 0 ? "bg-white" : "bg-slate-50";
+                  return (
+                    <tr key={s.id} className="group">
+                      <td
+                        className={`${TD} sticky left-0 z-10 w-12 min-w-[48px] border-r px-2 text-center text-xs tabular-nums text-slate-400 group-hover:bg-blue-50 ${bg}`}
+                      >
+                        {idx + 1}
+                      </td>
+                      <td
+                        title={s.nama_siswa}
+                        className={`${TD} sticky left-12 z-10 min-w-[220px] border-r px-4 py-1.5 text-[13px] font-medium text-slate-800 group-hover:bg-blue-50 ${SHADOW_L} ${bg}`}
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <span className="min-w-0 truncate">
+                            {s.nama_siswa}
+                          </span>
+                          {s.nis ? (
+                            <span className="shrink-0 text-[11px] tabular-nums text-slate-400">
+                              · {s.nis}
+                            </span>
+                          ) : null}
+                        </div>
+                      </td>
+                      <td
+                        className={`${TD} px-3 py-1.5 group-hover:bg-blue-50 ${bg}`}
+                      >
+                        <div>
+                          <textarea
+                            value={catatanMap[s.id]?.catatan ?? ""}
+                            onChange={(e) =>
+                              handleCatatanChange(s.id, e.target.value)
+                            }
+                            rows={2}
+                            placeholder="Catatan tahfizh..."
+                            aria-label={`Catatan ${s.nama_siswa}`}
+                            className="w-full min-w-[380px] resize-y rounded-md border border-slate-200 bg-white px-3 py-2 text-left text-[13px] text-slate-800 outline-none transition placeholder:text-slate-300 focus:ring-2 focus:ring-blue-400"
+                          />
+                          <div className="h-4">
+                            <SaveState status={catatanStatus[s.id]} />
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         ) : komponenKategori.length === 0 ? (
           <div className="px-4 py-14 text-center text-sm text-stone-400">
@@ -1146,7 +1564,9 @@ export default function TahfizhPanel({
       </section>
 
       {/* Keterangan predikat */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-1 text-[11.5px] text-stone-500">
+      <div
+        className={`flex flex-wrap items-center gap-x-4 gap-y-2 px-1 text-[11.5px] text-stone-500 ${isCatatan ? "hidden" : ""}`}
+      >
         <span className="font-semibold text-stone-600">Keterangan:</span>
         <span>A = Hafal</span>
         <span>B = Hafal dengan sedikit bantuan</span>
@@ -1159,15 +1579,20 @@ export default function TahfizhPanel({
         <Modal size="max-w-lg" onClose={() => setImportResult(null)}>
           <ModalHeader
             title="Hasil impor"
-            subtitle="Sel kosong dilewati. Predikat yang sama dengan data saat ini tidak diubah."
+            subtitle="Sel kosong dilewati. Predikat/catatan yang sama dengan data saat ini tidak diubah."
             onClose={() => setImportResult(null)}
           />
           <div className="space-y-4 overflow-y-auto px-5 pb-5">
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <StatBox
                 tone="blue"
                 value={importResult.saved}
                 label="Predikat disimpan"
+              />
+              <StatBox
+                tone="blue"
+                value={importResult.catatan}
+                label="Catatan disimpan"
               />
               <StatBox
                 tone="stone"
