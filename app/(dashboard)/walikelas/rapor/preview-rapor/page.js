@@ -806,9 +806,17 @@ export default function RaporWalikelasPage() {
       return;
     }
     let cancelled = false;
+    setTahfizhRapor(null);
     (async () => {
-      const ctx = await getRaporTahfizhContext({ kelasId: kelas.id });
-      if (cancelled || ctx.error) return;
+      const ctx = await getRaporTahfizhContext({
+        kelasId: kelas.id,
+        tahunAjaranId: ujian?.expand?.tahun_ajaran_id?.id,
+      });
+      if (cancelled) return;
+      if (ctx.error) {
+        setTahfizhCtx(null);
+        return;
+      }
       setTahfizhCtx(ctx);
       const res = await getRaporTahfizhSiswa({
         kelasId: kelas.id,
@@ -1758,6 +1766,12 @@ const CSS = `
         break-before: page;
         page-break-before: always;
       }
+      /* rapor tahfizh (template kombinasi) mulai di kertas baru */
+      .rapor-sheet + .rt-root {
+        margin-top: 0;
+        break-before: page;
+        page-break-before: always;
+      }
       .rapor-sheet,
       .rapor-sheet * {
         color: #000000 !important;
@@ -1767,6 +1781,7 @@ const CSS = `
       .rapor-table th,
       .rapor-table td {
         background-color: transparent !important;
+      }
       .ttd-img {
         max-height: 110px !important;
         max-width: 240px !important;

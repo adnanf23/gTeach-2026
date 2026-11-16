@@ -17,6 +17,8 @@
 //   lalu window.print(). Atur kertas F4 / margin default di dialog cetak.
 // - UI: semua komponen custom (tanpa <select> bawaan browser), gaya kartu
 //   disamakan dengan pemilihan kelas, aksen hitam gradasi.
+// - FIX: portal cetak memakai <RaporSheet ujian={ujian} /> (bukan RaporPreview
+//   langsung) supaya template ASAS / tahfizh / kombinasi ikut terpilih.
 
 import {
   getRaporPrintBase,
@@ -274,7 +276,10 @@ const NilaiTable = ({ rows, startIndex = 0, rowH }) => (
 
 /* ───────────── preview rapor ───────────── */
 const RaporPreview = ({ siswa, rapor, jenisUjian }) => {
-  const isAsas = String(jenisUjian || "").trim().toLowerCase() === "asas";
+  const isAsas =
+    String(jenisUjian || "")
+      .trim()
+      .toLowerCase() === "asas";
   const nilai = toArray(rapor.nilai);
   const ekskul = toArray(rapor.ekstrakurikuler);
   const ekskulRows = ekskul.length
@@ -1239,10 +1244,11 @@ export default function AdminRaporPage() {
         createPortal(
           <div ref={printRef} className="print-root">
             {printItems.map((it) => (
-              <RaporPreview
+              <RaporSheet
                 key={it.siswa.id}
                 siswa={it.siswa}
                 rapor={it.rapor}
+                ujian={ujian}
               />
             ))}
           </div>,
@@ -2064,6 +2070,16 @@ const CSS = `
       /* halaman 2 & tiap siswa baru selalu mulai di kertas baru */
       .print-root .page + .page,
       .print-root .rapor-sheet + .rapor-sheet .page-1 {
+        margin-top: 0;
+        break-before: page;
+        page-break-before: always;
+      }
+      /* tahfizh / kombinasi: tiap lembar mulai di kertas baru
+         (tahfizh setelah tahfizh, tahfizh setelah akademik,
+          akademik siswa berikutnya setelah tahfizh) */
+      .print-root .rt-root + .rt-root,
+      .print-root .rapor-sheet + .rt-root,
+      .print-root .rt-root + .rapor-sheet .page-1 {
         margin-top: 0;
         break-before: page;
         page-break-before: always;

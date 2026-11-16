@@ -567,13 +567,13 @@ export default function WalikelasLayout({ children }) {
 
   return (
     <div
-      className="flex h-screen min-h-[600px] bg-gray-50 text-[13px] font-sans overflow-hidden text-black"
+      className="flex h-screen min-h-[600px] bg-gray-50 text-[13px] font-sans overflow-hidden text-black print:h-auto print:min-h-0 print:overflow-visible print:bg-white"
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
       translate="no"
     >
       {/* ── SIDEBAR DESKTOP (kartu melayang) ── */}
-      <aside className="hidden lg:flex relative flex-col w-[240px] min-w-[240px] bg-white overflow-y-auto no-scrollbar my-4 ml-4 rounded-3xl shadow-[0_8px_30px_rgba(99,120,200,0.10)]">
+      <aside className="no-print hidden lg:flex relative flex-col w-[240px] min-w-[240px] bg-white overflow-y-auto no-scrollbar my-4 ml-4 rounded-3xl shadow-[0_8px_30px_rgba(99,120,200,0.10)]">
         <SidebarContent
           user={user}
           navGroups={navGroups}
@@ -588,7 +588,7 @@ export default function WalikelasLayout({ children }) {
 
       {/* ── DRAWER MOBILE ── */}
       <div
-        className={`lg:hidden fixed inset-0 z-50 ${
+        className={`no-print lg:hidden fixed inset-0 z-50 ${
           navOpen ? "pointer-events-auto" : "pointer-events-none"
         }`}
         aria-hidden={!navOpen}
@@ -620,7 +620,7 @@ export default function WalikelasLayout({ children }) {
       </div>
 
       {/* ── MAIN CONTENT ── */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden print:overflow-visible">
         {/* Topbar DESKTOP */}
         <header className="no-print hidden lg:flex items-center gap-4 px-6 pt-5 pb-3 flex-shrink-0">
           <div className="min-w-0">
@@ -689,7 +689,7 @@ export default function WalikelasLayout({ children }) {
         </header>
 
         {/* Page content */}
-        <div className="flex-1 no-scrollbar overflow-y-auto p-4 sm:p-5 lg:px-6 lg:pt-2 lg:pb-6">
+        <div className="flex-1 no-scrollbar overflow-y-auto p-4 sm:p-5 lg:px-6 lg:pt-2 lg:pb-6 print:overflow-visible print:p-0">
           {children}
         </div>
       </div>

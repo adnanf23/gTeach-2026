@@ -51,3 +51,9 @@ summary {
 button:disabled {
   cursor: not-allowed;
 }
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+}

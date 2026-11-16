@@ -265,14 +265,15 @@ export async function setCatatanTahfizh({
 
 /* ============================ RAPOR TAHFIZH ============================ */
 
-export async function getRaporTahfizhContext({ userId, kelasId }) {
+export async function getRaporTahfizhContext({ userId, kelasId, tahunAjaranId }) {
   try {
     const kelas = kelasId
       ? await tahfizhRepository.findKelasById(kelasId)
       : await tahfizhRepository.findKelasByWali(userId);
     if (!kelas) return { error: "Kelas tidak ditemukan." };
 
-    const taId = firstOf(kelas.tahun_ajaran_id);
+    // Ikut tahun ajaran ujian yang sedang dicetak, bukan tahun ajaran kelas.
+    const taId = tahunAjaranId || firstOf(kelas.tahun_ajaran_id);
     const [mapelTahfizh, tahsinMapel, siswa] = await Promise.all([
       tahfizhRepository.findMapelTahfizh(),
       resolveTahsinMapel(kelas.id),

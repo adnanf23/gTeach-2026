@@ -354,6 +354,7 @@ async function buildRapor(
   ) {
     const ctx = await tahfizhService.getRaporTahfizhContext({
       kelasId: kelas.id,
+      tahunAjaranId: ta?.id,
     });
     if (!ctx.error) {
       const res = await tahfizhService.getRaporTahfizhSiswa({

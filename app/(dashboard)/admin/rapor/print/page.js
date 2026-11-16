@@ -589,7 +589,10 @@ async function buildRapor(
     ujian?.template_rapor === "tahfiz" ||
     ujian?.template_rapor === "kombinasi"
   ) {
-    const ctx = await getRaporTahfizhContext({ kelasId: kelas.id });
+    const ctx = await getRaporTahfizhContext({
+      kelasId: kelas.id,
+      tahunAjaranId: ta?.id,
+    });
     if (!ctx.error) {
       const res = await getRaporTahfizhSiswa({
         kelasId: kelas.id,
@@ -2514,6 +2517,13 @@ const CSS = `
       /* halaman 2 & tiap siswa baru selalu mulai di kertas baru */
       .print-root .page + .page,
       .print-root .rapor-sheet + .rapor-sheet .page-1 {
+        margin-top: 0;
+        break-before: page;
+        page-break-before: always;
+      }
+      /* rapor tahfizh: tiap siswa mulai di kertas baru */
+      .print-root .rt-root + .rt-root,
+      .print-root .rapor-sheet + .rt-root {
         margin-top: 0;
         break-before: page;
         page-break-before: always;
