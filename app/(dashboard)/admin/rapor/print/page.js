@@ -39,6 +39,7 @@ const RaporSheet = ({ siswa, rapor, ujian }) => {
       kelas={t?.kelas}
       siswa={siswa}
       rapor={t?.data}
+      kategoriRapor={t?.kategoriRapor}
       tahsinNama={t?.tahsinNama}
       jenisSemester={t?.jenisSemester}
       tanggalRapor={t?.tanggalRapor}
@@ -605,6 +606,7 @@ async function buildRapor(
         tahfizh = {
           kelas: ctx.kelas,
           data: res,
+          kategoriRapor: ctx.kategoriRapor,
           tahsinNama: ctx.tahsinMapel?.nama_mapel || "Tahsin",
           jenisSemester: pengaturanRapor?.jenis_semester || "",
           tanggalRapor: pengaturanRapor?.tanggal_rapor

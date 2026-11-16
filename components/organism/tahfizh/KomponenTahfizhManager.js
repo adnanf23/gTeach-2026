@@ -5,19 +5,14 @@ import * as XLSX from "xlsx-js-style";
 import { getTahunAjaranList } from "@/actions/tahun-ajaran.action";
 import {
   getMapelTahfizh,
+  getKategoriTahfizh,
   getKomponenTingkat,
   addKomponenTingkat,
   removeKomponenTingkat,
 } from "@/actions/tahfizh.action";
+import { normalisasiKategori } from "@/lib/tahfizh-kategori";
 
-const KATEGORI = [
-  { key: "hafalan", label: "Hafalan Al-Qur'an" },
-  { key: "jaritmatika", label: "Jaritmatika Al-Qur'an" },
-  { key: "gesture", label: "Gesture" },
-  { key: "hadits", label: "Hadits" },
-  { key: "doa", label: "Doa" },
-  { key: "wudhu", label: "Doa Berwudhu" },
-];
+const KATEGORI_AWAL = normalisasiKategori(null);
 const TINGKAT = ["1", "2", "3", "4", "5", "6"];
 const sheetName = (label) => label.slice(0, 31);
 
@@ -112,6 +107,7 @@ export default function KomponenTahfizhManager() {
   const [mapel, setMapel] = useState(null);
   const [kelas, setKelas] = useState([]);
   const [komponen, setKomponen] = useState([]);
+  const [kategoriList, setKategoriList] = useState(KATEGORI_AWAL);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [nama, setNama] = useState("");
@@ -146,17 +142,26 @@ export default function KomponenTahfizhManager() {
     setLoading(true);
     setError("");
     try {
-      const res = await getKomponenTingkat({
-        tingkat,
-        tahunAjaranId: taId,
-        mapelId: mapel.id,
-      });
+      const [res, katRes] = await Promise.all([
+        getKomponenTingkat({
+          tingkat,
+          tahunAjaranId: taId,
+          mapelId: mapel.id,
+        }),
+        getKategoriTahfizh({ tingkat }),
+      ]);
       if (res.error) {
         setError(res.error);
         return;
       }
       setKelas(res.kelas || []);
       setKomponen(res.komponen || []);
+      // Tab kategori mengikuti tingkat; fallback ke daftar bawaan kalau kosong.
+      const daftar = normalisasiKategori(katRes?.kategori);
+      setKategoriList(daftar);
+      setKategori((prev) =>
+        daftar.some((k) => k.key === prev) ? prev : daftar[0]?.key || "hafalan",
+      );
     } catch (e) {
       setError(e?.message || "Gagal memuat komponen.");
     } finally {
@@ -170,7 +175,7 @@ export default function KomponenTahfizhManager() {
   }, [load]);
 
   const komponenKategori = komponen.filter((k) => k.kategori === kategori);
-  const kategoriAktif = KATEGORI.find((k) => k.key === kategori);
+  const kategoriAktif = kategoriList.find((k) => k.key === kategori);
   const countOf = (key) => komponen.filter((k) => k.kategori === key).length;
 
   async function handleAdd(e) {
@@ -223,7 +228,7 @@ export default function KomponenTahfizhManager() {
 
   function handleTemplate() {
     const wb = XLSX.utils.book_new();
-    KATEGORI.forEach((kat) => {
+    kategoriList.forEach((kat) => {
       const rows = komponen
         .filter((k) => k.kategori === kat.key)
         .map((k) => [k.komponen]);
@@ -246,7 +251,7 @@ export default function KomponenTahfizhManager() {
         const buf = await file.arrayBuffer();
         const wb = XLSX.read(buf, { type: "array" });
         let total = 0;
-        for (const kat of KATEGORI) {
+        for (const kat of kategoriList) {
           const sheet = wb.Sheets[sheetName(kat.label)];
           if (!sheet) continue;
           const rows = XLSX.utils.sheet_to_json(sheet, {
@@ -409,7 +414,7 @@ export default function KomponenTahfizhManager() {
           aria-label="Kategori komponen"
           className="flex overflow-x-auto border-b border-slate-200 px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:px-3"
         >
-          {KATEGORI.map((k) => {
+          {kategoriList.map((k) => {
             const active = kategori === k.key;
             return (
               <button

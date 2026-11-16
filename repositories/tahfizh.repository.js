@@ -2,15 +2,6 @@ import "server-only";
 
 import { getServerPb } from "@/lib/pocketbase.server";
 
-export const KATEGORI_TAHFIZH = [
-  "hafalan",
-  "jaritmatika",
-  "gesture",
-  "hadits",
-  "doa",
-  "wudhu",
-];
-
 /* ============================ KOMPONEN ============================ */
 
 export async function findKomponenByTingkat({ tingkat, tahunAjaranId, mapelId }) {
@@ -157,6 +148,22 @@ export async function findMapelTahfizh() {
 }
 
 /* ===================== KOMPONEN PER TINGKAT ===================== */
+
+// Susunan kategori rapor untuk satu tingkat (label, urutan, jumlah kolom).
+// Sumbernya koleksi tahfizh_kategori supaya layout tiap tingkat bisa berbeda.
+export async function findKategoriByTingkat(tingkat) {
+  const pb = await getServerPb();
+  try {
+    return await pb.collection("tahfizh_kategori").getFullList({
+      filter: `tingkat="${tingkat}"`,
+      sort: "urutan",
+      requestKey: null,
+    });
+  } catch {
+    // Koleksi belum ada (migrasi belum dijalankan) -> pemanggil pakai default.
+    return [];
+  }
+}
 
 // Semua kelas pada satu tingkat (opsional dibatasi tahun ajaran).
 export async function findKelasByTingkat(tingkat, tahunAjaranId) {

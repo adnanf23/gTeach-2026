@@ -46,12 +46,20 @@ export async function getRaporTahfizhSiswa(params) {
   return tahfizhService.getRaporTahfizhSiswa(params);
 }
 
+export async function getRaporTahfizhKelas(params) {
+  return tahfizhService.getRaporTahfizhKelas(params);
+}
+
 export async function getKomponenTingkat(params) {
   return tahfizhService.getKomponenTingkat(params);
 }
 
 export async function getMapelTahfizh() {
   return tahfizhService.getMapelTahfizh();
+}
+
+export async function getKategoriTahfizh(params) {
+  return tahfizhService.getKategoriTahfizh(params);
 }
 
 export async function addKomponenTingkat(params) {

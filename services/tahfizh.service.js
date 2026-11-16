@@ -1,10 +1,13 @@
 import { describeError } from "@/lib/app-error";
 import * as tahfizhRepository from "@/repositories/tahfizh.repository";
 import { writeLog } from "@/services/systemLog.service";
+import {
+  KATEGORI_TAHFIZH as KATEGORI,
+  normalisasiKategori,
+  LABEL_CETAK,
+} from "@/lib/tahfizh-kategori";
 
 const firstOf = (v) => (Array.isArray(v) ? v[0] : v);
-
-const KATEGORI = tahfizhRepository.KATEGORI_TAHFIZH;
 
 function mapPredikat(rows) {
   const map = {};
@@ -26,17 +29,24 @@ export async function getTahfizhData({ kelasId, tahunAjaranId, mapelId }) {
       mapelId,
     });
 
+    // 6 kategori diambil paralel (sebelumnya berurutan -> 6x latensi).
+    const hasil = await Promise.all(
+      KATEGORI.map(async (kategori) => {
+        const ids = komponen
+          .filter((k) => k.kategori === kategori)
+          .map((k) => k.id);
+        const rows = await tahfizhRepository.findPredikat(kategori, {
+          komponenIds: ids,
+          tahunAjaranId,
+        });
+        return [kategori, mapPredikat(rows)];
+      }),
+    );
+
     const predikat = {};
-    for (const kategori of KATEGORI) {
-      const ids = komponen
-        .filter((k) => k.kategori === kategori)
-        .map((k) => k.id);
-      const rows = await tahfizhRepository.findPredikat(kategori, {
-        komponenIds: ids,
-        tahunAjaranId,
-      });
-      predikat[kategori] = mapPredikat(rows);
-    }
+    hasil.forEach(([kategori, map]) => {
+      predikat[kategori] = map;
+    });
 
     return { komponen, predikat, error: null };
   } catch (error) {
@@ -265,6 +275,10 @@ export async function setCatatanTahfizh({
 
 /* ============================ RAPOR TAHFIZH ============================ */
 
+// Susunan kategori rapor default, dipakai kalau tahfizh_kategori kosong
+// (mis. migrasi belum dijalankan).
+const KATEGORI_RAPOR_DEFAULT = normalisasiKategori(null, { cetak: true });
+
 export async function getRaporTahfizhContext({ userId, kelasId, tahunAjaranId }) {
   try {
     const kelas = kelasId
@@ -274,10 +288,11 @@ export async function getRaporTahfizhContext({ userId, kelasId, tahunAjaranId })
 
     // Ikut tahun ajaran ujian yang sedang dicetak, bukan tahun ajaran kelas.
     const taId = tahunAjaranId || firstOf(kelas.tahun_ajaran_id);
-    const [mapelTahfizh, tahsinMapel, siswa] = await Promise.all([
+    const [mapelTahfizh, tahsinMapel, siswa, kategoriTingkat] = await Promise.all([
       tahfizhRepository.findMapelTahfizh(),
       resolveTahsinMapel(kelas.id),
       tahfizhRepository.findSiswaByKelas(kelas.id),
+      tahfizhRepository.findKategoriByTingkat(String(kelas?.tingkat ?? "")),
     ]);
 
     return {
@@ -286,11 +301,111 @@ export async function getRaporTahfizhContext({ userId, kelasId, tahunAjaranId })
       mapelTahfizh,
       tahsinMapel,
       siswa,
+      kategoriRapor: kategoriTingkat.length
+        ? kategoriTingkat.map((r) => ({
+            key: r.kategori,
+            kategori: r.kategori,
+            label: r.label || LABEL_CETAK[r.kategori]?.label,
+            item_label:
+              r.item_label || LABEL_CETAK[r.kategori]?.item || "SURAT",
+            kolom: Number(r.kolom) === 2 ? 2 : 1,
+            predikat_d: !!r.predikat_d,
+          }))
+        : KATEGORI_RAPOR_DEFAULT,
       error: null,
     };
   } catch (error) {
     console.error("[getRaporTahfizhContext]", error);
     return { error: describeError(error) };
+  }
+}
+
+// Ambil seluruh data tahfizh satu kelas sekali, lalu petakan per siswa.
+// Sebelumnya tiap siswa mengulang query komponen + 6 predikat + nilai tahsin +
+// catatan (semuanya identik untuk satu kelas) sehingga biaya jadi N kali.
+export async function getRaporTahfizhKelas({
+  kelasId,
+  tahunAjaranId,
+  mapelTahfizhId,
+  tahsinMapelId,
+  siswaIds = [],
+}) {
+  try {
+    const [tahfizhData, nilaiRows, catatanTahsinRows, catatanTahfizhRows] =
+      await Promise.all([
+        mapelTahfizhId
+          ? getTahfizhData({ kelasId, tahunAjaranId, mapelId: mapelTahfizhId })
+          : Promise.resolve({ komponen: [], predikat: {} }),
+        tahsinMapelId
+          ? tahfizhRepository.findNilaiTahsin({
+              kelasId,
+              tahunAjaranId,
+              mapelId: tahsinMapelId,
+            })
+          : Promise.resolve([]),
+        tahfizhRepository.findTahsinCatatan({ kelasId, tahunAjaranId }),
+        tahfizhRepository.findTahfizhCatatan({ kelasId, tahunAjaranId }),
+      ]);
+
+    const nilaiBySiswa = new Map();
+    nilaiRows.forEach((r) => nilaiBySiswa.set(firstOf(r.siswa_id), r));
+    const catatanTahsinBySiswa = new Map();
+    catatanTahsinRows.forEach((r) =>
+      catatanTahsinBySiswa.set(firstOf(r.siswa_id), r),
+    );
+    const catatanTahfizhBySiswa = new Map();
+    catatanTahfizhRows.forEach((r) =>
+      catatanTahfizhBySiswa.set(firstOf(r.siswa_id), r),
+    );
+
+    const komponen = tahfizhData.komponen || [];
+
+    // Hasil dipetakan per siswa sebagai objek biasa (bukan fungsi) supaya bisa
+    // dikirim lewat server action ke Client Component.
+    // Kalau daftar siswa kelas diberikan, itulah yang jadi cakupan output.
+    // Tanpa itu, pakai semua siswa yang muncul di data (nilai/predikat/catatan).
+    let cakupan;
+    if (siswaIds.length) {
+      cakupan = siswaIds;
+    } else {
+      const siswaData = new Set();
+      nilaiBySiswa.forEach((_, sid) => siswaData.add(sid));
+      catatanTahsinBySiswa.forEach((_, sid) => siswaData.add(sid));
+      catatanTahfizhBySiswa.forEach((_, sid) => siswaData.add(sid));
+      for (const kategori of KATEGORI) {
+        const map = tahfizhData.predikat?.[kategori] || {};
+        Object.values(map).forEach((siswaMap) => {
+          Object.keys(siswaMap).forEach((sid) => siswaData.add(sid));
+        });
+      }
+      cakupan = Array.from(siswaData);
+    }
+
+    const dataPerSiswa = {};
+    for (const siswaId of cakupan) {
+      const predikatSiswa = {};
+      for (const kategori of KATEGORI) {
+        const map = tahfizhData.predikat?.[kategori] || {};
+        predikatSiswa[kategori] = {};
+        Object.entries(map).forEach(([komponenId, siswaMap]) => {
+          predikatSiswa[kategori][komponenId] =
+            siswaMap?.[siswaId]?.predikat || "";
+        });
+      }
+      dataPerSiswa[siswaId] = {
+        predikat: predikatSiswa,
+        tahsinNilai: nilaiBySiswa.get(siswaId)?.nilai ?? null,
+        catatanTahsin: catatanTahsinBySiswa.get(siswaId)?.catatan || "",
+        catatanTahfizh: catatanTahfizhBySiswa.get(siswaId)?.catatan || "",
+        error: null,
+      };
+    }
+
+    // Komponen identik untuk semua siswa, jadi dikirim sekali di level atas.
+    return { komponen, dataPerSiswa, error: null };
+  } catch (error) {
+    console.error("[getRaporTahfizhKelas]", error);
+    return { komponen: [], dataPerSiswa: null, error: describeError(error) };
   }
 }
 
@@ -360,6 +475,25 @@ export async function getMapelTahfizh() {
     return { mapel, error: null };
   } catch (error) {
     return { mapel: null, error: describeError(error) };
+  }
+}
+
+// Susunan kategori yang dipakai UI input (admin/ICT & panel penilaian).
+// Hanya urutan + flag; label sengaja tidak dibawa karena label di
+// tahfizh_kategori berformat cetak (huruf kapital).
+export async function getKategoriTahfizh({ tingkat }) {
+  try {
+    const rows = await tahfizhRepository.findKategoriByTingkat(String(tingkat));
+    return {
+      kategori: rows.map((r) => ({
+        key: r.kategori,
+        kolom: Number(r.kolom) === 2 ? 2 : 1,
+        predikatD: !!r.predikat_d,
+      })),
+      error: null,
+    };
+  } catch (error) {
+    return { kategori: null, error: describeError(error) };
   }
 }
 

@@ -2708,6 +2708,7 @@ export default function PenilaianMapelPage() {
         <TahfizhPanel
           kelasId={kelas.id}
           kelasNama={kelas.nama_kelas}
+          tingkat={kelas.tingkat}
           tahunAjaranId={taId || selectedSemesterId}
           mapelId={mapel.id}
           mapelNama={mapel.nama_mapel || mapel.nama || "TAHFIZH"}

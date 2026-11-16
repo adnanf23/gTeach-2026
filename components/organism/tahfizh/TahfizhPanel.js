@@ -11,18 +11,14 @@ import {
   setTahfizhPredikat,
   getTahfizhCatatan,
   setCatatanTahfizh,
+  getKategoriTahfizh,
 } from "@/actions/tahfizh.action";
+import {
+  normalisasiKategori,
+  PREDIKAT_TAHFIZH as PREDIKAT,
+} from "@/lib/tahfizh-kategori";
 
-const KATEGORI = [
-  { key: "hafalan", label: "Hafalan Al-Qur'an", item: "Surat" },
-  { key: "jaritmatika", label: "Jaritmatika Al-Qur'an", item: "Surat" },
-  { key: "gesture", label: "Gesture", item: "Surat" },
-  { key: "hadits", label: "Hadits", item: "Hadits" },
-  { key: "doa", label: "Doa", item: "Niat & Doa" },
-  { key: "wudhu", label: "Doa Berwudhu", item: "Doa" },
-];
-
-const PREDIKAT = ["A", "B", "C", "*"];
+const KATEGORI_AWAL = normalisasiKategori(null);
 const FILE_PREFIX = "Tahfizh";
 
 // ================================================================
@@ -341,11 +337,13 @@ export default function TahfizhPanel({
   mapelId,
   mapelNama,
   siswaList = [],
+  tingkat = "",
 }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [komponen, setKomponen] = useState([]);
   const [predikat, setPredikat] = useState({});
+  const [kategoriList, setKategoriList] = useState(KATEGORI_AWAL);
   const [activeKategori, setActiveKategori] = useState("hafalan");
   const [namaKomponen, setNamaKomponen] = useState("");
   const [busy, setBusy] = useState(false);
@@ -387,11 +385,14 @@ export default function TahfizhPanel({
     setLoading(true);
     setError("");
     try {
-      const [res, catatanRes] = await Promise.all([
+      const [res, catatanRes, katRes] = await Promise.all([
         mapelId
           ? getTahfizhData({ kelasId, tahunAjaranId, mapelId })
           : Promise.resolve({ komponen: [], predikat: {} }),
         getTahfizhCatatan({ kelasId, tahunAjaranId }),
+        tingkat
+          ? getKategoriTahfizh({ tingkat })
+          : Promise.resolve({ kategori: null }),
       ]);
       if (res.error) {
         setError(res.error);
@@ -399,6 +400,12 @@ export default function TahfizhPanel({
       }
       setKomponen(res.komponen || []);
       setPredikat(res.predikat || {});
+      // Tab kategori mengikuti tingkat kelas; fallback kalau kosong.
+      const daftar = normalisasiKategori(katRes?.kategori);
+      setKategoriList(daftar);
+      setActiveKategori((prev) =>
+        daftar.some((k) => k.key === prev) ? prev : daftar[0]?.key || "hafalan",
+      );
       const cMap = {};
       (catatanRes?.rows || []).forEach((r) => {
         cMap[firstOf(r.siswa_id)] = { id: r.id, catatan: r.catatan };
@@ -409,7 +416,7 @@ export default function TahfizhPanel({
     } finally {
       setLoading(false);
     }
-  }, [kelasId, tahunAjaranId, mapelId]);
+  }, [kelasId, tahunAjaranId, mapelId, tingkat]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -420,19 +427,25 @@ export default function TahfizhPanel({
     () => komponen.filter((k) => (k.kategori || "") === activeKategori),
     [komponen, activeKategori],
   );
-  const kategoriInfo = KATEGORI.find((k) => k.key === activeKategori);
+  const kategoriInfo = kategoriList.find((k) => k.key === activeKategori);
+
+  // Tingkat 1-5 pakai (-) untuk belum hafal; hanya tingkat 6 yang pakai D.
+  const pakaiPredikatD = kategoriList.some((k) => k.predikat_d);
+  const predikatOpsi = pakaiPredikatD
+    ? PREDIKAT
+    : PREDIKAT.filter((p) => p !== "D");
 
   // Kalau kategori aktif kosong tapi kategori lain punya komponen, pindah otomatis.
   useEffect(() => {
     if (komponenKategori.length > 0 || komponen.length === 0) return;
-    const firstWithKomponen = KATEGORI.find((k) =>
+    const firstWithKomponen = kategoriList.find((k) =>
       komponen.some((c) => (c.kategori || "") === k.key),
     );
     if (firstWithKomponen && firstWithKomponen.key !== activeKategori) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setActiveKategori(firstWithKomponen.key);
     }
-  }, [komponen, komponenKategori.length, activeKategori]);
+  }, [komponen, komponenKategori.length, activeKategori, kategoriList]);
 
   const filteredSiswa = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -683,7 +696,7 @@ export default function TahfizhPanel({
       return ws;
     }
 
-    KATEGORI.forEach((kat) => {
+    kategoriList.forEach((kat) => {
       const list = komponen.filter((k) => (k.kategori || "") === kat.key);
       const headers = [
         "NO",
@@ -912,7 +925,7 @@ export default function TahfizhPanel({
         const isCatatanSheet = sheetName === "catatan";
         const kategori = isCatatanSheet
           ? null
-          : KATEGORI.find(
+          : kategoriList.find(
               (k) =>
                 norm(k.label) === sheetName || norm(k.key) === sheetName,
             );
@@ -1007,7 +1020,7 @@ export default function TahfizhPanel({
             if (!raw) return;
             if (!PREDIKAT.includes(raw)) {
               result.errors.push(
-                `Sheet "${ws.name}" baris ${rowNum} (${s.nama_siswa}): predikat "${raw}" tidak valid (A/B/C/*).`,
+                `Sheet "${ws.name}" baris ${rowNum} (${s.nama_siswa}): predikat "${raw}" tidak valid (A/B/C/D/*).`,
               );
               return;
             }
@@ -1274,7 +1287,7 @@ export default function TahfizhPanel({
         className={`overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${isCatatan ? "hidden" : ""}`}
       >
         <div className="inline-flex min-w-full gap-1 rounded-xl bg-stone-100 p-1 sm:min-w-0">
-          {KATEGORI.map((k) => (
+          {kategoriList.map((k) => (
             <button
               key={k.key}
               type="button"
@@ -1541,7 +1554,7 @@ export default function TahfizhPanel({
                                 )}`}
                               >
                                 <option value="">–</option>
-                                {PREDIKAT.map((p) => (
+                                {predikatOpsi.map((p) => (
                                   <option key={p} value={p}>
                                     {p}
                                   </option>

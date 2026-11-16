@@ -368,6 +368,7 @@ async function buildRapor(
         tahfizh = {
           kelas: ctx.kelas,
           data: res,
+          kategoriRapor: ctx.kategoriRapor,
           tahsinNama: ctx.tahsinMapel?.nama_mapel || "Tahsin",
           jenisSemester: pengaturanRapor?.jenis_semester || "",
           tanggalRapor: pengaturanRapor?.tanggal_rapor

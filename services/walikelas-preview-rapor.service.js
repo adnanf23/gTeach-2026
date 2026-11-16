@@ -155,6 +155,7 @@ async function hitungNilaiAkhir(kelasData, siswaData, tanggalMax) {
       await previewRaporRepository.findNilaiUjianByPengaturanIds(
         ujianData.map((u) => u.id),
         createdMax,
+        kelasData.id,
       );
   }
   const ujianMap = {};
@@ -257,12 +258,7 @@ async function buildRapor(
             akhir: ta.Akhir,
           })
         : Promise.resolve([]),
-      previewRaporRepository.findNilaiEkskulBySiswa(
-        sid,
-        pengaturanRapor?.tanggal_rapor
-          ? `${String(pengaturanRapor.tanggal_rapor).slice(0, 10)} 23:59:59.999Z`
-          : null,
-      ),
+      previewRaporRepository.findNilaiEkskulBySiswa(sid),
       previewRaporRepository.findCatatanBySiswaKelas({
         siswaId: sid,
         kelasId: kelas.id,
@@ -372,7 +368,9 @@ async function buildRapor(
 /* ───────────── layanan ───────────── */
 
 // Kelas + siswa + daftar periode rapor + nilai akhir seluruh mapel.
-export async function getPreviewRaporBase({ userId, tanggalMax, ujianId }) {
+// Periode terpilih (dan pengaturan rapornya) ikut diselesaikan di sini, jadi
+// pemanggil tidak perlu request kedua hanya untuk tahu tanggal_rapor.
+export async function getPreviewRaporBase({ userId, ujianId }) {
   let kelasData;
   try {
     kelasData =
@@ -396,14 +394,31 @@ export async function getPreviewRaporBase({ userId, tanggalMax, ujianId }) {
       if (mid) cMap.set(mid, c);
     });
 
-    const hasil = await hitungNilaiAkhir(kelasData, siswaData, tanggalMax);
-
     const sorted = sortUjian(ujianData);
+    const dipilih = sorted.find((u) => u.id === ujianId) || sorted[0] || null;
+
+    let pengaturanRapor = null;
+    if (dipilih) {
+      try {
+        pengaturanRapor =
+          await previewRaporRepository.findPengaturanRaporByUjian(dipilih.id);
+      } catch {
+        pengaturanRapor = null;
+      }
+    }
+
+    const hasil = await hitungNilaiAkhir(
+      kelasData,
+      siswaData,
+      pengaturanRapor?.tanggal_rapor || null,
+    );
 
     return {
       kelas: kelasData,
       siswaList: siswaData,
       ujianList: sorted,
+      ujianId: dipilih?.id || "",
+      pengaturanRapor,
       mapelList: hasil.mapelList,
       nilaiAkhir: hasil.nilaiAkhir,
       capaianList: Array.from(cMap.entries()),

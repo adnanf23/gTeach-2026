@@ -1,15 +1,16 @@
 "use client";
 
 import logo from "@/assets/logo.png";
+import { normalisasiKategori } from "@/lib/tahfizh-kategori";
 
-const KATEGORI = [
-  { key: "hafalan", label: "HAFALAN AL-QUR’AN", item: "SURAT" },
-  { key: "jaritmatika", label: "JARIMATIKA AL-QUR’AN", item: "SURAT" },
-  { key: "gesture", label: "GESTURE", item: "SURAT" },
-  { key: "hadits", label: "HADITS", item: "HADITS" },
-  { key: "doa", label: "DOA", item: "NIAT & DOA" },
-  { key: "wudhu", label: "DOA BERWUDHU", item: "DOA" },
-];
+const PREDIKAT_LEGEND = {
+  A: "Hafal",
+  B: "Hafal dengan sedikit bantuan",
+  C: "Hafal dengan banyak bantuan",
+  D: "Belum Hafal",
+  "-": "Belum Hafal",
+  "*": "Belum Diajarkan",
+};
 
 const SEKOLAH_JUDUL = "SD GLOBAL GARUDA NUSANTARA ISLAMIC CENTRE";
 const YAYASAN = "YAYASAN BI ASHOKAL HAJAR";
@@ -19,6 +20,70 @@ function semesterLabel(semester) {
 }
 
 function PredikatTable({ info, komponen, predikat }) {
+  const kolom = Number(info.kolom) === 2 ? 2 : 1;
+  const itemLabel = info.item_label || info.item || "SURAT";
+
+  // kolom=2 (asmaul husna): baris dibelah dua, tiap belahan punya NO/NAMA/PREDIKAT.
+  if (kolom === 2) {
+    const tengah = Math.ceil(komponen.length / 2);
+    const kiri = komponen.slice(0, tengah);
+    const kanan = komponen.slice(tengah);
+    return (
+      <table className="rt-table rt-table-2col">
+        <colgroup>
+          <col style={{ width: "6%" }} />
+          <col />
+          <col style={{ width: "12%" }} />
+          <col style={{ width: "6%" }} />
+          <col />
+          <col style={{ width: "12%" }} />
+        </colgroup>
+        <thead>
+          <tr>
+            <th colSpan={6} className="rt-cat">
+              {info.label}
+            </th>
+          </tr>
+          <tr>
+            <th className="rt-green rt-no">NO</th>
+            <th className="rt-green">{itemLabel}</th>
+            <th className="rt-green">PREDIKAT</th>
+            <th className="rt-green rt-no">NO</th>
+            <th className="rt-green">{itemLabel}</th>
+            <th className="rt-green">PREDIKAT</th>
+          </tr>
+        </thead>
+        <tbody>
+          {komponen.length === 0 ? (
+            <tr>
+              <td colSpan={6} className="rt-center">
+                -
+              </td>
+            </tr>
+          ) : (
+            kiri.map((k, i) => {
+              const k2 = kanan[i];
+              return (
+                <tr key={k.id}>
+                  <td className="rt-center rt-no">{i + 1}</td>
+                  <td>{k.komponen}</td>
+                  <td className="rt-center">{predikat?.[k.id] || "-"}</td>
+                  <td className="rt-center rt-no">
+                    {k2 ? tengah + i + 1 : ""}
+                  </td>
+                  <td>{k2?.komponen || ""}</td>
+                  <td className="rt-center">
+                    {k2 ? predikat?.[k2.id] || "-" : ""}
+                  </td>
+                </tr>
+              );
+            })
+          )}
+        </tbody>
+      </table>
+    );
+  }
+
   return (
     <table className="rt-table">
       <colgroup>
@@ -34,7 +99,7 @@ function PredikatTable({ info, komponen, predikat }) {
         </tr>
         <tr>
           <th className="rt-green rt-no">NO</th>
-          <th className="rt-green">{info.item}</th>
+          <th className="rt-green">{itemLabel}</th>
           <th className="rt-green">PREDIKAT</th>
         </tr>
       </thead>
@@ -67,6 +132,7 @@ export default function RaporTahfizhSheet({
   kelas,
   siswa,
   rapor,
+  kategoriRapor,
   tahsinNama = "Tahsin",
   jenisSemester = "",
   tanggalRapor = "",
@@ -78,11 +144,34 @@ export default function RaporTahfizhSheet({
     ? jenisSemester.toUpperCase()
     : semesterLabel(ta?.semester);
 
+  const kategoriList = normalisasiKategori(kategoriRapor, { cetak: true });
+
   const komponenByKategori = (kategori) =>
     (rapor?.komponen || []).filter((k) => (k.kategori || "") === kategori);
 
-  const page1 = KATEGORI.slice(0, 5);
-  const page2 = KATEGORI.slice(5);
+  // Kategori 2 kolom (asmaul husna, 99 baris) makan satu halaman penuh, jadi
+  // tidak boleh ikut menumpuk dengan kategori lain di halaman yang sama.
+  const halaman = [];
+  let buffer = [];
+  for (const info of kategoriList) {
+    if (Number(info.kolom) === 2) {
+      if (buffer.length) {
+        halaman.push(buffer);
+        buffer = [];
+      }
+      halaman.push([info]);
+      continue;
+    }
+    buffer.push(info);
+    if (buffer.length === 5) {
+      halaman.push(buffer);
+      buffer = [];
+    }
+  }
+  if (buffer.length) halaman.push(buffer);
+
+  // Pakai D = Belum Hafal kalau tingkat ini memakainya.
+  const pakaiPredikatD = kategoriList.some((k) => k.predikat_d);
 
   return (
     <div className="rt-root">
@@ -181,6 +270,12 @@ export default function RaporTahfizhSheet({
         }
         .rt-center {
           text-align: center;
+        }
+        /* Tabel 2 kolom (asmaul husna): garis pemisah antar belahan lebih tebal. */
+        .rt-table-2col td:nth-child(3),
+        .rt-table-2col th:nth-child(3) {
+          border-right-width: 2px;
+          border-right-color: #333;
         }
         .rt-catatan {
           border: 1px solid #555;
@@ -304,127 +399,133 @@ export default function RaporTahfizhSheet({
         }
       `}</style>
 
-      {/* ================= HALAMAN 1 ================= */}
-      <div className="rt-page">
-        <Watermark />
-        <div className="rt-content">
-          <div className="rt-header">
-            <img src={logo.src} alt="Logo" />
-            <div className="rt-title">
-              <h1>RAPOR TAHFIZH</h1>
-              <p>{SEKOLAH_JUDUL}</p>
-              <p>{YAYASAN}</p>
+      {halaman.map((isiHalaman, idx) => {
+        const terakhir = idx === halaman.length - 1;
+        return (
+          <div className="rt-page" key={idx}>
+            <Watermark />
+            <div className="rt-content">
+              {idx === 0 && (
+                <>
+                  <div className="rt-header">
+                    <img src={logo.src} alt="Logo" />
+                    <div className="rt-title">
+                      <h1>RAPOR TAHFIZH</h1>
+                      <p>{SEKOLAH_JUDUL}</p>
+                      <p>{YAYASAN}</p>
+                    </div>
+                  </div>
+
+                  <table className="rt-info">
+                    <tbody>
+                      <tr>
+                        <td style={{ width: "17%" }}>NAMA SISWA</td>
+                        <td style={{ width: "36%" }}>
+                          : {siswa?.nama_siswa || "-"}
+                        </td>
+                        <td style={{ width: "25%" }}>SEMESTER</td>
+                        <td>: {semesterText}</td>
+                      </tr>
+                      <tr>
+                        <td>KELAS</td>
+                        <td>: {kelas?.nama_kelas || "-"}</td>
+                        <td>TAHUN PELAJARAN</td>
+                        <td>: {ta?.tahun || "-"}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </>
+              )}
+
+              {isiHalaman.map((info) => (
+                <PredikatTable
+                  key={info.kategori}
+                  info={info}
+                  komponen={komponenByKategori(info.kategori)}
+                  predikat={rapor?.predikat?.[info.kategori]}
+                />
+              ))}
+
+              {terakhir && (
+                <>
+                  <div className="rt-catatan">
+                    <b>CATATAN TAHFIZH :</b>
+                    <p>{rapor?.catatanTahfizh || "-"}</p>
+                  </div>
+
+                  <table className="rt-tahsin">
+                    <thead>
+                      <tr>
+                        <th className="rt-no" style={{ width: "5%" }}>
+                          NO
+                        </th>
+                        <th style={{ width: "18%" }}>MATA PELAJARAN</th>
+                        <th style={{ width: "14%" }}>NILAI</th>
+                        <th>CATATAN</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td className="rt-no">1</td>
+                        <td style={{ textAlign: "left", paddingLeft: 14 }}>
+                          {tahsinNama}
+                        </td>
+                        <td>{rapor?.tahsinNilai ?? "-"}</td>
+                        <td className="catatan">
+                          {rapor?.catatanTahsin || "-"}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+
+                  <div className="rt-legend">
+                    <span className="full">Keterangan :</span>
+                    <span>A = {PREDIKAT_LEGEND.A}</span>
+                    <span>B = {PREDIKAT_LEGEND.B}</span>
+                    <span>C = {PREDIKAT_LEGEND.C}</span>
+                    <span>
+                      {pakaiPredikatD ? "D" : "(-)"} ={" "}
+                      {PREDIKAT_LEGEND.D}
+                    </span>
+                    <span>(*) = {PREDIKAT_LEGEND["*"]}</span>
+                  </div>
+
+                  <div className="rt-sign">
+                    <div>
+                      <div className="head">
+                        <p>Mengetahui,</p>
+                        <p>Orang Tua/Wali</p>
+                      </div>
+                      <div className="space" />
+                      <div className="line" />
+                    </div>
+                    <div>
+                      <div className="head">
+                        <p>Kepala SD Global Garuda Nusantara</p>
+                        <p>Islamic Centre</p>
+                      </div>
+                      <div className="space" />
+                      <p className="name">{kepalaSekolah}</p>
+                    </div>
+                    <div>
+                      <div className="head">
+                        <p style={{ textAlign: "right" }}>
+                          Bogor, {tanggalRapor || "........................"}
+                        </p>
+                        <p>Wali Kelas</p>
+                      </div>
+                      <div className="space" />
+                      <p className="name">
+                        {walikelas?.nama_lengkap || "............................"}
+                      </p>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           </div>
-
-          <table className="rt-info">
-            <tbody>
-              <tr>
-                <td style={{ width: "17%" }}>NAMA SISWA</td>
-                <td style={{ width: "36%" }}>: {siswa?.nama_siswa || "-"}</td>
-                <td style={{ width: "25%" }}>SEMESTER</td>
-                <td>: {semesterText}</td>
-              </tr>
-              <tr>
-                <td>KELAS</td>
-                <td>: {kelas?.nama_kelas || "-"}</td>
-                <td>TAHUN PELAJARAN</td>
-                <td>: {ta?.tahun || "-"}</td>
-              </tr>
-            </tbody>
-          </table>
-
-          {page1.map((info) => (
-            <PredikatTable
-              key={info.key}
-              info={info}
-              komponen={komponenByKategori(info.key)}
-              predikat={rapor?.predikat?.[info.key]}
-            />
-          ))}
-        </div>
-      </div>
-
-      {/* ================= HALAMAN 2 ================= */}
-      <div className="rt-page">
-        <Watermark />
-        <div className="rt-content">
-          {page2.map((info) => (
-            <PredikatTable
-              key={info.key}
-              info={info}
-              komponen={komponenByKategori(info.key)}
-              predikat={rapor?.predikat?.[info.key]}
-            />
-          ))}
-
-          <div className="rt-catatan">
-            <b>CATATAN TAHFIZH :</b>
-            <p>{rapor?.catatanTahfizh || "-"}</p>
-          </div>
-
-          <table className="rt-tahsin">
-            <thead>
-              <tr>
-                <th className="rt-no" style={{ width: "5%" }}>
-                  NO
-                </th>
-                <th style={{ width: "18%" }}>MATA PELAJARAN</th>
-                <th style={{ width: "14%" }}>NILAI</th>
-                <th>CATATAN</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td className="rt-no">1</td>
-                <td style={{ textAlign: "left", paddingLeft: 14 }}>TAHSIN</td>
-                <td>{rapor?.tahsinNilai ?? "-"}</td>
-                <td className="catatan">{rapor?.catatanTahsin || "-"}</td>
-              </tr>
-            </tbody>
-          </table>
-
-          <div className="rt-legend">
-            <span className="full">Keterangan :</span>
-            <span>A = Hafal</span>
-            <span>B = Hafal dengan sedikit bantuan</span>
-            <span>C = Hafal dengan banyak bantuan</span>
-            <span>(-) = Belum Hafal</span>
-            <span>(*) = Belum Diajarkan</span>
-          </div>
-
-          <div className="rt-sign">
-            <div>
-              <div className="head">
-                <p>Mengetahui,</p>
-                <p>Orang Tua/Wali</p>
-              </div>
-              <div className="space" />
-              <div className="line" />
-            </div>
-            <div>
-              <div className="head">
-                <p>Kepala SD Global Garuda Nusantara</p>
-                <p>Islamic Centre</p>
-              </div>
-              <div className="space" />
-              <p className="name">{kepalaSekolah}</p>
-            </div>
-            <div>
-              <div className="head">
-                <p style={{ textAlign: "right" }}>
-                  Bogor, {tanggalRapor || "........................"}
-                </p>
-                <p>Wali Kelas</p>
-              </div>
-              <div className="space" />
-              <p className="name">
-                {walikelas?.nama_lengkap || "............................"}
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
+        );
+      })}
     </div>
   );
 }

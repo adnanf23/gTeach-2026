@@ -22,7 +22,6 @@
 
 import {
   getPreviewRaporBase,
-  getPengaturanRapor,
   getPreviewRaporSiswa,
 } from "@/actions/walikelas-preview-rapor.action";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
@@ -30,7 +29,7 @@ import { createPortal } from "react-dom";
 import { getCurrentUser } from "@/lib/pocketbase";
 import {
   getRaporTahfizhContext,
-  getRaporTahfizhSiswa,
+  getRaporTahfizhKelas,
 } from "@/actions/tahfizh.action";
 import RaporTahfizhSheet from "@/components/organism/tahfizh/RaporTahfizhSheet";
 
@@ -748,10 +747,10 @@ export default function RaporWalikelasPage() {
   const headRef = useRef(null);
   const [tahfizhCtx, setTahfizhCtx] = useState(null);
   const [tahfizhRapor, setTahfizhRapor] = useState(null);
-  // Tanggal rapor (pengaturan_rapor) -> batas nilai yang ikut dihitung.
-  const [baseTanggal, setBaseTanggal] = useState(null);
-  // Ujian terpilih -> filter capaian kompetensi per ujian.
-  const [baseUjianId, setBaseUjianId] = useState(null);
+  // Satu request base per periode. Promise-nya di-cache supaya efek yang
+  // dijalankan ulang (StrictMode / auto-pilih periode) tidak memicu request
+  // kedua, dan hasilnya tetap diterapkan.
+  const baseRef = useRef({ key: undefined, promise: null });
 
   /* ───── data dasar ───── */
   useEffect(() => {
@@ -759,12 +758,16 @@ export default function RaporWalikelasPage() {
       setLoading(false);
       return;
     }
-    (async () => {
-      const res = await getPreviewRaporBase({
-        userId,
-        tanggalMax: baseTanggal,
-        ujianId: baseUjianId,
-      });
+
+    const cache = baseRef.current;
+    if (cache.key !== ujianId || !cache.promise) {
+      cache.key = ujianId;
+      cache.promise = getPreviewRaporBase({ userId, ujianId });
+    }
+
+    let cancelled = false;
+    cache.promise.then((res) => {
+      if (cancelled) return;
 
       if (res.error) {
         console.error(res.error);
@@ -778,16 +781,32 @@ export default function RaporWalikelasPage() {
           nilaiAkhir: res.nilaiAkhir,
         });
         setUjianList(res.ujianList);
-        setUjianId((prev) => prev || res.ujianList[0]?.id || "");
-        // Nilai/capaian berubah (ganti ujian/tanggal) -> rapor disusun ulang.
+        // Periode tanpa record pengaturan_rapor (mis. Tahfizh/ASAS) tetap
+        // dianggap siap, dengan data null.
+        setPengaturan(
+          res.ujianId ? { ujianId: res.ujianId, data: res.pengaturanRapor } : null,
+        );
+        setTahfizhCtx(null);
+        // Nilai/capaian berubah (ganti ujian) -> rapor disusun ulang.
         cacheRef.current = {};
+        // Periode hasil resolve base jadi kunci cache, supaya setUjianId
+        // di bawah tidak memicu request berikutnya.
+        const periode = res.ujianId || "";
+        if (periode !== cache.key) {
+          cache.key = periode;
+          setUjianId(periode);
+        }
       } else {
         setKelas(null);
       }
 
       setLoading(false);
-    })();
-  }, [userId, baseTanggal, baseUjianId]);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, ujianId]);
 
   const siswa = siswaList[index] || null;
   const ujian = useMemo(
@@ -795,71 +814,79 @@ export default function RaporWalikelasPage() {
     [ujianList, ujianId],
   );
 
-  /* ───── data rapor tahfizh (bila template_rapor = tahfiz/kombinasi) ───── */
+  const pengaturanSiap = !!ujian && pengaturan?.ujianId === ujian.id;
+
+  /* ───── konteks tahfizh (per kelas + periode, bukan per siswa) ───── */
+  const perluTahfizh =
+    ujian?.template_rapor === "tahfiz" ||
+    ujian?.template_rapor === "kombinasi";
+
   useEffect(() => {
-    const perluTahfizh =
-      ujian?.template_rapor === "tahfiz" ||
-      ujian?.template_rapor === "kombinasi";
-    if (!perluTahfizh || !kelas?.id || !siswa?.id) {
+    if (!perluTahfizh || !kelas?.id) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setTahfizhRapor(null);
+      setTahfizhCtx(null);
       return;
     }
     let cancelled = false;
-    setTahfizhRapor(null);
     (async () => {
       const ctx = await getRaporTahfizhContext({
         kelasId: kelas.id,
         tahunAjaranId: ujian?.expand?.tahun_ajaran_id?.id,
       });
       if (cancelled) return;
-      if (ctx.error) {
-        setTahfizhCtx(null);
-        return;
-      }
-      setTahfizhCtx(ctx);
-      const res = await getRaporTahfizhSiswa({
-        kelasId: kelas.id,
-        tahunAjaranId: ctx.tahunAjaranId,
-        mapelTahfizhId: ctx.mapelTahfizh?.id,
-        tahsinMapelId: ctx.tahsinMapel?.id,
-        siswaId: siswa.id,
-      });
-      if (!cancelled && !res.error) setTahfizhRapor(res);
+      setTahfizhCtx(ctx.error ? null : ctx);
     })();
     return () => {
       cancelled = true;
     };
-  }, [ujian, kelas, siswa]);
+  }, [perluTahfizh, kelas?.id, ujian?.expand?.tahun_ajaran_id?.id]);
 
-  /* ───── pengaturan_rapor ───── */
+  /* ───── data rapor tahfizh (satu muat untuk seluruh kelas) ───── */
+  const tahfizhKelasRef = useRef({ key: undefined, promise: null });
+
   useEffect(() => {
-    if (!ujian) {
-      setPengaturan(null);
+    if (!perluTahfizh || !tahfizhCtx || !kelas?.id) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setTahfizhRapor(null);
       return;
     }
+
+    const key = [
+      kelas.id,
+      tahfizhCtx.tahunAjaranId,
+      tahfizhCtx.mapelTahfizh?.id,
+      tahfizhCtx.tahsinMapel?.id,
+    ].join(":");
+
+    const cache = tahfizhKelasRef.current;
+    if (cache.key !== key || !cache.promise) {
+      cache.key = key;
+      cache.promise = getRaporTahfizhKelas({
+        kelasId: kelas.id,
+        tahunAjaranId: tahfizhCtx.tahunAjaranId,
+        mapelTahfizhId: tahfizhCtx.mapelTahfizh?.id,
+        tahsinMapelId: tahfizhCtx.tahsinMapel?.id,
+        siswaIds: siswaList.map((s) => s.id),
+      });
+    }
+
     let cancelled = false;
-    (async () => {
-      const pr = await getPengaturanRapor(ujian.id);
-      if (!cancelled) setPengaturan({ ujianId: ujian.id, data: pr.data ?? null });
-    })();
+    cache.promise.then((res) => {
+      if (cancelled) return;
+      if (!res.dataPerSiswa || !siswa?.id) {
+        setTahfizhRapor(null);
+        return;
+      }
+      const perSiswa = res.dataPerSiswa[siswa.id];
+      setTahfizhRapor(
+        perSiswa ? { ...perSiswa, komponen: res.komponen || [] } : null,
+      );
+    });
+
     return () => {
       cancelled = true;
     };
-  }, [ujian]);
-
-  // Batas tanggal rapor + filter capaian per ujian.
-  const tanggalRaporKey = pengaturan?.data?.tanggal_rapor || null;
-  const ujianRaporKey = pengaturan?.ujianId || null;
-  useEffect(() => {
-    if (ujianRaporKey) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setBaseUjianId(ujianRaporKey);
-      setBaseTanggal(tanggalRaporKey);
-    }
-  }, [ujianRaporKey, tanggalRaporKey]);
-
-  const pengaturanSiap = !!ujian && pengaturan?.ujianId === ujian.id;
+  }, [perluTahfizh, tahfizhCtx, siswa?.id, kelas?.id]);
 
   const raporKey = siswa && ujian ? `${ujian.id}:${siswa.id}` : "";
   currentKeyRef.current = raporKey;
@@ -1216,6 +1243,7 @@ export default function RaporWalikelasPage() {
                           kelas={tahfizhCtx.kelas}
                           siswa={siswa}
                           rapor={tahfizhRapor}
+                          kategoriRapor={tahfizhCtx.kategoriRapor}
                           tahsinNama={
                             tahfizhCtx.tahsinMapel?.nama_mapel || "Tahsin"
                           }
@@ -1258,6 +1286,7 @@ export default function RaporWalikelasPage() {
                               kelas={tahfizhCtx.kelas}
                               siswa={siswa}
                               rapor={tahfizhRapor}
+                              kategoriRapor={tahfizhCtx.kategoriRapor}
                               tahsinNama={
                                 tahfizhCtx.tahsinMapel?.nama_mapel || "Tahsin"
                               }

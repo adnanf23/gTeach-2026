@@ -84,18 +84,24 @@ export async function findUjianBukaByKelasOrTingkat({ kelasId, tingkat }) {
 }
 
 // Batas tanggal: hanya nilai yang dibuat sampai tanggal rapor yang dihitung.
-// (Filter `created` tidak didukung PocketBase -> disaring di kode.)
-function sampaiTanggal(rows, createdMax) {
-  return createdMax ? rows.filter((r) => r.created <= createdMax) : rows;
-}
+// Filter `created` didukung PocketBase, jadi disaring di server (bukan di kode)
+// supaya record di luar rentang tidak perlu diunduh sama sekali.
+const batasCreated = (createdMax) => (createdMax ? `created <= "${createdMax}"` : "");
 
-export async function findNilaiUjianByPengaturanIds(ujianIds, createdMax) {
+export async function findNilaiUjianByPengaturanIds(
+  ujianIds,
+  createdMax,
+  kelasId,
+) {
   const pb = await getServerPb();
-  const rows = await pb.collection("nilai_ujian").getFullList({
-    filter: ujianIds.map((id) => `pengaturan_ujian_id = "${id}"`).join(" || "),
-    requestKey: null,
-  });
-  return sampaiTanggal(rows, createdMax);
+  const filter = [
+    `(${ujianIds.map((id) => `pengaturan_ujian_id = "${id}"`).join(" || ")})`,
+    kelasId ? `siswa_id.kelas_id = "${kelasId}"` : "",
+    batasCreated(createdMax),
+  ]
+    .filter(Boolean)
+    .join(" && ");
+  return pb.collection("nilai_ujian").getFullList({ filter, requestKey: null });
 }
 
 export async function findTpByMapelIds(mapelIds) {
@@ -116,20 +122,18 @@ export async function findLmByMapelIds(mapelIds) {
 
 export async function findNilaiFormatifByKelas(kelasId, createdMax) {
   const pb = await getServerPb();
-  const rows = await pb.collection("nilai_formatif").getFullList({
-    filter: `kelas_id = "${kelasId}"`,
-    requestKey: null,
-  });
-  return sampaiTanggal(rows, createdMax);
+  const filter = [`kelas_id = "${kelasId}"`, batasCreated(createdMax)]
+    .filter(Boolean)
+    .join(" && ");
+  return pb.collection("nilai_formatif").getFullList({ filter, requestKey: null });
 }
 
 export async function findNilaiSumatifByKelas(kelasId, createdMax) {
   const pb = await getServerPb();
-  const rows = await pb.collection("nilai_sumatif").getFullList({
-    filter: `kelas_id = "${kelasId}"`,
-    requestKey: null,
-  });
-  return sampaiTanggal(rows, createdMax);
+  const filter = [`kelas_id = "${kelasId}"`, batasCreated(createdMax)]
+    .filter(Boolean)
+    .join(" && ");
+  return pb.collection("nilai_sumatif").getFullList({ filter, requestKey: null });
 }
 
 /* ───────────── lampiran rapor per siswa ───────────── */
@@ -142,13 +146,14 @@ export async function findAbsensiBySiswaRange({ siswaId, mulai, akhir }) {
   });
 }
 
-export async function findNilaiEkskulBySiswa(siswaId, createdMax) {
+// Catatan: koleksi nilai_ekskul tidak punya field `created`, jadi tidak bisa
+// dibatasi tanggal rapor di server (filter `created` akan ditolak 400).
+export async function findNilaiEkskulBySiswa(siswaId) {
   const pb = await getServerPb();
-  const rows = await pb.collection("nilai_ekskul").getFullList({
+  return pb.collection("nilai_ekskul").getFullList({
     filter: `siswa_id = "${siswaId}"`,
     requestKey: null,
   });
-  return sampaiTanggal(rows, createdMax);
 }
 
 export async function findCatatanBySiswaKelas({ siswaId, kelasId, ujianId }) {

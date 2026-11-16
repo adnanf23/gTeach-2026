@@ -41,6 +41,7 @@ const RaporSheet = ({ siswa, rapor, ujian }) => {
       kelas={t?.kelas}
       siswa={siswa}
       rapor={t?.data}
+      kategoriRapor={t?.kategoriRapor}
       tahsinNama={t?.tahsinNama}
       jenisSemester={t?.jenisSemester}
       tanggalRapor={t?.tanggalRapor}
