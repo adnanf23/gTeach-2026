@@ -61,20 +61,33 @@ function KategoriBody({ blok, predikat }) {
   );
 }
 
-// Kategori 2 kolom (asmaul husna): daftar dibelah dua, tiap belahan punya
-// NO/NAMA/PREDIKAT. `mulai`/`jumlah` menandai potongan halaman.
+// Kategori 2 kolom (asmaul husna): tiap baris memuat 2 item.
+// `mulai`/`jumlah` dihitung dalam satuan BARIS; item yang dipakai potongan ini
+// adalah items[mulai*2 .. mulai*2+jumlah*2]. Pembacaan mengalir per halaman:
+// halaman 1 = 1..n di kolom kiri lalu n+1..2n di kolom kanan, halaman
+// berikutnya melanjutkan 2n+1, sehingga nomor tidak loncat antar halaman.
 function DuaKolomTable({ blok, predikat }) {
   const info = blok.info;
   const itemLabel = info.item_label || info.item || "ASMAUL HUSNA";
-  const tengah = blok.tengah;
-  const kiri = blok.items.slice(0, tengah);
-  const kanan = blok.items.slice(tengah);
+  const offset = blok.mulai * 2;
+  const sisa = Math.max(blok.items.length - offset, 0);
+  const ambil = Math.min(blok.jumlah * 2, sisa);
+  // Kolom kiri diisi lebih dulu; baris terakhir boleh hanya punya kolom kiri.
+  const kolomKiri = Math.ceil(ambil / 2);
+  const potong = blok.items.slice(offset, offset + ambil);
+  const kiri = potong.slice(0, kolomKiri);
+  const kanan = potong.slice(kolomKiri);
   const baris = [];
-  for (let i = blok.mulai; i < blok.mulai + blok.jumlah; i++) {
-    baris.push({ no: i, a: kiri[i], b: kanan[i] });
+  for (let i = 0; i < Math.min(blok.jumlah, Math.ceil(ambil / 2)); i++) {
+    baris.push({
+      noKiri: offset + i,
+      noKanan: offset + kolomKiri + i,
+      a: kiri[i],
+      b: kanan[i],
+    });
   }
   return (
-    <table className="rt-table rt-table-2col">
+    <table className="rt-table">
       <colgroup>
         <col style={{ width: "6%" }} />
         <col />
@@ -108,12 +121,12 @@ function DuaKolomTable({ blok, predikat }) {
             </td>
           </tr>
         ) : (
-          baris.map(({ no, a, b }) => (
-            <tr key={no}>
-              <td className="rt-center rt-no">{no + 1}</td>
+          baris.map(({ noKiri, noKanan, a, b }) => (
+            <tr key={noKiri}>
+              <td className="rt-center rt-no">{noKiri + 1}</td>
               <td>{a?.komponen || ""}</td>
               <td className="rt-center">{a ? predikat?.[a.id] || "-" : ""}</td>
-              <td className="rt-center rt-no">{b ? tengah + no + 1 : ""}</td>
+              <td className="rt-center rt-no">{b ? noKanan + 1 : ""}</td>
               <td>{b?.komponen || ""}</td>
               <td className="rt-center">{b ? predikat?.[b.id] || "-" : ""}</td>
             </tr>
@@ -235,7 +248,8 @@ function susunHalaman(kategoriList, ambilKomponen) {
 
   // Tutup butuh halaman sendiri kalau catatan sudah menghabiskan sisa ruang.
   const akhir = halaman[halaman.length - 1];
-  const sisaAkhir = kapasitasHalaman(halaman.length - 1) - akhir.baris * BARIS_MIN;
+  const sisaAkhir =
+    kapasitasHalaman(halaman.length - 1) - akhir.baris * BARIS_MIN;
   // Catatan menempati sisa ruang (>= TINGGI_CATATAN), jadi tutup butuh
   // TINGGI_CATATAN + TINGGI_TUTUP agar bisa berbagi halaman.
   if (sisaAkhir < TINGGI_CATATAN + TINGGI_TUTUP) {
@@ -482,12 +496,6 @@ export default function RaporTahfizhSheet({
         .rt-center {
           text-align: center;
         }
-        /* Tabel 2 kolom (asmaul husna): garis pemisah antar belahan lebih tebal. */
-        .rt-table-2col td:nth-child(3),
-        .rt-table-2col th:nth-child(3) {
-          border-right-width: 2px;
-          border-right-color: #333;
-        }
         .rt-catatan {
           border: 1px solid #555;
           padding: 8px 12px 18px;
@@ -659,30 +667,30 @@ export default function RaporTahfizhSheet({
                   className="rt-isi"
                   style={{ "--rt-pad": `${paddingBaris.toFixed(2)}px` }}
                 >
-                {segmenDariBlok(isiHalaman.blok).map((seg, i) =>
-                  seg.duaK ? (
-                    <DuaKolomTable
-                      key={`d${i}`}
-                      blok={seg.blok[0]}
-                      predikat={rapor?.predikat?.[seg.blok[0].info.kategori]}
-                    />
-                  ) : (
-                    <table className="rt-table" key={`s${i}`}>
-                      <colgroup>
-                        <col style={{ width: "6%" }} />
-                        <col />
-                        <col style={{ width: "36%" }} />
-                      </colgroup>
-                      {seg.blok.map((b) => (
-                        <KategoriBody
-                          key={`${b.info.kategori}-${b.mulai}`}
-                          blok={b}
-                          predikat={rapor?.predikat?.[b.info.kategori]}
-                        />
-                      ))}
-                    </table>
-                  ),
-                )}
+                  {segmenDariBlok(isiHalaman.blok).map((seg, i) =>
+                    seg.duaK ? (
+                      <DuaKolomTable
+                        key={`d${i}`}
+                        blok={seg.blok[0]}
+                        predikat={rapor?.predikat?.[seg.blok[0].info.kategori]}
+                      />
+                    ) : (
+                      <table className="rt-table" key={`s${i}`}>
+                        <colgroup>
+                          <col style={{ width: "6%" }} />
+                          <col />
+                          <col style={{ width: "36%" }} />
+                        </colgroup>
+                        {seg.blok.map((b) => (
+                          <KategoriBody
+                            key={`${b.info.kategori}-${b.mulai}`}
+                            blok={b}
+                            predikat={rapor?.predikat?.[b.info.kategori]}
+                          />
+                        ))}
+                      </table>
+                    ),
+                  )}
                 </div>
               )}
 
@@ -726,8 +734,7 @@ export default function RaporTahfizhSheet({
                     <span>B = {PREDIKAT_LEGEND.B}</span>
                     <span>C = {PREDIKAT_LEGEND.C}</span>
                     <span>
-                      {pakaiPredikatD ? "D" : "(-)"} ={" "}
-                      {PREDIKAT_LEGEND.D}
+                      {pakaiPredikatD ? "D" : "(-)"} = {PREDIKAT_LEGEND.D}
                     </span>
                     <span>(*) = {PREDIKAT_LEGEND["*"]}</span>
                   </div>
@@ -758,7 +765,8 @@ export default function RaporTahfizhSheet({
                       </div>
                       <div className="space" />
                       <p className="name">
-                        {walikelas?.nama_lengkap || "............................"}
+                        {walikelas?.nama_lengkap ||
+                          "............................"}
                       </p>
                     </div>
                   </div>

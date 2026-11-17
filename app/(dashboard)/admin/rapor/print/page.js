@@ -612,7 +612,7 @@ async function buildRapor(
           kelas: ctx.kelas,
           data: res,
           kategoriRapor: ctx.kategoriRapor,
-          tahsinNama: ctx.tahsinMapel?.nama_mapel || "Tahsin",
+          tahsinNama: ctx.tahsinMapel?.Label || ctx.tahsinMapel?.nama_mapel || "Tahsin",
           pengaturan: pengaturanRapor,
           semester: ta?.semester || "",
           tanggalRapor: pengaturanRapor?.tanggal_rapor

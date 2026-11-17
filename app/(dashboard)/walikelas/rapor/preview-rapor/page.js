@@ -1245,7 +1245,9 @@ export default function RaporWalikelasPage() {
                           rapor={tahfizhRapor}
                           kategoriRapor={tahfizhCtx.kategoriRapor}
                           tahsinNama={
-                            tahfizhCtx.tahsinMapel?.nama_mapel || "Tahsin"
+                            tahfizhCtx.tahsinMapel?.Label ||
+                            tahfizhCtx.tahsinMapel?.nama_mapel ||
+                            "Tahsin"
                           }
                           pengaturan={pengaturan?.data}
                           semester={ujian?.expand?.tahun_ajaran_id?.semester}
@@ -1289,7 +1291,9 @@ export default function RaporWalikelasPage() {
                               rapor={tahfizhRapor}
                               kategoriRapor={tahfizhCtx.kategoriRapor}
                               tahsinNama={
-                                tahfizhCtx.tahsinMapel?.nama_mapel || "Tahsin"
+                                tahfizhCtx.tahsinMapel?.Label ||
+                                tahfizhCtx.tahsinMapel?.nama_mapel ||
+                                "Tahsin"
                               }
                               pengaturan={pengaturan?.data}
                               semester={
