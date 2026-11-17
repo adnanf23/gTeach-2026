@@ -1,4 +1,8 @@
 import * as previewRaporRepository from "@/repositories/walikelas-preview-rapor.repository";
+import {
+  jenisRaporDariUjian,
+  tahunAjaranIdDariUjian,
+} from "@/lib/raporJenis";
 
 /* ───────────── konfigurasi ───────────── */
 const SEKOLAH_DEFAULT = {
@@ -341,7 +345,7 @@ async function buildRapor(
   return {
     judul: judulRapor(ujian, ta?.semester),
     semester: ta?.semester,
-    tahun_ajaran: pengaturanRapor?.tahun_ajaran || ta?.tahun,
+    tahun_ajaran: ta?.tahun || "-",
     kelas: kelas?.tingkat,
     fase: faseDari(kelas?.tingkat),
     wali_kelas: waliUser?.nama_lengkap || "-",
@@ -400,8 +404,10 @@ export async function getPreviewRaporBase({ userId, ujianId }) {
     let pengaturanRapor = null;
     if (dipilih) {
       try {
-        pengaturanRapor =
-          await previewRaporRepository.findPengaturanRaporByUjian(dipilih.id);
+        pengaturanRapor = await previewRaporRepository.findPengaturanRapor(
+          tahunAjaranIdDariUjian(dipilih),
+          jenisRaporDariUjian(dipilih),
+        );
       } catch {
         pengaturanRapor = null;
       }
@@ -431,10 +437,12 @@ export async function getPreviewRaporBase({ userId, ujianId }) {
 }
 
 // Pengaturan rapor (judul, tanda tangan, dsb.) untuk satu periode ujian.
-export async function getPengaturanRapor(ujianId) {
+export async function getPengaturanRapor(ujian) {
   try {
-    const pr =
-      await previewRaporRepository.findPengaturanRaporByUjian(ujianId);
+    const pr = await previewRaporRepository.findPengaturanRapor(
+      tahunAjaranIdDariUjian(ujian),
+      jenisRaporDariUjian(ujian),
+    );
     return { data: pr, error: null };
   } catch {
     return { data: null, error: null };

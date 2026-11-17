@@ -31,13 +31,9 @@ export async function getPengaturanRaporData(tahunAjaranId) {
         tahunAjaranId,
       );
 
-    if (ujianList.length === 0) {
-      return { ujianList: [], raporList: [], error: null };
-    }
-
     const raporList =
-      await ictRaporPengaturanRepository.findPengaturanRaporByUjianIds(
-        ujianList.map((u) => u.id),
+      await ictRaporPengaturanRepository.findPengaturanRaporByTahunAjaran(
+        tahunAjaranId,
       );
 
     return { ujianList, raporList, error: null };

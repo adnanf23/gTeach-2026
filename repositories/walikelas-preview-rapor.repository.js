@@ -42,11 +42,20 @@ export async function findCapaianByKelas(kelasId, ujianId) {
   });
 }
 
-export async function findPengaturanRaporByUjian(ujianId) {
+// Pengaturan rapor dikunci (tahun ajaran, jenis rapor) — satu per semester.
+export async function findPengaturanRapor(tahunAjaranId, jenisRapor) {
+  if (!tahunAjaranId || !jenisRapor) return null;
   const pb = await getServerPb();
-  return pb
-    .collection("pengaturan_rapor")
-    .getFirstListItem(`ujian_id ~ "${ujianId}"`, { requestKey: null });
+  try {
+    return await pb
+      .collection("pengaturan_rapor")
+      .getFirstListItem(
+        `tahun_ajaran_id = "${tahunAjaranId}" && jenis_rapor = "${jenisRapor}"`,
+        { requestKey: null },
+      );
+  } catch {
+    return null;
+  }
 }
 
 /* ───────────── sumber nilai akhir per mapel ───────────── */

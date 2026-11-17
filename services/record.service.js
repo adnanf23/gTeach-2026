@@ -1,4 +1,5 @@
 import { describeError } from "@/lib/app-error";
+import { semesterAktif, semesterUntukTanggal } from "@/lib/semester";
 import * as recordRepository from "@/repositories/record.repository";
 import { findAllTahunAjaran } from "@/repositories/tahun-ajaran.repository";
 import { writeLog } from "@/services/systemLog.service";
@@ -12,34 +13,67 @@ const TAHUN_AJARAN_COLLECTIONS = new Set([
   "lingkup_materi",
   "pengaturan_ujian",
   "catatan_kasus",
+  "agenda_mengajar",
+  "absensi",
 ]);
 
-let activeTaCache = { id: "", at: 0 };
+// Koleksi yang semesternya ditentukan tanggal record itu sendiri, bukan
+// semester yang sedang aktif. Guru bisa mengisi agenda/absensi untuk tanggal
+// lampau (mis. mengisi susulan), dan record itu harus masuk semester tanggalnya.
+const KEPEMILIKAN_PER_TANGGAL = {
+  agenda_mengajar: "date",
+  absensi: "tanggal",
+};
 
-async function getActiveTahunAjaranId() {
+let taCache = { list: null, at: 0 };
+
+async function getTahunAjaranList() {
   const now = Date.now();
-  if (activeTaCache.id && now - activeTaCache.at < 60_000) {
-    return activeTaCache.id;
-  }
+  if (taCache.list && now - taCache.at < 60_000) return taCache.list;
   try {
     const list = await findAllTahunAjaran();
-    const id = list.find((t) => t.is_aktif)?.id || "";
-    activeTaCache = { id, at: now };
-    return id;
+    taCache = { list, at: now };
+    return list;
   } catch {
-    return "";
+    return [];
   }
 }
 
-// Isi otomatis tahun_ajaran_id dengan semester yang sedang aktif bila belum diisi.
+// Isi otomatis tahun_ajaran_id bila belum diisi.
 async function withActiveTahunAjaran(collection, data) {
   if (!TAHUN_AJARAN_COLLECTIONS.has(collection)) return data;
   if (!data || typeof data !== "object") return data;
   if (typeof FormData !== "undefined" && data instanceof FormData) return data;
   if (data.tahun_ajaran_id) return data;
-  const id = await getActiveTahunAjaranId();
-  if (!id) return data;
-  return { ...data, tahun_ajaran_id: id };
+
+  const list = await getTahunAjaranList();
+  if (list.length === 0) return data;
+
+  const fieldTanggal = KEPEMILIKAN_PER_TANGGAL[collection];
+  const ta = fieldTanggal
+    ? semesterUntukTanggal(data[fieldTanggal], list)
+    : semesterAktif(list);
+
+  if (!ta?.id) return data;
+  return { ...data, tahun_ajaran_id: ta.id };
+}
+
+// Saat tanggal record dipindah, semesternya harus ikut pindah. Hanya
+// menyentuh record yang tanggalnya benar-benar berubah; kalau tanggal tidak
+// dikirim, `tahun_ajaran_id` yang sudah ada dibiarkan.
+async function withTahunAjaranSaatPindahTanggal(collection, data) {
+  const fieldTanggal = KEPEMILIKAN_PER_TANGGAL[collection];
+  if (!fieldTanggal) return data;
+  if (!data || typeof data !== "object") return data;
+  if (typeof FormData !== "undefined" && data instanceof FormData) return data;
+  if (!data[fieldTanggal]) return data;
+
+  const list = await getTahunAjaranList();
+  if (list.length === 0) return data;
+
+  const ta = semesterUntukTanggal(data[fieldTanggal], list);
+  if (!ta?.id) return data;
+  return { ...data, tahun_ajaran_id: ta.id };
 }
 
 // Catat aksi CRUD ke system_log. Kegagalan logging tidak boleh menggagalkan
@@ -98,7 +132,17 @@ export async function create(collection, data, options) {
 
 export async function update(collection, id, data, options) {
   return run(async () => {
-    const result = await recordRepository.modify(collection, id, data, options);
+    const payload = await withTahunAjaranSaatPindahTanggal(
+      collection,
+      data,
+      options,
+    );
+    const result = await recordRepository.modify(
+      collection,
+      id,
+      payload,
+      options,
+    );
     await logCrud("memperbarui", collection, id);
     return result;
   });

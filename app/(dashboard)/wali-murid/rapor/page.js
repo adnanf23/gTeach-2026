@@ -22,6 +22,10 @@ import { pb } from "@/lib/pocketbase";
 
 // ✅ TTD kepala sekolah dari folder assets (static import Next.js)
 import ttdKepsekAsset from "@/assets/TTD BUNDA AHDA_STAMPEL_BOLD.png";
+import {
+  jenisRaporDariUjian,
+  tahunAjaranIdDariUjian,
+} from "@/lib/raporJenis";
 
 /* ───────────── konfigurasi ───────────── */
 const SEKOLAH_DEFAULT = {
@@ -553,7 +557,7 @@ async function buildRapor(siswa, ujian, pengaturanRapor = null) {
   return {
     judul: judulRapor(ujian, ta?.semester),
     semester: ta?.semester,
-    tahun_ajaran: pengaturanRapor?.tahun_ajaran || ta?.tahun,
+    tahun_ajaran: ta?.tahun || "-",
     kelas: kelas?.tingkat,
     fase: faseDari(kelas?.tingkat),
     wali_kelas: waliUser?.nama_lengkap || "-",
@@ -1178,13 +1182,13 @@ export default function RaporPage() {
     (async () => {
       let pr = null;
       try {
-        pr = await db.getFirstListItem("pengaturan_rapor", `ujian_id ~ "${ujian.id}"`, { requestKey: null });
+        pr = await db.getFirstListItem(
+          "pengaturan_rapor",
+          `tahun_ajaran_id = "${tahunAjaranIdDariUjian(ujian)}" && jenis_rapor = "${jenisRaporDariUjian(ujian)}"`,
+          { requestKey: null },
+        );
       } catch {
-        try {
-          pr = await db.getFirstListItem("pengaturan_rapor", `ujian = "${ujian.id}"`, { requestKey: null });
-        } catch {
-          pr = null;
-        }
+        pr = null;
       }
       if (!cancelled) setPengaturan({ ujianId: ujian.id, data: pr });
     })();

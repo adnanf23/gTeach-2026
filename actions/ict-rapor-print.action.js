@@ -13,8 +13,8 @@ export async function getRaporPrintKelasData(params) {
   return raporPrintService.getRaporPrintKelasData(params);
 }
 
-export async function getPengaturanRapor(ujianId) {
-  return raporPrintService.getPengaturanRapor(ujianId);
+export async function getPengaturanRapor(ujian) {
+  return raporPrintService.getPengaturanRapor(ujian);
 }
 
 export async function getRaporPrintSiswa(params) {

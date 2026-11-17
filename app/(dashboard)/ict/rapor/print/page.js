@@ -43,7 +43,8 @@ const RaporSheet = ({ siswa, rapor, ujian }) => {
       rapor={t?.data}
       kategoriRapor={t?.kategoriRapor}
       tahsinNama={t?.tahsinNama}
-      jenisSemester={t?.jenisSemester}
+      pengaturan={t?.pengaturan}
+      semester={t?.semester}
       tanggalRapor={t?.tanggalRapor}
       kepalaSekolah={t?.kepalaSekolah}
     />
@@ -974,7 +975,7 @@ export default function AdminRaporPage() {
     }
     let cancelled = false;
     (async () => {
-      const res = await getPengaturanRapor(ujian.id);
+      const res = await getPengaturanRapor(ujian);
       if (!cancelled) setPengaturan({ ujianId: ujian.id, data: res.data });
     })();
     return () => {

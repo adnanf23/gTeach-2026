@@ -6,8 +6,8 @@ export async function getPreviewRaporBase(params) {
   return previewRaporService.getPreviewRaporBase(params);
 }
 
-export async function getPengaturanRapor(ujianId) {
-  return previewRaporService.getPengaturanRapor(ujianId);
+export async function getPengaturanRapor(ujian) {
+  return previewRaporService.getPengaturanRapor(ujian);
 }
 
 export async function getPreviewRaporSiswa(params) {

@@ -26,12 +26,11 @@ export async function findPengaturanUjianByTahunAjaran(tahunAjaranId) {
   });
 }
 
-// Pengaturan rapor untuk sekumpulan id ujian.
-export async function findPengaturanRaporByUjianIds(ujianIds) {
+// Seluruh pengaturan rapor pada satu tahun ajaran (satu per jenis rapor).
+export async function findPengaturanRaporByTahunAjaran(tahunAjaranId) {
   const pb = await getServerPb();
-  const filter = ujianIds.map((id) => `ujian_id = "${id}"`).join(" || ");
   return pb.collection("pengaturan_rapor").getFullList({
-    filter,
+    filter: `tahun_ajaran_id = "${tahunAjaranId}"`,
     requestKey: null,
   });
 }

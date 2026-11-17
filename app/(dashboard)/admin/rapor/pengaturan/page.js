@@ -4,12 +4,12 @@ import { db } from "@/lib/db";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { isAuthenticated, getCurrentUser } from "@/lib/pocketbase";
+import {
+  LABEL_JENIS_RAPOR,
+  jenisRaporDariUjian,
+} from "@/lib/raporJenis";
 
 const ALLOWED_ROLES = ["admin", "ict"];
-
-function firstOf(val) {
-  return Array.isArray(val) ? val[0] : val;
-}
 
 function toDateInput(val) {
   if (!val) return "";
@@ -42,12 +42,11 @@ function jenisUjianBadge(jenis) {
 }
 
 const emptyForm = {
-  ujian_id: "",
+  jenis_rapor: "",
   nama_sekolah: "",
   alamat: "",
-  tahun_ajaran: "",
+  kepala_sekolah: "",
   tanggal_rapor: "",
-  jenis_semester: "",
 };
 
 export default function PengaturanRaporPage() {
@@ -76,17 +75,13 @@ export default function PengaturanRaporPage() {
     [tahunAjaranList, selectedTahunAjaranId],
   );
 
-  const ujianMap = useMemo(() => {
-    const map = {};
-    ujianList.forEach((u) => {
-      map[u.id] = u;
-    });
-    return map;
-  }, [ujianList]);
-
-  function getUjianIdOfRapor(r) {
-    return firstOf(r.ujian_id);
+  function getJenisRapor(r) {
+    return r.jenis_rapor || "";
   }
+
+  // Satu baris per jenis rapor, bukan per ujian: satu semester hanya punya
+  // satu rapor Tahfizh, satu AHB, dan satu ASAS.
+  const KARTU_JENIS = ["tahfiz", "ahb", "asas"];
 
   // 1. Auth
   useEffect(() => {
@@ -157,17 +152,8 @@ export default function PengaturanRaporPage() {
         if (!isMounted) return;
         setUjianList(ujianRecords);
 
-        if (ujianRecords.length === 0) {
-          setRaporList([]);
-          return;
-        }
-
-        const filterStr = ujianRecords
-          .map((u) => `ujian_id = "${u.id}"`)
-          .join(" || ");
-
         const raporRecords = await db.getFullList("pengaturan_rapor", {
-            filter: filterStr,
+            filter: `tahun_ajaran_id = "${selectedTahunAjaranId}"`,
             requestKey: null,
           });
         if (!isMounted) return;
@@ -187,20 +173,15 @@ export default function PengaturanRaporPage() {
   }, [selectedTahunAjaranId]);
 
   // ---------------- Handlers ----------------
-  function openFormForUjian(u) {
-    const existing = raporList.find((r) => getUjianIdOfRapor(r) === u.id);
-    setEditingUjianId(u.id);
+  function openFormForJenis(jenis) {
+    const existing = raporList.find((r) => getJenisRapor(r) === jenis);
+    setEditingUjianId(jenis);
     setForm({
-      ujian_id: u.id,
+      jenis_rapor: jenis,
       nama_sekolah: existing?.nama_sekolah || "",
       alamat: existing?.alamat || "",
-      tahun_ajaran:
-        existing?.tahun_ajaran ||
-        (selectedTahunAjaran
-          ? `${selectedTahunAjaran.tahun} · Semester ${selectedTahunAjaran.semester}`
-          : ""),
+      kepala_sekolah: existing?.kepala_sekolah || "",
       tanggal_rapor: toDateInput(existing?.tanggal_rapor),
-      jenis_semester: existing?.jenis_semester || "",
     });
   }
 
@@ -210,24 +191,24 @@ export default function PengaturanRaporPage() {
   }
 
   async function submitForm() {
-    if (!form.ujian_id) {
-      setError("Ujian tidak valid.");
+    if (!form.jenis_rapor || !selectedTahunAjaranId) {
+      setError("Jenis rapor atau tahun ajaran tidak valid.");
       return;
     }
     setSavingForm(true);
     setError("");
     try {
       const payload = {
-        ujian_id: form.ujian_id,
+        tahun_ajaran_id: selectedTahunAjaranId,
+        jenis_rapor: form.jenis_rapor,
         nama_sekolah: form.nama_sekolah.trim(),
         alamat: form.alamat.trim(),
-        tahun_ajaran: form.tahun_ajaran.trim(),
+        kepala_sekolah: form.kepala_sekolah.trim(),
         tanggal_rapor: form.tanggal_rapor || null,
-        jenis_semester: form.jenis_semester || "",
       };
 
       const existing = raporList.find(
-        (r) => getUjianIdOfRapor(r) === form.ujian_id,
+        (r) => getJenisRapor(r) === form.jenis_rapor,
       );
       if (existing) {
         const updated = await db.update("pengaturan_rapor", existing.id, payload);
@@ -248,16 +229,13 @@ export default function PengaturanRaporPage() {
   }
 
   async function deleteRapor(raporId) {
-    if (!confirm("Hapus pengaturan rapor untuk ujian ini?")) return;
+    if (!confirm("Hapus pengaturan rapor untuk jenis ini?")) return;
     setDeletingId(raporId);
     setError("");
     try {
       await db.remove("pengaturan_rapor", raporId);
       setRaporList((prev) => prev.filter((r) => r.id !== raporId));
-      if (editingUjianId) {
-        const stillExists = raporList.find((r) => r.id === raporId);
-        if (stillExists) closeForm();
-      }
+      closeForm();
     } catch (err) {
       console.error("Error deleting pengaturan_rapor:", err);
       setError("Gagal menghapus pengaturan rapor.");
@@ -266,8 +244,13 @@ export default function PengaturanRaporPage() {
     }
   }
 
-  const jumlahTerisi = raporList.length;
-  const jumlahKosong = ujianList.length - jumlahTerisi;
+  const jenisTersedia = KARTU_JENIS.filter((jenis) =>
+    ujianList.some((u) => jenisRaporDariUjian(u) === jenis),
+  );
+  const jumlahTerisi = jenisTersedia.filter((jenis) =>
+    raporList.some((r) => getJenisRapor(r) === jenis),
+  ).length;
+  const jumlahKosong = jenisTersedia.length - jumlahTerisi;
 
   // ---------------- Render ----------------
 
@@ -290,9 +273,9 @@ export default function PengaturanRaporPage() {
     );
   }
 
-  const editingUjian = editingUjianId ? ujianMap[editingUjianId] : null;
-  const editingRapor = editingUjianId
-    ? raporList.find((r) => getUjianIdOfRapor(r) === editingUjianId)
+  const editingJenis = editingUjianId || null;
+  const editingRapor = editingJenis
+    ? raporList.find((r) => getJenisRapor(r) === editingJenis)
     : null;
 
   return (
@@ -313,8 +296,8 @@ export default function PengaturanRaporPage() {
           <h1 className="text-lg font-bold text-slate-800">Pengaturan Rapor</h1>
           <p className="text-xs text-slate-500 mt-1">
             Atur header & tanggal rapor (nama sekolah, alamat, tahun ajaran,
-            tanggal) <b>per ujian</b>. Setiap ujian punya pengaturan rapornya
-            sendiri.
+            tanggal) <b>per jenis rapor</b>: Tahfizh, AHB, dan ASAS — satu per
+            semester.
           </p>
         </div>
 
@@ -351,11 +334,11 @@ export default function PengaturanRaporPage() {
                 {selectedTahunAjaran.semester}
               </p>
               <h2 className="text-base font-bold mt-0.5">
-                {jumlahTerisi} / {ujianList.length} Ujian Sudah Diatur Rapornya
+                {jumlahTerisi} / {jenisTersedia.length} Jenis Rapor Sudah Diatur
               </h2>
               {jumlahKosong > 0 && (
                 <p className="text-[11px] text-blue-100 mt-1">
-                  {jumlahKosong} ujian belum memiliki pengaturan rapor.
+                  {jumlahKosong} jenis rapor belum memiliki pengaturan.
                 </p>
               )}
             </div>
@@ -372,7 +355,7 @@ export default function PengaturanRaporPage() {
       )}
 
       {/* Form edit/tambah */}
-      {editingUjian && (
+      {editingJenis && (
         <div className="mb-6 rounded-2xl border border-blue-100 bg-blue-50/40 p-5 space-y-4">
           <div className="flex items-center justify-between">
             <div>
@@ -380,16 +363,18 @@ export default function PengaturanRaporPage() {
                 {editingRapor ? "Edit Pengaturan Rapor" : "Atur Rapor Baru"}
               </h3>
               <p className="text-[11px] text-slate-500 mt-0.5">
-                Untuk ujian:{" "}
+                Rapor:{" "}
                 <span className="font-semibold text-slate-700">
-                  {editingUjian.nama_ujian}
+                  {LABEL_JENIS_RAPOR[editingJenis] || editingJenis}
                 </span>
               </p>
             </div>
             <span
-              className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded border ${jenisUjianBadge(editingUjian.jenis_ujian)}`}
+              className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded border ${jenisUjianBadge(
+                editingJenis === "tahfiz" ? "lainnya" : editingJenis,
+              )}`}
             >
-              {editingUjian.jenis_ujian || "—"}
+              {editingJenis}
             </span>
           </div>
 
@@ -411,15 +396,15 @@ export default function PengaturanRaporPage() {
 
             <div>
               <label className="text-[11px] font-medium text-slate-500">
-                Tahun Ajaran (teks pada rapor)
+                Kepala Sekolah
               </label>
               <input
                 type="text"
-                value={form.tahun_ajaran}
+                value={form.kepala_sekolah}
                 onChange={(e) =>
-                  setForm((f) => ({ ...f, tahun_ajaran: e.target.value }))
+                  setForm((f) => ({ ...f, kepala_sekolah: e.target.value }))
                 }
-                placeholder="Contoh: 2024/2025 · Semester 1"
+                placeholder="Contoh: Syafrina Ahda, S.Pd., M.M."
                 className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-blue-500"
               />
             </div>
@@ -459,26 +444,6 @@ export default function PengaturanRaporPage() {
             )}
           </div>
 
-          <div>
-            <label className="text-xs font-medium text-slate-500">
-              Semester (Ganjil/Genap)
-            </label>
-            <select
-              value={form.jenis_semester}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, jenis_semester: e.target.value }))
-              }
-              className="mt-1 w-full sm:w-64 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs outline-none focus:border-blue-500"
-            >
-              <option value="">— Pilih —</option>
-              <option value="ganjil">Ganjil</option>
-              <option value="genap">Genap</option>
-            </select>
-            <p className="mt-1 text-[11px] text-slate-400">
-              Dipakai pada rapor tahfizh.
-            </p>
-          </div>
-
           <div className="flex gap-2 justify-between pt-2 border-t border-blue-100">
             <div>
               {editingRapor && (
@@ -515,22 +480,22 @@ export default function PengaturanRaporPage() {
         </div>
       )}
 
-      {/* Daftar ujian */}
+      {/* Daftar jenis rapor */}
       {loadingData ? (
         <LoadingGrid />
-      ) : ujianList.length === 0 ? (
+      ) : jenisTersedia.length === 0 ? (
         <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center text-slate-500 text-xs">
           Belum ada ujian untuk tahun ajaran ini. Tambahkan ujian dulu di menu{" "}
           <span className="font-semibold text-slate-600">Manajemen Ujian</span>.
         </div>
       ) : (
         <div className="space-y-3">
-          {ujianList.map((u) => {
-            const rapor = raporList.find((r) => getUjianIdOfRapor(r) === u.id);
-            const isEditing = editingUjianId === u.id;
+          {jenisTersedia.map((jenis) => {
+            const rapor = raporList.find((r) => getJenisRapor(r) === jenis);
+            const isEditing = editingJenis === jenis;
             return (
               <div
-                key={u.id}
+                key={jenis}
                 className={`rounded-2xl border bg-white p-4 shadow-sm transition ${
                   isEditing
                     ? "border-blue-300 ring-2 ring-blue-100"
@@ -541,9 +506,11 @@ export default function PengaturanRaporPage() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span
-                        className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded border ${jenisUjianBadge(u.jenis_ujian)}`}
+                        className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded border ${jenisUjianBadge(
+                          jenis === "tahfiz" ? "lainnya" : jenis,
+                        )}`}
                       >
-                        {u.jenis_ujian || "—"}
+                        {jenis}
                       </span>
                       <span
                         className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded ${
@@ -557,7 +524,7 @@ export default function PengaturanRaporPage() {
                     </div>
 
                     <h3 className="text-sm font-bold text-slate-800 mt-2">
-                      {u.nama_ujian}
+                      {LABEL_JENIS_RAPOR[jenis] || jenis}
                     </h3>
 
                     {rapor ? (
@@ -573,8 +540,10 @@ export default function PengaturanRaporPage() {
                           {rapor.alamat || "—"}
                         </p>
                         <p>
-                          <span className="text-slate-400">TA:</span>{" "}
-                          {rapor.tahun_ajaran || "—"}
+                          <span className="text-slate-400">
+                            Kepala Sekolah:
+                          </span>{" "}
+                          {rapor.kepala_sekolah || "—"}
                         </p>
                         <p>
                           <span className="text-slate-400">Tanggal:</span>{" "}
@@ -583,7 +552,7 @@ export default function PengaturanRaporPage() {
                       </div>
                     ) : (
                       <p className="text-[11px] text-slate-400 italic mt-2">
-                        Belum ada pengaturan rapor untuk ujian ini.
+                        Belum ada pengaturan rapor untuk jenis ini.
                       </p>
                     )}
                   </div>
@@ -591,7 +560,7 @@ export default function PengaturanRaporPage() {
                   <div className="flex items-center gap-2 shrink-0">
                     <button
                       type="button"
-                      onClick={() => openFormForUjian(u)}
+                      onClick={() => openFormForJenis(jenis)}
                       className={`rounded-lg px-3 py-1.5 text-xs font-semibold border transition ${
                         rapor
                           ? "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100"

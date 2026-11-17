@@ -43,8 +43,10 @@ export async function findAgendaByBulan({
   semesterAkhir,
 }) {
   const pb = await getServerPb();
-  // Filter semester (opsional) memakai rentang field `date`, karena agenda
-  // tidak menyimpan tahun_ajaran_id.
+  // Kalender sengaja TIDAK difilter `tahun_ajaran_id`. Pada bulan peralihan
+  // (mis. Desember) satu bulan berisi dua semester, dan memfilter per semester
+  // justru menyembunyikan agenda yang tanggalnya sah. `tahun_ajaran_id` tetap
+  // diisi di tiap record untuk kebutuhan agregasi per semester.
   const semesterFilter =
     semesterMulai && semesterAkhir
       ? ` && date >= "${semesterMulai}" && date <= "${semesterAkhir}"`

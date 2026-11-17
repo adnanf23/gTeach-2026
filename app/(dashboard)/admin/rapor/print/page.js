@@ -30,6 +30,10 @@ import {
   getRaporTahfizhContext,
   getRaporTahfizhSiswa,
 } from "@/actions/tahfizh.action";
+import {
+  jenisRaporDariUjian,
+  tahunAjaranIdDariUjian,
+} from "@/lib/raporJenis";
 
 // Pilih lembar rapor sesuai template ujian (akademik / tahfiz / kombinasi).
 const RaporSheet = ({ siswa, rapor, ujian }) => {
@@ -41,7 +45,8 @@ const RaporSheet = ({ siswa, rapor, ujian }) => {
       rapor={t?.data}
       kategoriRapor={t?.kategoriRapor}
       tahsinNama={t?.tahsinNama}
-      jenisSemester={t?.jenisSemester}
+      pengaturan={t?.pengaturan}
+      semester={t?.semester}
       tanggalRapor={t?.tanggalRapor}
       kepalaSekolah={t?.kepalaSekolah}
     />
@@ -608,7 +613,8 @@ async function buildRapor(
           data: res,
           kategoriRapor: ctx.kategoriRapor,
           tahsinNama: ctx.tahsinMapel?.nama_mapel || "Tahsin",
-          jenisSemester: pengaturanRapor?.jenis_semester || "",
+          pengaturan: pengaturanRapor,
+          semester: ta?.semester || "",
           tanggalRapor: pengaturanRapor?.tanggal_rapor
             ? new Date(pengaturanRapor.tanggal_rapor).toLocaleDateString(
                 "id-ID",
@@ -626,7 +632,7 @@ async function buildRapor(
     tahfizh,
     judul: judulRapor(ujian, ta?.semester),
     semester: ta?.semester,
-    tahun_ajaran: pengaturanRapor?.tahun_ajaran || ta?.tahun,
+    tahun_ajaran: ta?.tahun || "-",
     kelas: kelas?.tingkat,
     fase: faseDari(kelas?.tingkat),
     wali_kelas: waliUser?.nama_lengkap || "-",
@@ -1423,7 +1429,11 @@ export default function AdminRaporPage() {
     (async () => {
       let pr = null;
       try {
-        pr = await db.getFirstListItem("pengaturan_rapor", `ujian_id ~ "${ujian.id}"`, { requestKey: null });
+        pr = await db.getFirstListItem(
+          "pengaturan_rapor",
+          `tahun_ajaran_id = "${tahunAjaranIdDariUjian(ujian)}" && jenis_rapor = "${jenisRaporDariUjian(ujian)}"`,
+          { requestKey: null },
+        );
       } catch {
         pr = null;
       }

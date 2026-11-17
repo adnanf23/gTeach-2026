@@ -1,5 +1,9 @@
 import * as raporPrintRepository from "@/repositories/ict-rapor-print.repository";
 import * as tahfizhService from "@/services/tahfizh.service";
+import {
+  jenisRaporDariUjian,
+  tahunAjaranIdDariUjian,
+} from "@/lib/raporJenis";
 
 // Logika bisnis halaman ICT > Rapor > Cek & Print Rapor.
 // Seluruh helper murni & agregasi (nilai akhir per mapel, penyusunan rapor
@@ -370,7 +374,8 @@ async function buildRapor(
           data: res,
           kategoriRapor: ctx.kategoriRapor,
           tahsinNama: ctx.tahsinMapel?.nama_mapel || "Tahsin",
-          jenisSemester: pengaturanRapor?.jenis_semester || "",
+          pengaturan: pengaturanRapor,
+          semester: ta?.semester || "",
           tanggalRapor: pengaturanRapor?.tanggal_rapor
             ? new Date(pengaturanRapor.tanggal_rapor).toLocaleDateString(
                 "id-ID",
@@ -388,7 +393,7 @@ async function buildRapor(
     tahfizh,
     judul: judulRapor(ujian, ta?.semester),
     semester: ta?.semester,
-    tahun_ajaran: pengaturanRapor?.tahun_ajaran || ta?.tahun,
+    tahun_ajaran: ta?.tahun || "-",
     kelas: kelas?.tingkat,
     fase: faseDari(kelas?.tingkat),
     wali_kelas: waliUser?.nama_lengkap || "-",
@@ -474,9 +479,12 @@ export async function getRaporPrintKelasData({ kelas, tanggalMax, ujianId }) {
 
 // Pengaturan rapor (judul, tanda tangan, dsb.) untuk satu periode ujian.
 // Ketiadaan/kesalahan data dikembalikan sebagai null tanpa melempar error.
-export async function getPengaturanRapor(ujianId) {
+export async function getPengaturanRapor(ujian) {
   try {
-    const pr = await raporPrintRepository.findPengaturanRaporByUjian(ujianId);
+    const pr = await raporPrintRepository.findPengaturanRapor(
+      tahunAjaranIdDariUjian(ujian),
+      jenisRaporDariUjian(ujian),
+    );
     return { data: pr, error: null };
   } catch {
     return { data: null, error: null };

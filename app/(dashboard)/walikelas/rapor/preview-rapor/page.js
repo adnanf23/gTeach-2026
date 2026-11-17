@@ -1247,7 +1247,8 @@ export default function RaporWalikelasPage() {
                           tahsinNama={
                             tahfizhCtx.tahsinMapel?.nama_mapel || "Tahsin"
                           }
-                          jenisSemester={pengaturan?.data?.jenis_semester || ""}
+                          pengaturan={pengaturan?.data}
+                          semester={ujian?.expand?.tahun_ajaran_id?.semester}
                           tanggalRapor={
                             pengaturan?.data?.tanggal_rapor
                               ? new Date(
@@ -1290,8 +1291,9 @@ export default function RaporWalikelasPage() {
                               tahsinNama={
                                 tahfizhCtx.tahsinMapel?.nama_mapel || "Tahsin"
                               }
-                              jenisSemester={
-                                pengaturan?.data?.jenis_semester || ""
+                              pengaturan={pengaturan?.data}
+                              semester={
+                                ujian?.expand?.tahun_ajaran_id?.semester
                               }
                               tanggalRapor={
                                 pengaturan?.data?.tanggal_rapor
