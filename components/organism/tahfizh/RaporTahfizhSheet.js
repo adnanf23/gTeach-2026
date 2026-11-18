@@ -21,8 +21,7 @@ function semesterLabel(semester) {
 
 // Satu <tbody> per kategori 1 kolom. Semua kategori dalam satu halaman
 // ditumpuk di SATU <table> supaya border-collapse menyatukan garis antar
-// kategori (kalau tabel terpisah, garis bawah + garis atas jadi double).
-// Potongan lanjutan (halaman berikutnya) tidak mengulang judul + header.
+// kategori. Potongan lanjutan tidak mengulang judul + header.
 function KategoriBody({ blok, predikat }) {
   const itemLabel = blok.info.item_label || blok.info.item || "SURAT";
   const items = blok.items.slice(blok.mulai, blok.mulai + blok.jumlah);
@@ -62,17 +61,13 @@ function KategoriBody({ blok, predikat }) {
 }
 
 // Kategori 2 kolom (asmaul husna): tiap baris memuat 2 item.
-// `mulai`/`jumlah` dihitung dalam satuan BARIS; item yang dipakai potongan ini
-// adalah items[mulai*2 .. mulai*2+jumlah*2]. Pembacaan mengalir per halaman:
-// halaman 1 = 1..n di kolom kiri lalu n+1..2n di kolom kanan, halaman
-// berikutnya melanjutkan 2n+1, sehingga nomor tidak loncat antar halaman.
+// `mulai`/`jumlah` dihitung dalam satuan BARIS.
 function DuaKolomTable({ blok, predikat }) {
   const info = blok.info;
   const itemLabel = info.item_label || info.item || "ASMAUL HUSNA";
   const offset = blok.mulai * 2;
   const sisa = Math.max(blok.items.length - offset, 0);
   const ambil = Math.min(blok.jumlah * 2, sisa);
-  // Kolom kiri diisi lebih dulu; baris terakhir boleh hanya punya kolom kiri.
   const kolomKiri = Math.ceil(ambil / 2);
   const potong = blok.items.slice(offset, offset + ambil);
   const kiri = potong.slice(0, kolomKiri);
@@ -139,33 +134,23 @@ function DuaKolomTable({ blok, predikat }) {
 
 /* ================================================================
    PEMBAGIAN HALAMAN (satuan px, hasil pengukuran render)
-   Kertas 330mm = 1247px, padding 14/12mm -> konten 1149px.
+   Kertas 330mm = 1247px, padding 8/8mm -> konten 1187px.
    Kop + identitas = 169px (hanya halaman 1).
-   Penutup boleh dipecah seperti rapor asli: catatan (154px) menyusul
-   tabel di halaman yang sama bila masih ada ruang; tahsin + legenda +
-   tanda tangan (278px) selalu di halaman terakhir.
-   Baris tabel 18.5px, boleh ditinggikan sampai 27px supaya tabel
-   mengisi halaman penuh sebelum isinya dilanjutkan ke halaman berikutnya.
+   Catatan (154px) menyusul tabel di halaman yang sama bila ada ruang;
+   tahsin + legenda + tanda tangan (278px) selalu di halaman terakhir.
    ================================================================ */
-const TINGGI_KONTEN = 1149;
+const TINGGI_KONTEN = 1187;
 const TINGGI_KOP = 169;
 const TINGGI_CATATAN = 154;
 const TINGGI_TUTUP = 278;
-// Tinggi baris terukur: 16.4px tanpa padding, bertambah 2px tiap 1px padding.
 const BARIS_MIN = 16.4;
 const BARIS_MAKS = 30;
 const TINGGI_TEKS = 16.4;
 
 const kapasitasHalaman = (idx) => TINGGI_KONTEN - (idx === 0 ? TINGGI_KOP : 0);
 const barisMuat = (idx) => Math.floor(kapasitasHalaman(idx) / BARIS_MIN);
-// Judul kategori + baris header (NO/ITEM/PREDIKAT) hanya digambar sekali, di
-// potongan pertama; potongan lanjutan langsung meneruskan baris isi.
 const tinggiBlok = (b) => b.jumlah + (b.lanjutan ? 0 : 2);
 
-// Satu kategori = satu blok. `tengah` adalah jumlah baris yang dipakai
-// (untuk kategori 2 kolom separuh item, karena tiap baris memuat 2 item),
-// sedangkan `mulai`/`jumlah` menandai potongan saat blok dipecah ke halaman
-// berikutnya.
 function blokDariKategori(info, items) {
   const duaK = Number(info.kolom) === 2;
   return {
@@ -205,11 +190,7 @@ function susunHalaman(kategoriList, ambilKomponen) {
     }
   }
 
-  // Halaman terakhir cukup menyisakan ruang untuk catatan. Kalau masih muat
-  // untuk tahsin+legenda+TTD, semuanya di halaman yang sama. Kalau hanya muat
-  // catatan, tabel + catatan tetap di halaman itu dan tutup pindah ke halaman
-  // baru (persis rapor asli kelas 6: tabel + catatan di hal. 1). Tabel hanya
-  // dipecah kalau sisa ruang bahkan tidak cukup untuk catatan.
+  // Halaman terakhir harus menyisakan ruang untuk catatan.
   for (;;) {
     const idx = halaman.length - 1;
     const last = halaman[idx];
@@ -246,12 +227,10 @@ function susunHalaman(kategoriList, ambilKomponen) {
     baru.baris = pindah.reduce((n, b) => n + tinggiBlok(b), 0);
   }
 
-  // Tutup butuh halaman sendiri kalau catatan sudah menghabiskan sisa ruang.
+  // Tutup butuh halaman sendiri kalau sisa ruang tidak cukup.
   const akhir = halaman[halaman.length - 1];
   const sisaAkhir =
     kapasitasHalaman(halaman.length - 1) - akhir.baris * BARIS_MIN;
-  // Catatan menempati sisa ruang (>= TINGGI_CATATAN), jadi tutup butuh
-  // TINGGI_CATATAN + TINGGI_TUTUP agar bisa berbagi halaman.
   if (sisaAkhir < TINGGI_CATATAN + TINGGI_TUTUP) {
     halaman.push({ blok: [], baris: 0 });
   }
@@ -259,8 +238,6 @@ function susunHalaman(kategoriList, ambilKomponen) {
   return halaman;
 }
 
-// Gabungkan blok 1 kolom berurutan supaya dirender sebagai satu tabel:
-// border-collapse lalu menyatukan garis antar kategori (tidak dobel).
 function segmenDariBlok(blok) {
   const segmen = [];
   for (const b of blok) {
@@ -289,8 +266,6 @@ export default function RaporTahfizhSheet({
 }) {
   const ta = kelas?.expand?.tahun_ajaran_id;
   const walikelas = kelas?.expand?.walikelas_id;
-  // Semester tidak ada di koleksi pengaturan_rapor; sumbernya relasi
-  // ujian -> tahun_ajaran (dikirim pemanggil sebagai prop `semester`).
   const semesterText = semester
     ? semesterLabel(semester)
     : semesterLabel(ta?.semester);
@@ -310,8 +285,6 @@ export default function RaporTahfizhSheet({
 
   const halaman = susunHalaman(kategoriList, komponenByKategori);
 
-  // Catatan hanya tampil SEKALI, di halaman pertama yang masih punya ruang
-  // setelah tabel (mengikuti rapor asli: bisa halaman 1 atau 2).
   const sisaBaris = halaman.map(
     (h, idx) => kapasitasHalaman(idx) - h.baris * BARIS_MIN,
   );
@@ -323,9 +296,6 @@ export default function RaporTahfizhSheet({
   const posCatatan = idxCatatan >= 0 ? idxCatatan : halaman.length - 1;
   catatanDiSini[posCatatan] = true;
 
-  // Semua halaman memakai SATU tinggi baris yang sama: dihitung dari halaman
-  // paling sempit (paling banyak isi), lalu dipakai seragam supaya halaman 1
-  // dan halaman lanjutan tidak beda tinggi baris.
   const paddingBaris = (() => {
     let pad = Infinity;
     halaman.forEach((h, idx) => {
@@ -339,7 +309,6 @@ export default function RaporTahfizhSheet({
     return Number.isFinite(pad) ? Math.max(0, pad) : 0;
   })();
 
-  // Pakai D = Belum Hafal kalau tingkat ini memakainya.
   const pakaiPredikatD = kategoriList.some((k) => k.predikat_d);
 
   return (
@@ -354,7 +323,7 @@ export default function RaporTahfizhSheet({
           height: 330mm;
           margin: 0 auto 12mm;
           background: #fff;
-          padding: 14mm 18mm 12mm;
+          padding: 8mm 18mm;
           box-shadow: 0 6px 24px rgba(15, 23, 42, 0.12);
           position: relative;
           box-sizing: border-box;
@@ -370,8 +339,6 @@ export default function RaporTahfizhSheet({
           flex: 1;
           min-height: 0;
         }
-        /* Area tabel TIDAK melar: tinggi baris sudah disamakan lewat --rt-pad,
-           jadi tabel + catatan + tutup mengalir dari atas halaman. */
         .rt-isi {
           flex: 0 0 auto;
           min-height: 0;
@@ -380,16 +347,11 @@ export default function RaporTahfizhSheet({
           margin-bottom: 8px;
         }
         .rt-isi > table + table {
-          /* Tabel 2 kolom memakai <table> sendiri (jumlah kolom beda). Margin
-             negatif 1px menumpuk border atas dengan border bawah tabel
-             sebelumnya supaya tetap tampak satu garis, bukan dua. */
           margin-top: -1px;
         }
         .rt-isi > table {
           width: 100%;
         }
-        /* Jangan biarkan tabel melar sendiri: tinggi baris diatur lewat
-           --rt-pad supaya isi yang kepanjangan tidak terpotong overflow. */
         .rt-isi > table:last-child {
           flex: 0 0 auto;
           margin-bottom: 0;
@@ -409,6 +371,8 @@ export default function RaporTahfizhSheet({
           align-items: center;
           margin-bottom: 16px;
           padding: 0 2px;
+          position: relative;
+          top: -4mm; /* naikkan kop; isi di bawahnya tidak ikut bergeser */
         }
         .rt-header img {
           width: 22mm;
@@ -426,8 +390,6 @@ export default function RaporTahfizhSheet({
           font-weight: 700;
           line-height: 1.3;
         }
-        /* Identitas: dua blok, kiri menempel tepi kiri dan blok kanan menempel
-           tepi kanan garis tabel. Teks di dalamnya tetap rata kiri. */
         .rt-info {
           display: flex;
           align-items: flex-start;
@@ -470,13 +432,8 @@ export default function RaporTahfizhSheet({
           padding: var(--rt-pad, 0px) 12px;
           line-height: 1.1;
           background: transparent;
-        }
-        /* Tinggi baris diatur lewat padding vertikal cell (--rt-pad). */
-        .rt-table th,
-        .rt-table td {
           vertical-align: middle;
         }
-        /* Kolom NO diperkecil */
         .rt-table th.rt-no,
         .rt-table td.rt-no {
           padding: 0 2px;
@@ -552,8 +509,6 @@ export default function RaporTahfizhSheet({
         .rt-legend .full {
           grid-column: 1 / -1;
         }
-
-        /* ===== Tanda tangan: semua kolom punya struktur tinggi yang sama ===== */
         .rt-sign {
           display: grid;
           grid-template-columns: 1fr 1.3fr 1fr;
@@ -566,7 +521,7 @@ export default function RaporTahfizhSheet({
           margin: 0;
         }
         .rt-sign .head {
-          height: 3em; /* tepat 2 baris */
+          height: 3em;
           line-height: 1.5;
         }
         .rt-sign .head p {
@@ -589,27 +544,74 @@ export default function RaporTahfizhSheet({
           border-bottom: 1px solid #000;
           box-sizing: border-box;
         }
+
+        /* =================== PRINT ===================
+           Tujuan: dokumen cetak = HANYA halaman sheet, tanpa sisa tinggi
+           dari layout/sidebar/wrapper di luar sheet (penyebab halaman kosong). */
         @media print {
+          html,
+          body {
+            margin: 0 !important;
+            padding: 0 !important;
+            height: auto !important;
+            min-height: 0 !important;
+            overflow: visible !important;
+            background: #fff !important;
+          }
+
+          /* 1. Sembunyikan semua yang bukan leluhur sheet dan bukan isi sheet. */
+          body :not(:has(.rt-root)):not(.rt-root):not(.rt-root *) {
+            display: none !important;
+          }
+
+          /* 2. Netralkan leluhur sheet (padding, min-h, flex, transform, dll). */
+          body :has(.rt-root) {
+            display: block !important;
+            position: static !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            border: 0 !important;
+            width: auto !important;
+            max-width: none !important;
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: none !important;
+            overflow: visible !important;
+            transform: none !important;
+            box-shadow: none !important;
+            background: none !important;
+          }
+
           .rt-no-print {
             display: none !important;
           }
-          /* Geometri halaman dijaga sama dengan preview supaya tabel yang
-             sudah mengisi penuh tidak meluber ke halaman berikutnya. */
+
+          .rt-root {
+            page: tahfizh;
+            margin: 0;
+            padding: 0;
+          }
+
+          /* Tinggi 329mm < 330mm kertas: aman dari pembulatan mm -> px. */
           .rt-page {
             box-shadow: none;
             margin: 0;
-            padding: 14mm 18mm 12mm;
+            padding: 8mm 18mm;
+            height: 329mm;
             overflow: hidden;
+            break-inside: avoid;
             break-after: page;
           }
           .rt-page:last-child {
             break-after: auto;
           }
+
           .rt-root * {
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
           }
-          @page {
+
+          @page tahfizh {
             size: 215mm 330mm;
             margin: 0;
           }
