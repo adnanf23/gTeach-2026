@@ -17,3 +17,7 @@ export async function getSystemLogCounts() {
 export async function getSystemLogUser(userId) {
   return ictSystemLogsService.getSystemLogUser(userId);
 }
+
+export async function getLogCounts(ranges) {
+  return ictSystemLogsService.getLogCounts(ranges);
+}

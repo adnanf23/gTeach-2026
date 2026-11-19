@@ -125,7 +125,7 @@ export async function create(collection, data, options) {
   return run(async () => {
     const payload = await withActiveTahunAjaran(collection, data);
     const result = await recordRepository.insert(collection, payload, options);
-    await logCrud("menambah", collection, result?.id);
+    if (!options?.skipLog) await logCrud("menambah", collection, result?.id);
     return result;
   });
 }
@@ -143,7 +143,7 @@ export async function update(collection, id, data, options) {
       payload,
       options,
     );
-    await logCrud("memperbarui", collection, id);
+    if (!options?.skipLog) await logCrud("memperbarui", collection, id);
     return result;
   });
 }

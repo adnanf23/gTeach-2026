@@ -398,22 +398,35 @@ export default function AbsensiPageWalas() {
         detailRows.map(async (row) => {
           const existing = existingByStudent[row.siswaId];
           if (existing) {
-            await db.update("absensi", existing.id,
-                { status: row.status },
-                { requestKey: null },);
+            await db.update(
+              "absensi",
+              existing.id,
+              { status: row.status },
+              { requestKey: null, skipLog: true },
+            );
             updatedCount++;
           } else {
-            await db.create("absensi", {
+            await db.create(
+              "absensi",
+              {
                 kelas_id: kelas.id,
                 siswa_id: row.siswaId,
                 tanggal: dateStr,
                 status: row.status,
               },
-              { requestKey: null },);
+              { requestKey: null, skipLog: true },
+            );
             createdCount++;
           }
         }),
       );
+
+      // Rincian status untuk payload log (satu log per kelas per hari, bukan
+      // satu log per siswa — supaya system_log tidak boros).
+      const statusCount = { hadir: 0, sakit: 0, izin: 0, alpha: 0 };
+      for (const row of detailRows) {
+        if (row.status in statusCount) statusCount[row.status]++;
+      }
 
       // Satu log saja untuk keseluruhan submit
       await createSystemLog({
@@ -425,7 +438,12 @@ export default function AbsensiPageWalas() {
           kelas_id: kelas.id,
           nama_kelas: kelas.nama_kelas,
           tanggal: dateStr,
+          total_siswa: totalSiswa,
           jumlah_siswa_diabsen: detailRows.length,
+          hadir: statusCount.hadir,
+          sakit: statusCount.sakit,
+          izin: statusCount.izin,
+          alpha: statusCount.alpha,
           jumlah_dibuat: createdCount,
           jumlah_diupdate: updatedCount,
         },

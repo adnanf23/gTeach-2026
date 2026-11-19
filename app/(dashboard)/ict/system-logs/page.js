@@ -8,7 +8,8 @@ import {
 } from "@/actions/ict-system-logs.action";
 import { useState, useEffect, useCallback, useRef, Fragment } from "react";
 import { pb } from "@/lib/pocketbase";
-import { newWorkbook, addSheet, saveWorkbook } from "@/lib/excel-export";
+import * as ExcelJS from "exceljs";
+import { saveAs } from "file-saver";
 
 // =========================================================
 // Konstanta
@@ -149,6 +150,109 @@ function getPageItems(current, total) {
   if (end < total - 1) items.push("…");
   items.push(total);
   return items;
+}
+
+// =========================================================
+// Export Excel — gaya laporan penilaian (ExcelJS):
+// judul merge, header berwarna, border tipis hitam, header dibekukan.
+// =========================================================
+const CLR = {
+  HEAD: "FFD9EAD3",
+  TYPE: {
+    succes: "FFD9EAD3",
+    warning: "FFFCE5CD",
+    info: "FFCFE2F3",
+    error: "FFF4CCCC",
+  },
+};
+
+async function exportLogWorkbook(rows, { filterLabel, search, total }) {
+  const HEADERS = [
+    { key: "waktu", label: "WAKTU", width: 24 },
+    { key: "pengguna", label: "PENGGUNA", width: 26 },
+    { key: "role", label: "ROLE", width: 18 },
+    { key: "tipe", label: "TIPE", width: 12 },
+    { key: "aktivitas", label: "AKTIVITAS", width: 52 },
+    { key: "endpoint", label: "ENDPOINT", width: 30 },
+    { key: "status", label: "STATUS", width: 9 },
+    { key: "payload", label: "PAYLOAD", width: 46 },
+  ];
+
+  const border = {
+    top: { style: "thin", color: { argb: "FF000000" } },
+    left: { style: "thin", color: { argb: "FF000000" } },
+    bottom: { style: "thin", color: { argb: "FF000000" } },
+    right: { style: "thin", color: { argb: "FF000000" } },
+  };
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "gTeach — System Log";
+  wb.created = new Date();
+  const ws = wb.addWorksheet("SYSTEM LOG");
+  const lastCol = HEADERS.length;
+
+  const title = ws.addRow(["CATATAN AKTIVITAS SISTEM"]);
+  ws.mergeCells(title.number, 1, title.number, lastCol);
+  title.height = 26;
+  title.getCell(1).font = { bold: true, size: 14 };
+  title.getCell(1).alignment = { horizontal: "center", vertical: "middle" };
+
+  const metaParts = [
+    `Filter tipe: ${filterLabel}`,
+    search ? `Pencarian: "${search}"` : null,
+    `${total.toLocaleString("id-ID")} entri`,
+    `Dicetak: ${new Date().toLocaleString("id-ID")}`,
+  ].filter(Boolean);
+
+  const meta = ws.addRow([metaParts.join("   •   ")]);
+  ws.mergeCells(meta.number, 1, meta.number, lastCol);
+  meta.getCell(1).font = { italic: true, size: 10, color: { argb: "FF555555" } };
+  meta.getCell(1).alignment = { horizontal: "center", vertical: "middle" };
+
+  ws.addRow([]);
+
+  const head = ws.addRow(HEADERS.map((h) => h.label));
+  head.height = 22;
+  head.eachCell((cell) => {
+    cell.font = { bold: true, size: 10 };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: CLR.HEAD } };
+    cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+    cell.border = border;
+  });
+
+  rows.forEach((r) => {
+    const row = ws.addRow(HEADERS.map((h) => r[h.key] ?? "-"));
+    row.eachCell((cell, col) => {
+      cell.font = { size: 9 };
+      cell.border = border;
+      cell.alignment = {
+        vertical: "top",
+        wrapText: col === 5 || col === 6 || col === 8,
+        horizontal: col === 4 || col === 7 ? "center" : "left",
+      };
+    });
+    const typeArgb = CLR.TYPE[r.rawType];
+    if (typeArgb) {
+      row.getCell(4).fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: typeArgb },
+      };
+    }
+  });
+
+  HEADERS.forEach((h, i) => {
+    ws.getColumn(i + 1).width = h.width;
+  });
+  ws.views = [{ state: "frozen", ySplit: 4 }];
+
+  const buf = await wb.xlsx.writeBuffer();
+  saveAs(
+    new Blob([buf], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    }),
+    `system-log-${new Date().toISOString().slice(0, 10)}.xlsx`,
+  );
 }
 
 // =========================================================
@@ -582,34 +686,23 @@ export default function SystemLogsPage() {
           role:
             user?.role ||
             (user?.collectionName === "wali_murid" ? "wali murid" : "-"),
-          tipe: log.type || "",
+          tipe: TYPE_STYLE[log.type]?.label || log.type || "-",
+          rawType: log.type || "",
           aktivitas: log.aktivitas || log.msg || "",
           endpoint: log.endpoint || "-",
           status: log.status_code ?? "",
-          payload: log.payload_json ? JSON.stringify(log.payload_json) : "",
+          payload: log.payload_json ? JSON.stringify(log.payload_json) : "-",
         };
       });
 
-      const wb = newWorkbook();
-      addSheet(
-        wb,
-        "System Log",
-        [
-          "waktu",
-          "pengguna",
-          "role",
-          "tipe",
-          "aktivitas",
-          "endpoint",
-          "status",
-          "payload",
-        ],
-        rows,
-      );
-      await saveWorkbook(
-        wb,
-        `system-log-${new Date().toISOString().slice(0, 10)}.xlsx`,
-      );
+      await exportLogWorkbook(rows, {
+        filterLabel:
+          activeFilter === "all"
+            ? "Semua tipe"
+            : TYPE_STYLE[activeFilter]?.label || activeFilter,
+        search: debouncedSearch.trim(),
+        total: res.logs.length,
+      });
     } catch (e) {
       console.error("Gagal export log:", e);
     } finally {

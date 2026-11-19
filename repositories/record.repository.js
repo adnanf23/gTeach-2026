@@ -3,10 +3,10 @@ import "server-only";
 import { getServerPb, assertAllowedCollection } from "@/lib/pocketbase.server";
 import { invalidate, cached, bolehCacheSampai, upperTanggalDariFilter } from "@/lib/cache";
 
-// Opsi khusus browser (requestKey) tidak relevan di server.
+// Opsi khusus aplikasi (requestKey, skipLog) tidak dikirim ke PocketBase.
 export function sanitizeOptions(options) {
   if (!options || typeof options !== "object") return {};
-  const { requestKey, ...rest } = options;
+  const { requestKey, skipLog, ...rest } = options;
   return rest;
 }
 

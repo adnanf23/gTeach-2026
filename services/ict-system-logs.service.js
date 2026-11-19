@@ -1,4 +1,5 @@
 import { describeError } from "@/lib/app-error";
+import { cached } from "@/lib/cache";
 import * as ictSystemLogsRepository from "@/repositories/ict-system-logs.repository";
 
 // Tipe log yang dihitung pada ringkasan (sama dengan yang dipakai halaman).
@@ -68,6 +69,65 @@ export async function getSystemLogCounts() {
     };
   } catch (error) {
     return { error: describeError(error) };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Jumlah log pada beberapa rentang waktu sekaligus.
+// Dibatasi 6 query paralel per gelombang: PocketBase di server produksi
+// menggantung bila menerima lebih dari itu sekaligus.
+// ---------------------------------------------------------------------------
+const COUNT_CONCURRENCY = 6;
+const PAST_BUCKET_TTL_MS = 600000;
+
+function rangeFilter({ start, end, type }) {
+  const range = `created >= "${start}" && created < "${end}"`;
+  return type ? `${range} && type = "${type}"` : range;
+}
+
+// Rentang yang sudah lewat sepenuhnya tidak akan berubah lagi (created
+// diisi otomatis oleh PocketBase), jadi aman di-cache. Rentang yang masih
+// berjalan — hari ini, minggu ini, bulan ini — selalu diambil live.
+function isPastRange({ end }) {
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  return new Date(end).getTime() <= todayStart.getTime();
+}
+
+function countOne(range) {
+  const run = () =>
+    ictSystemLogsRepository
+      .countLogs({ fields: "id", filter: rangeFilter(range) })
+      .then((res) => res.totalItems);
+
+  if (!isPastRange(range)) return run();
+  return cached(`syslog:count:${JSON.stringify(range)}`, PAST_BUCKET_TTL_MS, run);
+}
+
+async function countInBatches(ranges) {
+  const results = new Array(ranges.length);
+
+  for (let i = 0; i < ranges.length; i += COUNT_CONCURRENCY) {
+    const batch = ranges.slice(i, i + COUNT_CONCURRENCY);
+    const res = await Promise.all(batch.map(countOne));
+    res.forEach((v, k) => {
+      results[i + k] = v;
+    });
+  }
+
+  return results;
+}
+
+export async function getLogCounts(ranges = []) {
+  try {
+    const results = await countInBatches(ranges);
+
+    return {
+      counts: Object.fromEntries(ranges.map((r, i) => [r.key, results[i]])),
+      error: null,
+    };
+  } catch (error) {
+    return { counts: {}, error: describeError(error) };
   }
 }
 

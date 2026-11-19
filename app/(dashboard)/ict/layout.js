@@ -256,6 +256,13 @@ const NAV_SECTIONS = [
       },
       {
         type: "item",
+        key: "statistik_log",
+        label: "Statistik Log",
+        href: "/ict/system-logs/statistik",
+        icon: "summary",
+      },
+      {
+        type: "item",
         key: "onboarding",
         label: "Onboarding Semester",
         href: "/ict/onboarding",
